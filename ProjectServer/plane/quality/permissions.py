@@ -119,6 +119,11 @@ def roles_for(project_id, user_id):
         return set()
     row = BusinessRole.objects.filter(project_id=project_id, user_id=user_id).first()
     roles = {row.role, *(row.additional_roles or [])} if row else set()
+    workspace_member = WorkspaceMember.objects.filter(
+        workspace__slug=membership, member_id=user_id, is_active=True, role__gte=15
+    ).first()
+    if workspace_member:
+        roles.update(workspace_member.business_roles or [])
     legacy_admin = "PLATFORM_ADMIN" in roles
     roles.discard("PLATFORM_ADMIN")
     if is_administrator(user_id):

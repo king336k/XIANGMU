@@ -22,7 +22,7 @@ def content_hash(revision):
 
 
 def request_build(project, actor=None):
-    config = semantic_provider.configuration()
+    config = semantic_provider.configuration(project.workspace_id)
     if not config["configured"]:
         raise ValueError("EMBEDDING_UNCONFIGURED")
     from .retrieval import published
@@ -68,7 +68,7 @@ def enqueue(project_id, token):
 
 
 def schedule_if_opted_in(project):
-    config = semantic_provider.configuration()
+    config = semantic_provider.configuration(project.workspace_id)
     if config["configured"] and (
         config.get("source") == "builtin"
         or SemanticProjectIndex.objects.filter(project=project, fingerprint=config["fingerprint"]).exists()
@@ -80,7 +80,10 @@ def schedule_if_opted_in(project):
 def run_build(project_id, token):
     from .retrieval import published, scan_content
 
-    config = semantic_provider.configuration()
+    from plane.db.models import Project
+
+    workspace_id = Project.objects.get(pk=project_id).workspace_id
+    config = semantic_provider.configuration(workspace_id)
     job = SemanticProjectIndex.objects.filter(project_id=project_id, token=token).first()
     if not job:
         return {"status": "stale"}
@@ -131,8 +134,8 @@ def run_build(project_id, token):
                 if not SemanticProjectIndex.objects.filter(pk=job.pk, token=token, status="running").exists():
                     return {"status": "stale"}
                 if (
-                    semantic_provider.configuration()["fingerprint"] != config["fingerprint"]
-                    or not semantic_provider.configuration()["configured"]
+                    semantic_provider.configuration(workspace_id)["fingerprint"] != config["fingerprint"]
+                    or not semantic_provider.configuration(workspace_id)["configured"]
                 ):
                     raise ValueError("CONFIGURATION_CHANGED")
                 vectors.extend(semantic_provider.embed(chunks[offset : offset + 16], config))
@@ -168,7 +171,7 @@ def run_build(project_id, token):
 def ranked_ids(project, query):
     from .retrieval import published, scan_content
 
-    config = semantic_provider.configuration()
+    config = semantic_provider.configuration(project.workspace_id)
     if not config["configured"] or not query.strip() or scan_content(query):
         return None
     if not SemanticProjectIndex.objects.filter(

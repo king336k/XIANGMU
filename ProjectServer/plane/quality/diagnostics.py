@@ -226,7 +226,11 @@ class DiagnosticList(QualityView):
             return Response(DiagnosticSerializer(existing).data)
         if DiagnosticJob.objects.filter(defect=defect, status__in=["queued", "running"]).exists():
             raise Conflict("当前缺陷已有诊断在运行，请等待完成或取消后重试。")
-        status = "unconfigured" if data["mode"] == "llm" and not assistant.provider_config()["configured"] else "queued"
+        status = (
+            "unconfigured"
+            if data["mode"] == "llm" and not assistant.provider_config(defect.project.workspace_id)["configured"]
+            else "queued"
+        )
         job = DiagnosticJob.objects.create(
             project=defect.project,
             created_by=request.user,

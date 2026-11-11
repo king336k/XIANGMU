@@ -144,7 +144,6 @@ export const UnifiedMembers = observer(function UnifiedMembers({
             <thead>
               <tr className="border-b border-subtle text-secondary">
                 <th className="p-3">姓名与账号</th>
-                <th>账号来源</th>
                 <th>业务岗位</th>
                 <th>访问状态</th>
                 <th>管理员</th>
@@ -158,7 +157,6 @@ export const UnifiedMembers = observer(function UnifiedMembers({
                     <p>{person.display_name || person.username}</p>
                     {person.username !== person.id && <p className="text-11 text-secondary">{person.username}</p>}
                   </td>
-                  <td>{person.source || "来源信息未公开"}</td>
                   <td>
                     {person.is_administrator
                       ? "全部业务权限"

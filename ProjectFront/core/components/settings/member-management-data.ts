@@ -12,6 +12,7 @@ export type AccessMembership = {
   original_role?: number;
   is_active?: boolean;
   is_administrator?: boolean;
+  business_roles?: string[];
   member: string | { id: string; username?: string; display_name?: string; first_name?: string; is_active?: boolean };
 };
 export const accessUserId = (row: AccessMembership) => (typeof row.member === "string" ? row.member : row.member.id);
@@ -40,6 +41,7 @@ export function mergeMemberRows(
         username: accessPerson(p).username || accessPerson(p).display_name || accessUserId(p),
         display_name: accessPerson(p).display_name,
         workspaceMembership: p,
+        roles: p.business_roles || [],
         is_administrator: p.is_administrator === true,
       });
   for (const p of project)
@@ -58,7 +60,16 @@ export function mergeMemberRows(
         roles: d.roles.filter((r) => r !== "PLATFORM_ADMIN"),
         is_administrator: d.is_administrator === true,
       });
-  for (const p of workspace) if (result.has(accessUserId(p))) put(accessUserId(p), { workspaceMembership: p });
+  for (const p of workspace)
+    if (result.has(accessUserId(p))) {
+      const current = result.get(accessUserId(p))!;
+      put(accessUserId(p), {
+        workspaceMembership: p,
+        roles: [
+          ...new Set([...current.roles, ...(p.is_active !== false && p.role >= 15 ? p.business_roles || [] : [])]),
+        ],
+      });
+    }
   for (const p of people)
     if (result.has(p.id))
       put(p.id, {

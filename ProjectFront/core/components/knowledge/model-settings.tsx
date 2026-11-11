@@ -24,8 +24,9 @@ type Configuration = {
     status?: string;
   };
 };
-export function ModelSettings({ base }: { base: string }) {
-  const { data, error, mutate } = useSWR(`${base}configuration/`, (url: string) => qualityApi.read<Configuration>(url));
+export function ModelSettings({ base, endpoint }: { base: string; endpoint?: string }) {
+  const url = endpoint || `${base}configuration/`;
+  const { data, error, mutate } = useSWR(url, (path: string) => qualityApi.read<Configuration>(path));
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [advancedOpen, setAdvancedOpen] = useState(false),
@@ -38,7 +39,7 @@ export function ModelSettings({ base }: { base: string }) {
         : "知识检索";
   return (
     <section className="max-w-2xl space-y-5">
-      <h2 className="text-18 font-semibold">模型配置</h2>
+      {!endpoint && <h2 className="text-18 font-semibold">模型配置</h2>}
       <p className="text-13">
         当前状态：{data?.configured ? "已配置" : "尚未配置"} · 密钥：
         {data?.key_present ? "已设置" : "未设置"}
@@ -68,7 +69,7 @@ export function ModelSettings({ base }: { base: string }) {
             setMessage("");
             try {
               await qualityApi.write(
-                `${base}configuration/`,
+                url,
                 {
                   model: form.get("model"),
                   base_url: form.get("base_url"),
@@ -212,6 +213,7 @@ export function ModelSettings({ base }: { base: string }) {
       )}
       {data && (
         <div className="space-y-1 rounded-md border border-subtle p-3 text-12 text-secondary">
+          <p>默认诊断引擎：PydanticAI · 使用上方对话模型。</p>
           <p role="status">
             {searchName} ·{" "}
             {data.semantic?.source === "shared" || (!data.semantic?.source && !data.semantic?.managed)
@@ -220,6 +222,7 @@ export function ModelSettings({ base }: { base: string }) {
                 ? "已就绪"
                 : "未就绪"}
           </p>
+          {data.embedding_model && <p>检索模型：{data.embedding_model}</p>}
           <p>
             {data.semantic?.source === "external"
               ? "当前使用外部向量服务。"

@@ -103,7 +103,7 @@ def run_diagnostic(job_id):
         elif any(row.get("scan_incomplete") for row in sources):
             result["model_status"] = "material_scan_incomplete"
         elif job.mode in {"llm", "auto"}:
-            config = assistant.provider_config()
+            config = assistant.provider_config(job.project.workspace_id)
             if not config["configured"]:
                 result["model_status"] = "unconfigured"
             elif time.monotonic() - started > 20:

@@ -53,7 +53,7 @@ class ChatEndpoint(QualityView):
                 )
             if scan_content(data["query"]):
                 raise ValidationError({"query": "问题中包含疑似敏感信息，请脱敏后重试。"})
-            config = assistant.provider_config()
+            config = assistant.provider_config(self.project().workspace_id)
             if not config.get("configured"):
                 return Response(
                     {"code": "AI_NOT_CONFIGURED", "error": "模型服务尚未配置。可先使用已发布知识检索。"}, status=503
@@ -105,7 +105,7 @@ class ChatEndpoint(QualityView):
                 message.answer = "未检索到可引用的已发布知识，请补充现象、错误码或版本，也可先整理并发布知识。"
                 message.save()
                 return Response(MessageSerializer(message).data, status=201)
-            references = assistant.reference_payload(revisions,retrieval_query)
+            references = assistant.reference_payload(revisions, retrieval_query)
             try:
                 response = assistant.complete_answer(config, data["query"], references, history)
                 answer = assistant.validate_answer(response, references)
@@ -173,12 +173,12 @@ class AssistantStatus(QualityView):
     authentication_classes = [PlatformBridgeAuthentication, BaseSessionAuthentication]
 
     def get(self, request, **kwargs):
-        from .semantic_provider import public_status
+        from .semantic_provider import public_status, configuration
 
-        config = assistant.provider_config()
+        config = assistant.provider_config(self.project().workspace_id)
         return Response(
             {
-                "semantic": public_status(),
+                "semantic": public_status(configuration(self.project().workspace_id)),
                 "configured": config["configured"],
                 "model": config.get("model", "") if config["configured"] else "",
                 "message": "只引用当前项目可见的已发布知识；不会执行命令或修改业务数据。",

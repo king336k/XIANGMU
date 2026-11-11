@@ -75,7 +75,7 @@ function management(context, section = "connections", query = "project=p") {
   }, exp);
   return { tree: exp.PlatformManagement({ section }), requests };
 }
-test("平台连接使用独立全局权限接口无需项目，模型仍按项目能力核验", () => {
+test("平台连接无需项目，模型按当前工作区统一配置", () => {
   const ordinary = { is_manager: true, is_administrator: false, can_configure_model: false };
   for (const context of [undefined, ordinary, { ...ordinary, is_administrator: true }]) {
     for (const query of ["", "project=p", "project=other"]) {
@@ -92,18 +92,18 @@ test("平台连接使用独立全局权限接口无需项目，模型仍按项�
   // a project context must neither grant nor deny global authority.
   assert.equal(
     nodes(management(ordinary, "models").tree).some((n) => n.type === stub("ModelSettings")),
-    false
+    true
   );
   assert.ok(
     nodes(management({ ...ordinary, can_configure_model: true }, "models").tree).some(
-      (n) => n.type === stub("ModelSettings") && n.props.base.endsWith("/knowledge/")
+      (n) => n.type === stub("ModelSettings") && n.props.endpoint === "/api/workspaces/w/model-configuration/"
     )
   );
   assert.equal(
     nodes(management({ ...ordinary, can_configure_model: true }, "models", "project=other").tree).some(
       (n) => n.type === stub("ModelSettings")
     ),
-    false
+    true
   );
   assert.deepEqual(management(ordinary, "models", "project=other").requests, [null]);
 });

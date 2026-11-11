@@ -12,12 +12,18 @@ def test_embedding_explicit_dns_origin_is_supported_without_loosening_chat_hosts
     from plane.knowledge.semantic_provider import valid_embedding_url
     from plane.knowledge.assistant import valid_provider_url
 
-    mocker.patch.dict("os.environ", {"KNOWLEDGE_EMBEDDING_ALLOWED_HTTP_ORIGINS": "http://engramproject-embedding:18885"})
+    mocker.patch.dict(
+        "os.environ", {"KNOWLEDGE_EMBEDDING_ALLOWED_HTTP_ORIGINS": "http://engramproject-embedding:18885"}
+    )
     assert valid_embedding_url("http://engramproject-embedding:18885/v1")
     assert not valid_provider_url("http://engramproject-embedding:18885/v1")
-    for url in ["http://other:18885/v1", "http://engramproject-embedding:18886/v1",
-                "http://user@engramproject-embedding:18885/v1", "http://engramproject-embedding:18885/v1?secret=1",
-                "http://engramproject-embedding:18885/v1#x"]:
+    for url in [
+        "http://other:18885/v1",
+        "http://engramproject-embedding:18886/v1",
+        "http://user@engramproject-embedding:18885/v1",
+        "http://engramproject-embedding:18885/v1?secret=1",
+        "http://engramproject-embedding:18885/v1#x",
+    ]:
         assert not valid_embedding_url(url)
 
 
@@ -67,7 +73,7 @@ def test_index_idempotent_version_and_offline_revocation(semantic_case, mocker):
     from plane.knowledge.semantic_models import SemanticRevisionIndex
 
     project, article, revision = semantic_case
-    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda: config())
+    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda workspace_id=None: config())
     embed = mocker.patch(
         "plane.knowledge.semantic_provider.embed", side_effect=lambda texts, cfg: [[1.0, 0.0] for _ in texts]
     )
@@ -91,7 +97,7 @@ def test_sensitive_queries_and_published_content_never_leave_boundary(semantic_c
     from plane.knowledge import semantic
 
     project, article, revision = semantic_case
-    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda: config())
+    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda workspace_id=None: config())
     embed = mocker.patch("plane.knowledge.semantic_provider.embed")
     assert semantic.ranked_ids(project, "password=private-fixture") is None
     revision.content = "api_key=fixture-private"
@@ -126,7 +132,7 @@ def test_index_api_requires_reviewer_and_explicit_optin(session_client, semantic
 
     project, article, revision = semantic_case
     base = f"/api/workspaces/{workspace.slug}/projects/{project.id}/knowledge/"
-    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda: config())
+    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda workspace_id=None: config())
     mocker.patch("plane.knowledge.semantic.enqueue")
     state = session_client.get(base + "semantic-index/")
     assert state.status_code == 200 and state.data["indexed_count"] == 0 and state.data["eligible_count"] == 1
@@ -172,7 +178,7 @@ def test_semantic_configuration_is_admin_only_and_default_off(
         and result.data["semantic_enabled"] is True
         and result.data["embedding_model"] == "test-embedding"
     )
-    assert InstanceConfiguration.objects.get(key="KNOWLEDGE_SEMANTIC_ENABLED").value == "true"
+    assert InstanceConfiguration.objects.get(key=f"WS:{workspace.id}:KNOWLEDGE_SEMANTIC_ENABLED").value == "true"
     assert "api_key" not in result.data and "api_key" not in result.data["semantic"]
 
 
@@ -181,7 +187,7 @@ def test_provider_failure_falls_back_and_revoked_index_cannot_be_used(semantic_c
     from plane.knowledge.retrieval import search
 
     project, article, revision = semantic_case
-    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda: config())
+    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda workspace_id=None: config())
     embed = mocker.patch(
         "plane.knowledge.semantic_provider.embed", side_effect=lambda texts, cfg: [[1.0, 0.0] for _ in texts]
     )
@@ -198,7 +204,7 @@ def test_stale_index_task_and_revoked_reviewer_cannot_call_provider(semantic_cas
     from plane.knowledge import semantic
 
     project, _, _ = semantic_case
-    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda: config())
+    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda workspace_id=None: config())
     embed = mocker.patch("plane.knowledge.semantic_provider.embed")
     job = semantic.request_build(project, create_user)
     assert semantic.run_build(project.id, uuid4())["status"] == "stale"
@@ -232,7 +238,7 @@ def test_content_change_provider_change_draft_and_queue_failure_fail_closed(sema
 
     project, article, revision = semantic_case
     cfg = config()
-    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda: cfg)
+    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda workspace_id=None: cfg)
     embed = mocker.patch(
         "plane.knowledge.semantic_provider.embed", side_effect=lambda texts, cfg: [[1.0, 0.0] for _ in texts]
     )
@@ -266,7 +272,7 @@ def test_strict_project_reviewer_can_build_without_generic_unavailable_capabilit
 
     project, _, _ = semantic_case
     ProjectRolePolicy.objects.create(project=project, enabled=True)
-    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda: config())
+    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda workspace_id=None: config())
     mocker.patch("plane.knowledge.semantic.enqueue")
     url = f"/api/workspaces/{workspace.slug}/projects/{project.id}/knowledge/semantic-index/"
     assert session_client.post(url, {"action": "build"}, format="json").status_code == 403
@@ -279,7 +285,7 @@ def test_new_publication_snapshot_supersedes_running_task_and_indexes_only_after
     from plane.knowledge.semantic_models import SemanticProjectIndex
 
     project, article, revision = semantic_case
-    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda: config())
+    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda workspace_id=None: config())
     enqueue = mocker.patch("plane.knowledge.semantic.enqueue")
     semantic.schedule_if_opted_in(project)
     assert not SemanticProjectIndex.objects.exists()
@@ -302,7 +308,8 @@ def test_embedding_connection_is_independent_from_chat_configuration(mocker):
         "KNOWLEDGE_EMBEDDING_API_KEY": "test-local-secret",
     }
     mocker.patch(
-        "plane.knowledge.assistant.model_option", side_effect=lambda name, fallback: values.get(name, fallback)
+        "plane.knowledge.assistant.model_option",
+        side_effect=lambda name, fallback, workspace_id=None: values.get(name, fallback),
     )
     mocker.patch(
         "plane.knowledge.assistant.provider_config",
@@ -320,7 +327,7 @@ def test_chinese_documents_use_bounded_complete_chunks_for_cpu_embedding(semanti
     project, article, revision = semantic_case
     revision.content = "设备连接失败，检查监听服务。" * 80
     revision.save()
-    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda: config())
+    mocker.patch("plane.knowledge.semantic_provider.configuration", side_effect=lambda workspace_id=None: config())
     seen = []
 
     def embed(texts, cfg):

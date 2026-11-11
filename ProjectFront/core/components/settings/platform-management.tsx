@@ -25,8 +25,9 @@ export const PlatformManagement = observer(function PlatformManagement({
   const selected = params.get("project") || "";
   const projectId = joinedProjectIds.includes(selected) ? selected : "";
   const base = projectId ? `/api/workspaces/${workspaceSlug}/projects/${projectId}/quality/` : "";
-  const { data: context, error } = useSWR(base && section !== "connections" ? `${base}context/` : null, (url: string) =>
-    qualityApi.read<Context>(url)
+  const { data: context, error } = useSWR(
+    base && !["connections", "models"].includes(section) ? `${base}context/` : null,
+    (url: string) => qualityApi.read<Context>(url)
   );
   const allowed =
     section === "connections"
@@ -38,10 +39,19 @@ export const PlatformManagement = observer(function PlatformManagement({
     section === "members" || section === "accounts"
       ? "成员与权限"
       : section === "sources"
-        ? "协作服务"
+        ? "报告通知"
         : section === "connections"
           ? "平台连接"
           : "模型配置";
+  if (section === "models") {
+    return (
+      <SettingsContentWrapper hugging>
+        <h1 className="platform-page-title mb-3">模型配置</h1>
+        <p className="mb-5 text-13 text-secondary">当前工作区的所有项目共用此模型配置。</p>
+        <ModelSettings base="" endpoint={`/api/workspaces/${workspaceSlug}/model-configuration/`} />
+      </SettingsContentWrapper>
+    );
+  }
   if (section === "connections") {
     return (
       <SettingsContentWrapper hugging>
@@ -54,7 +64,7 @@ export const PlatformManagement = observer(function PlatformManagement({
     <SettingsContentWrapper hugging>
       <h1 className="platform-page-title mb-5">{title}</h1>
       <label className="mb-5 flex max-w-lg flex-col gap-2 text-13">
-        选择项目
+        {section === "members" || section === "accounts" ? "权限范围" : "选择项目"}
         <select
           aria-label="选择项目"
           className={fieldClass}
@@ -65,7 +75,7 @@ export const PlatformManagement = observer(function PlatformManagement({
             setParams(next);
           }}
         >
-          <option value="">请选择项目</option>
+          <option value="">当前工作区 · 全部项目</option>
           {joinedProjectIds.map((id) => (
             <option key={id} value={id}>
               {getPartialProjectById(id)?.name || id}
@@ -95,7 +105,7 @@ export const PlatformManagement = observer(function PlatformManagement({
       ) : (
         <>
           <p className="mb-5 text-12 text-secondary">
-            {section === "sources" ? "所选项目的通知和协作服务。" : "平台统一模型配置。"}
+            {section === "sources" ? "配置所选项目测试报告的飞书接收群；不使用飞书时可留空。" : "平台统一模型配置。"}
           </p>
           {!projectId ? (
             <p role="status" className="text-13 text-secondary">

@@ -58,7 +58,7 @@ export function AddManagedMember({
       onSubmit={async (form) => {
         let person = mode === "local" ? created : selected;
         if (mode === "local" && !created) {
-          if (!canAdmin) throw Error("只有管理员可以创建本地账号。");
+          if (!canAdmin) throw Error("只有管理员可以创建账号。");
           person = await qualityApi.write<Person>("/api/quality-auth/accounts/", {
             username: form.get("username"),
             password: form.get("password"),
@@ -89,7 +89,7 @@ export function AddManagedMember({
         </Button>
         {canAdmin && (
           <Button type="button" variant="neutral-primary" onClick={() => setMode("local")}>
-            新建本地账号
+            创建账号
           </Button>
         )}
       </nav>
@@ -117,7 +117,7 @@ export function AddManagedMember({
                   checked={selected?.id === person.id}
                   onChange={() => choose(person)}
                 />
-                {person.username} · {person.source || "本平台"}
+                {person.username}
                 {person.in_project ? " · 已在项目中" : ""}
               </label>
             ))}

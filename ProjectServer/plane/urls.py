@@ -16,7 +16,10 @@ from drf_spectacular.views import (
 
 handler404 = "plane.app.views.error_404.custom_404_view"
 
+from plane.knowledge.configuration import WorkspaceModelConfiguration
+
 urlpatterns = [
+    path("api/workspaces/<str:slug>/model-configuration/", WorkspaceModelConfiguration.as_view()),
     path("api/workspaces/<str:slug>/member-context/", WorkspaceMemberContext.as_view()),
     path("api/quality-auth/", include("plane.quality.auth_urls")),
     path("api/workspaces/<str:slug>/projects/<uuid:project_id>/knowledge/", include("plane.knowledge.urls")),

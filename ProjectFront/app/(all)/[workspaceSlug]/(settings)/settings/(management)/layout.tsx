@@ -18,7 +18,7 @@ export default function PlatformSettingsLayout() {
               : path.endsWith("/connections/")
                 ? "平台连接"
                 : path.endsWith("/sources/")
-                  ? "协作服务"
+                  ? "报告通知"
                   : "成员与权限"
         }
       />

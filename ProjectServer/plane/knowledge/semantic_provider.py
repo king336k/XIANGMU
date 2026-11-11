@@ -9,8 +9,11 @@ from urllib.parse import urlsplit
 from openai import OpenAI
 
 
-def configuration():
-    from .assistant import model_option, provider_config
+def configuration(workspace_id=None):
+    from .assistant import model_option as read_option, provider_config
+
+    def model_option(name, fallback):
+        return read_option(name, fallback, workspace_id)
 
     builtin_url = os.environ.get("KNOWLEDGE_BUILTIN_EMBEDDING_BASE_URL", "").strip().rstrip("/")
     builtin_key = os.environ.get("KNOWLEDGE_BUILTIN_EMBEDDING_API_KEY", "")
@@ -29,7 +32,7 @@ def configuration():
         == "true"
     )
     model = model_option("KNOWLEDGE_EMBEDDING_MODEL", os.environ.get("KNOWLEDGE_EMBEDDING_MODEL", "")).strip()
-    config = provider_config()
+    config = provider_config(workspace_id)
     separate_url = model_option("KNOWLEDGE_EMBEDDING_BASE_URL", "").strip().rstrip("/")
     source = "shared"
     if builtin:

@@ -314,10 +314,6 @@ export const SecurityProfileSettings = observer(function SecurityProfileSettings
             <dt className="text-secondary">用户名</dt>
             <dd className="mt-1 font-medium">{data.username}</dd>
           </div>
-          <div>
-            <dt className="text-secondary">账号来源</dt>
-            <dd className="mt-1">{data.source_label}</dd>
-          </div>
         </dl>
         {!data.project_assigned && <p className="text-12 text-secondary">账号已登录，尚未分配项目。请联系项目经理。</p>}
       </section>

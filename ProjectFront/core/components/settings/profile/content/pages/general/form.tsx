@@ -101,10 +101,6 @@ export const GeneralProfileSettingsForm = observer(function GeneralProfileSettin
                   <dt className="text-12 text-secondary">用户名</dt>
                   <dd className="mt-1 text-14 font-medium break-all">{account.username}</dd>
                 </div>
-                <div>
-                  <dt className="text-12 text-secondary">账号来源</dt>
-                  <dd className="mt-1 text-13">{account.source_label}</dd>
-                </div>
                 {account.email && (
                   <div>
                     <dt className="text-12 text-secondary">邮箱</dt>

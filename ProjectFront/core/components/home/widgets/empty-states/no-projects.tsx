@@ -20,14 +20,15 @@ import { cn, getFileURL } from "@plane/utils";
 import { useCommandPalette } from "@/hooks/store/use-command-palette";
 import { useProject } from "@/hooks/store/use-project";
 import { useWorkspace } from "@/hooks/store/use-workspace";
-import { useUser, useUserPermissions } from "@/hooks/store/user";
+import { useUser } from "@/hooks/store/user";
+import { useSettingsPermissions } from "@/components/settings/use-settings-permissions";
 // plane web constants
 
 export const NoProjectsEmptyState = observer(function NoProjectsEmptyState() {
   // navigation
   const { workspaceSlug } = useParams();
   // store hooks
-  const { allowPermissions } = useUserPermissions();
+  const { allowPermissions } = useSettingsPermissions();
   const { toggleCreateProjectModal } = useCommandPalette();
   const { data: currentUser } = useUser();
   const { joinedProjectIds } = useProject();
@@ -85,7 +86,7 @@ export const NoProjectsEmptyState = observer(function NoProjectsEmptyState() {
       flag: "visited_workspace",
       cta: {
         text: "home.empty.configure_workspace.cta",
-        link: "settings",
+        link: `/${workspaceSlug}/settings/`,
         disabled: !isWorkspaceAdmin,
       },
     },
@@ -132,7 +133,7 @@ export const NoProjectsEmptyState = observer(function NoProjectsEmptyState() {
     }
   };
 
-  if (storedValue?.hide || (joinedProjectIds?.length > 0 && (activeWorkspace?.total_members || 0) >= 2)) return null;
+  if (storedValue?.hide) return null;
 
   return (
     <div>
@@ -163,40 +164,43 @@ export const NoProjectsEmptyState = observer(function NoProjectsEmptyState() {
               </div>
               <h3 className="mb-2 text-13 font-medium text-primary">{t(item.title)}</h3>
               <p className="mb-2 text-11 text-tertiary">{t(item.description)}</p>
-              {isStateComplete ? (
-                <div className="flex w-fit items-center gap-2 rounded-full bg-[#17a34a] p-1">
-                  <CheckIcon className="size-3 text-accent-primary text-on-color" />
-                </div>
-              ) : (
-                !item.cta.disabled &&
-                (item.cta.link ? (
-                  <Link
-                    href={item.cta.link}
-                    onClick={(e) => {
-                      if (!storedValue) {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        return;
+              <div className="flex items-center gap-3">
+                {isStateComplete && (
+                  <span
+                    aria-label="已访问"
+                    className="bg-emerald-600 flex size-5 items-center justify-center rounded-full"
+                  >
+                    <CheckIcon className="size-3 text-on-color" />
+                  </span>
+                )}
+                {!item.cta.disabled &&
+                  (item.cta.link ? (
+                    <Link
+                      href={item.cta.link}
+                      onClick={() =>
+                        setValue({
+                          ...storedValue,
+                          hide: storedValue?.hide ?? false,
+                          visited_members: storedValue?.visited_members ?? false,
+                          visited_workspace: storedValue?.visited_workspace ?? false,
+                          visited_profile: storedValue?.visited_profile ?? false,
+                          [item.flag]: true,
+                        })
                       }
-                      setValue({
-                        ...storedValue,
-                        [item.flag]: true,
-                      });
-                    }}
-                    className={cn("text-13 font-medium text-accent-primary hover:text-accent-secondary", {})}
-                  >
-                    {t(item.cta.text)}
-                  </Link>
-                ) : (
-                  <button
-                    type="button"
-                    className="text-left text-13 font-medium text-accent-primary hover:text-accent-secondary"
-                    onClick={item.cta.onClick}
-                  >
-                    {t(item.cta.text)}
-                  </button>
-                ))
-              )}
+                      className="text-13 font-medium text-accent-primary hover:text-accent-secondary"
+                    >
+                      {t(item.cta.text)}
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      className="text-left text-13 font-medium text-accent-primary hover:text-accent-secondary"
+                      onClick={item.cta.onClick}
+                    >
+                      {t(item.cta.text)}
+                    </button>
+                  ))}
+              </div>
             </div>
           );
         })}

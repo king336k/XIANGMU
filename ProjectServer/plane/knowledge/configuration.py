@@ -40,8 +40,14 @@ class ModelInput(serializers.Serializer):
 
     def validate(self, data):
         if data.get("embedding_mode") == "external":
-            model = data.get("embedding_model", assistant.model_option("KNOWLEDGE_EMBEDDING_MODEL", ""))
-            url = data.get("embedding_base_url", assistant.model_option("KNOWLEDGE_EMBEDDING_BASE_URL", ""))
+            model = data.get(
+                "embedding_model",
+                assistant.model_option("KNOWLEDGE_EMBEDDING_MODEL", "", self.context.get("workspace_id")),
+            )
+            url = data.get(
+                "embedding_base_url",
+                assistant.model_option("KNOWLEDGE_EMBEDDING_BASE_URL", "", self.context.get("workspace_id")),
+            )
             if not model or not url:
                 raise ValidationError({"embedding_mode": "使用外部向量服务时请填写独立模型与接口地址。"})
         return data
@@ -62,31 +68,41 @@ class ModelInput(serializers.Serializer):
 class ModelConfiguration(QualityView):
     permission_classes = [ModelPermission]
 
+    def workspace(self):
+        return self.project().workspace
+
     def get(self, request, **kwargs):
         from .semantic_provider import public_status
 
-        config = assistant.provider_config()
-        semantic = public_status()
+        workspace = self.workspace()
+        config = assistant.provider_config(workspace.id)
+        from .semantic_provider import configuration
+
+        semantic = public_status(configuration(workspace.id))
         return Response(
             {
                 "semantic_enabled": semantic["enabled"],
                 "embedding_mode": semantic["source"],
                 "embedding_model": semantic["model"],
-                "embedding_base_url": assistant.model_option("KNOWLEDGE_EMBEDDING_BASE_URL", ""),
-                "embedding_key_present": bool(assistant.model_option("KNOWLEDGE_EMBEDDING_API_KEY", "")),
+                "embedding_base_url": assistant.model_option("KNOWLEDGE_EMBEDDING_BASE_URL", "", workspace.id),
+                "embedding_key_present": bool(assistant.model_option("KNOWLEDGE_EMBEDDING_API_KEY", "", workspace.id)),
                 "semantic": semantic,
                 "configured": config["configured"],
                 "model": config["model"],
                 "base_url": config["base_url"],
                 "key_present": bool(config["api_key"]),
                 "can_configure": is_administrator(request.user),
-                "scope": "整个平台共用的模型连接，由管理员配置；项目权限仍独立校验。",
+                "scope": "当前工作区下所有项目共用此模型配置。",
+                "workspace_id": str(workspace.id),
+                "workspace_name": workspace.name,
             }
         )
 
     @transaction.atomic
     def patch(self, request, **kwargs):
-        data = self.input(ModelInput)
+        parser = ModelInput(data=request.data, context={"workspace_id": self.workspace().id})
+        parser.is_valid(raise_exception=True)
+        data = parser.validated_data
         if data.get("api_key") and data["clear_key"]:
             raise ValidationError({"api_key": "不能同时填写和清除密钥。"})
         if data.get("embedding_api_key") and data["clear_embedding_key"]:
@@ -115,6 +131,33 @@ class ModelConfiguration(QualityView):
             updates["KNOWLEDGE_API_KEY"] = (encrypted, True)
         for key, (value, encrypted) in updates.items():
             InstanceConfiguration.objects.update_or_create(
-                key=key, defaults={"value": value, "category": "KNOWLEDGE", "is_encrypted": encrypted}
+                key=f"WS:{self.workspace().id}:{key}",
+                defaults={"value": value, "category": "KNOWLEDGE", "is_encrypted": encrypted},
             )
         return self.get(request, **kwargs)
+
+
+class WorkspaceModelPermission(ModelPermission):
+    def has_permission(self, request, view):
+        from plane.db.models import WorkspaceMember
+
+        return bool(
+            request.user.is_authenticated
+            and is_administrator(request.user)
+            and WorkspaceMember.objects.filter(
+                workspace__slug=view.workspace_slug,
+                member=request.user,
+                is_active=True,
+                **({} if request.method in SAFE_METHODS else {"role__gte": 15}),
+            ).exists()
+        )
+
+
+class WorkspaceModelConfiguration(ModelConfiguration):
+    permission_classes = [WorkspaceModelPermission]
+
+    def workspace(self):
+        from django.shortcuts import get_object_or_404
+        from plane.db.models import Workspace
+
+        return get_object_or_404(Workspace, slug=self.workspace_slug)

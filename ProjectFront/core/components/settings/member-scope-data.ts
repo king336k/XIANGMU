@@ -9,6 +9,7 @@ export type ScopeRow = {
   project_count?: number;
   access_role: number;
   roles: string[];
+  inherited_roles?: string[];
   revision: string;
 };
 export type ScopeChange = {
@@ -31,14 +32,15 @@ export function updateScopeChanges(
 ): ScopeChanges {
   const next = { ...pending };
   const key = scopeKey(row);
-  if (accessRole === row.access_role && (row.kind === "workspace" || sameRoles(roles, row.roles))) delete next[key];
+  if (accessRole === row.access_role && sameRoles(roles, row.roles)) delete next[key];
   else
     next[key] = {
       kind: row.kind,
       id: row.id,
       access_role: accessRole,
       expected_revision: pending[key]?.expected_revision || row.revision,
-      ...(row.kind === "project" ? { roles: [...roles], workspace_id: row.workspace_id } : {}),
+      roles: [...roles],
+      ...(row.kind === "project" ? { workspace_id: row.workspace_id } : {}),
     };
   if (row.kind === "workspace" && accessRole === 0) {
     for (const [otherKey, change] of Object.entries(next)) {

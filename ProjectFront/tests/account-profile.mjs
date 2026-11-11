@@ -68,8 +68,7 @@ test("个人资料显示本地账号，不提供外部账号维护入口", () =>
       },
     ],
   });
-  for (const value of ["admin", "项目管理平台账号", "admin@example.test", "项目甲", "管理员"])
-    assert.ok(html.includes(value), value);
+  for (const value of ["admin", "admin@example.test", "项目甲", "管理员"]) assert.ok(html.includes(value), value);
   for (const value of [
     "不应显示",
     "internal@",
@@ -78,6 +77,8 @@ test("个人资料显示本地账号，不提供外部账号维护入口", () =>
     'name="display_name"',
     "显示名称",
     "停用账号",
+    "账号来源",
+    "项目管理平台账号",
     "数据平台角色",
     "在数据管理平台管理账号",
   ])
@@ -129,6 +130,6 @@ test("项目名称与编号相同不会重复显示两行", () => {
     ],
   });
   assert.equal((html.match(/>111</g) || []).length, 1);
-  assert.ok(html.includes("项目管理"));
+  assert.ok(!html.includes("账号来源") && !html.includes("项目管理平台账号"));
   assert.ok(!html.includes("安排需求、任务与测试，确认业务结果</span>"));
 });

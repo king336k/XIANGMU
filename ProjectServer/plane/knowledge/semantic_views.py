@@ -28,7 +28,7 @@ class SemanticIndexView(QualityView):
 
     def get(self, request, **kwargs):
         project = self.project()
-        config = semantic_provider.configuration()
+        config = semantic_provider.configuration(project.workspace_id)
         info = semantic_provider.public_status(config)
         job = SemanticProjectIndex.objects.filter(project=project, fingerprint=config["fingerprint"]).first()
         count = SemanticRevisionIndex.objects.filter(

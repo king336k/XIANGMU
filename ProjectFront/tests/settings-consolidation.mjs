@@ -312,3 +312,11 @@ test("停用账号或移出访问范围不显示仍可参与", () => {
     "账号已停用"
   );
 });
+
+test("全部人员和工作区列表显示继承岗位，停用工作区不残留岗位", () => {
+  const { mergeMemberRows } = load();
+  const person = { id: "u", username: "test" };
+  const member = { id: "wm", member: "u", role: 15, is_active: true, business_roles: ["REGRESSION_TESTER"] };
+  assert.deepEqual(mergeMemberRows([], [member], [], [person], [], "accounts")[0].roles, ["REGRESSION_TESTER"]);
+  assert.deepEqual(mergeMemberRows([], [{ ...member, is_active: false }], [], [person], [], "accounts")[0].roles, []);
+});

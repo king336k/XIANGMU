@@ -74,7 +74,9 @@ class Governance(QualityView):
                         "source", "target"
                     )[:20]
                 ],
-                "scope": ("同标题知识可选择两条比较后归并。检索仅使用当前有效发布版本；语义索引可由管理员或项目经理维护。"),
+                "scope": (
+                    "同标题知识可选择两条比较后归并。检索仅使用当前有效发布版本；语义索引可由管理员或项目经理维护。"
+                ),
             }
         )
 
@@ -176,7 +178,7 @@ def semantic_candidates(project, threshold):
     from .semantic_vectors import normalized_vector
 
     value = serializers.FloatField(min_value=0.5, max_value=1.0).run_validation(threshold)
-    config = semantic_provider.configuration()
+    config = semantic_provider.configuration(project.workspace_id)
     if not config["configured"]:
         return []
     vectors = list(

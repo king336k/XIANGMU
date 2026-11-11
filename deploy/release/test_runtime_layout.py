@@ -39,3 +39,17 @@ def test_source_bundle_does_not_leave_workspace_business_imports():
     import re
     text=(ROOT/'services/collaboration/dist/start.mjs').read_text()
     assert not re.search(r'(?:from\s*|import\s*\()([\"\'])@plane/',text)
+
+
+def test_default_ai_stack_is_bundled_and_custom_model_hosts_are_preserved():
+    services=yaml.safe_load((ROOT/'deploy/release/compose.yml').read_text())['services']
+    for name in ['api','worker','diagnostic-worker','migrator','beat-worker']:
+        env=services[name]['environment']
+        assert env['KNOWLEDGE_BUILTIN_EMBEDDING_MODEL']=='bge-small-zh-v1.5'
+        assert env['KNOWLEDGE_BUILTIN_EMBEDDING_BASE_URL']=='http://builtin-embedding:18885/v1'
+        assert env['KNOWLEDGE_LLM_ALLOWED_HOSTS']=='${KNOWLEDGE_LLM_ALLOWED_HOSTS:-api.openai.com}'
+    diagnostic=services['diagnostic-worker']
+    assert diagnostic['environment']['DIAGNOSTIC_AGENT_PYTHON']=='/opt/diagnostic-agent/bin/python'
+    assert diagnostic['environment']['DIAGNOSTIC_AGENT_SCRIPT']=='/release-agent/runner.py'
+    assert '${RELEASE_DIR:?请使用部署入口}/services/diagnostic-agent:/release-agent:ro' in diagnostic['volumes']
+    assert 'pydantic-ai' in (ROOT/'services/diagnostic-agent/requirements.txt').read_text()

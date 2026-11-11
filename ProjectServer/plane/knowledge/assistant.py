@@ -52,17 +52,19 @@ def valid_provider_url(url):
         return False
 
 
-def model_option(name, fallback):
+def model_option(name, fallback, workspace_id=None):
     from plane.license.models import InstanceConfiguration
     from plane.license.utils.encryption import decrypt_data
 
-    row = InstanceConfiguration.objects.filter(key=name).first()
+    row = InstanceConfiguration.objects.filter(key=f"WS:{workspace_id}:{name}").first() if workspace_id else None
+    if row is None:
+        row = InstanceConfiguration.objects.filter(key=name).first()
     if row is None:
         return fallback
     return decrypt_data(row.value) if row.is_encrypted else row.value
 
 
-def provider_config():
+def provider_config(workspace_id=None):
     key, provider, model = get_configuration_value(
         [
             {"key": "LLM_API_KEY", "default": os.environ.get("LLM_API_KEY")},
@@ -70,9 +72,11 @@ def provider_config():
             {"key": "LLM_MODEL", "default": "gpt-4o-mini"},
         ]
     )
-    key = model_option("KNOWLEDGE_API_KEY", key)
-    model = model_option("KNOWLEDGE_MODEL", model)
-    base_url = model_option("KNOWLEDGE_BASE_URL", os.environ.get("KNOWLEDGE_LLM_BASE_URL", "https://api.openai.com/v1"))
+    key = model_option("KNOWLEDGE_API_KEY", key, workspace_id)
+    model = model_option("KNOWLEDGE_MODEL", model, workspace_id)
+    base_url = model_option(
+        "KNOWLEDGE_BASE_URL", os.environ.get("KNOWLEDGE_LLM_BASE_URL", "https://api.openai.com/v1"), workspace_id
+    )
     valid = valid_provider_url(base_url)
     return {
         "configured": bool(key and valid and provider == "openai"),
@@ -140,7 +144,8 @@ def validate_answer(data, references):
 
 def reference_payload(revisions, query=""):
     from .reference_excerpt import excerpt
+
     return [
-        {**dict(value), **excerpt(value["content"],query)}
+        {**dict(value), **excerpt(value["content"], query)}
         for value in PublicationSerializer(revisions, many=True).data
     ]

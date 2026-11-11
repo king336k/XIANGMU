@@ -180,70 +180,18 @@ def test_tester_asset_lifecycle_does_not_grant_release_account_or_global_setting
     )
 
 
-def test_tester_can_start_data_regression_for_another_owner_but_not_accept_it(session_client, tester_scope):
-    from django.utils import timezone
-    from plane.db.models import Issue
-    from plane.quality.models import Defect, DaqBinding, DaqReport, Solution, SolutionRevision, PlatformProject
+def test_retired_data_regression_is_unavailable_to_tester_and_reporter(session_client, tester_scope):
+    from plane.quality.models import Defect, TestPlan
 
     project, tester, manager, base = tester_scope
-    issue = Issue.objects.create(project=project, workspace=project.workspace, name="原采集任务")
-    binding = DaqBinding.objects.create(
-        project=project,
-        created_by=manager,
-        source_instance="test-source",
-        platform_task_id=7,
-        source_record_id="old-session",
-        package_id="old-package",
-        issue=issue,
-    )
-    PlatformProject.objects.create(project=project, source_instance="test-source", external_project_id=9)
-    defect = Defect.objects.create(
-        project=project,
-        title="别人负责的数据问题",
-        assignee=manager,
-        status="resolved",
-        fixed_build="v2",
-        resolved_at=timezone.now(),
-    )
-    DaqReport.objects.create(
-        project=project, binding=binding, defect=defect, request_id=uuid4(), request_hash="hash", category="Other"
-    )
-    solution = Solution.objects.create(
-        project=project,
-        defect=defect,
-        title="已审核修复",
-        status="approved",
-        submitted_version=1,
-        verification="新采集数据通过",
-    )
-    SolutionRevision.objects.create(
-        project=project,
-        solution=solution,
-        version=1,
-        snapshot={"verification": "新采集数据通过"},
-        reviewer_ids=[str(manager.id)],
-        required_count=1,
-    )
+    defect = Defect.objects.create(project=project, title="独立平台缺陷", assignee=manager)
     endpoint = base + f"defects/{defect.id}/data-regressions/"
-    created = session_client.post(endpoint, {"solution_id": str(solution.id), "environment": "回归测试"}, format="json")
-    assert created.status_code == 201, created.data
-    plan = created.data["plan"]
-    assert (
-        session_client.post(
-            base + f"plans/{plan['id']}/workflow/",
-            {"action": "approve", "expected_version": plan["workflow_version"]},
-            format="json",
-        ).status_code
-        == 403
-    )
+    count = TestPlan.objects.filter(project=project).count()
+    assert session_client.post(endpoint, {"environment": "回归测试"}, format="json").status_code == 404
     reporter = User.objects.create(email="no-regression@tester.invalid", username="no-regression")
     WorkspaceMember.objects.create(workspace=project.workspace, member=reporter, role=15)
     ProjectMember.objects.create(project=project, member=reporter, role=15)
     BusinessRole.objects.create(project=project, user=reporter, role="REPORTER")
     session_client.force_authenticate(reporter)
-    assert (
-        session_client.post(
-            endpoint, {"solution_id": str(solution.id), "environment": "不能绕过"}, format="json"
-        ).status_code
-        == 403
-    )
+    assert session_client.post(endpoint, {"environment": "不能绕过"}, format="json").status_code == 404
+    assert TestPlan.objects.filter(project=project).count() == count

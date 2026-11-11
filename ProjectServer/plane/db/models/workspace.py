@@ -203,6 +203,7 @@ class WorkspaceMember(BaseModel):
         related_name="member_workspace",
     )
     role = models.PositiveSmallIntegerField(choices=ROLE_CHOICES, default=5)
+    business_roles = models.JSONField(default=list, blank=True)
     company_role = models.TextField(null=True, blank=True)
     view_props = models.JSONField(default=get_default_props)
     default_props = models.JSONField(default=get_default_props)

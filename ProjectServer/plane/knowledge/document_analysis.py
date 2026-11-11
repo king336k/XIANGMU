@@ -111,12 +111,15 @@ def segments(article):
     for imported in imports:
         # Visible marker text is editable source material, never an authenticity
         # signal. Trust parser metadata only while the confirmed source is exact.
-        if imported.extraction.get("segments") and any(
-            row.get("content") == article.content for row in imported.rows
-        ) and article.content in {
-            extracted_content(imported.extraction).strip(),
-            "\n\n".join(text for _, text in extracted_parts(imported.extraction)).strip(),
-        }:
+        if (
+            imported.extraction.get("segments")
+            and any(row.get("content") == article.content for row in imported.rows)
+            and article.content
+            in {
+                extracted_content(imported.extraction).strip(),
+                "\n\n".join(text for _, text in extracted_parts(imported.extraction)).strip(),
+            }
+        ):
             sources = list(extracted_parts(imported.extraction))
             break
     output = []
@@ -241,12 +244,15 @@ def render_analysis(result, selected, original):
     locations = {segment["id"]: segment.get("locator", "") for segment in selected}
 
     def references(item):
-        return "；".join(
-            f"[{c['segment_id']}]"
-            + (f"（{locations[c['segment_id']]}）" if locations[c['segment_id']] else "")
-            + f"「{c['quote']}」"
-            for c in item["citations"]
-        ) or "原文未说明"
+        return (
+            "；".join(
+                f"[{c['segment_id']}]"
+                + (f"（{locations[c['segment_id']]}）" if locations[c["segment_id"]] else "")
+                + f"「{c['quote']}」"
+                for c in item["citations"]
+            )
+            or "原文未说明"
+        )
 
     lines = [
         "## 结构化解读（人工确认草稿）",
@@ -315,7 +321,7 @@ class ArticleAnalysis(QualityView):
             )
         if sensitive_content([article.title, selected, data["focus"]]):
             raise ValidationError({"source": "所选内容包含疑似敏感信息，请先脱敏。"})
-        config = assistant.provider_config()
+        config = assistant.provider_config(article.project.workspace_id)
         if not config.get("configured"):
             return Response(
                 {

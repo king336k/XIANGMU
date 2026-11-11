@@ -260,7 +260,7 @@ export const platformGuide = [
         caption: "管理员按项目分配反馈权限，搜索和分页保持勾选；所有采集电脑共用清单。",
       },
     ],
-    title: "协作服务与DAQ项目授权",
+    title: "报告通知与DAQ项目授权",
     summary: "管理DAQ可反馈的项目，查看上报账号、日志、附件和现场版本。",
     paragraphs: [
       "“设置 → DAQ项目授权”按项目勾选允许反馈的范围，不需要给DAQ分配工作区。飞书等协作服务在“设置 → 平台连接”维护。",
@@ -273,7 +273,7 @@ export const platformGuide = [
       "从采集端提交本轮问题，回平台检查缺陷、来源记录和实际附件。",
     ],
     links: [
-      { label: "查看协作服务", path: "/quality?tab=integrations" },
+      { label: "查看报告通知", path: "/quality?tab=integrations" },
       { label: "查看测试资源", path: "/quality?tab=resources" },
     ],
   },

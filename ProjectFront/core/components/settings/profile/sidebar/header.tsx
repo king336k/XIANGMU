@@ -33,7 +33,6 @@ export const ProfileSettingsSidebarHeader = observer(function ProfileSettingsSid
       </div>
       <div className="truncate">
         <p className="truncate text-body-sm-medium">{account?.username || currentUser?.username || "账号"}</p>
-        <p className="truncate text-caption-md-regular">{account?.source_label || ""}</p>
       </div>
     </div>
   );

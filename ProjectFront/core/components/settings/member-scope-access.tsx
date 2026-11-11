@@ -23,6 +23,7 @@ function WorkspaceScopes({ row, endpoint, pending, busy, administrator, own, onC
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const access = pending[scopeKey(row)]?.access_role ?? row.access_role;
+  const workspaceRoles = pending[scopeKey(row)]?.roles ?? row.roles;
   const query = new URLSearchParams({
     kind: "project",
     workspace_id: row.id,
@@ -63,6 +64,33 @@ function WorkspaceScopes({ row, endpoint, pending, busy, administrator, own, onC
           {expanded ? "收起项目" : `选择项目${row.project_count ? `（${row.project_count}）` : ""}`}
         </Button>
       </div>
+      {access >= 15 && !administrator && (
+        <fieldset className="mt-3 space-y-2 border-t border-subtle pt-3">
+          <legend className="text-13 font-medium">工作区统一岗位</legend>
+          <p className="text-12 text-secondary">
+            所选岗位作用于工作区内所有项目，包括后续新建项目；单个项目岗位可另外设置。
+          </p>
+          <div className="flex flex-wrap gap-4">
+            {Object.entries(DUTY_LABELS).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 text-13">
+                <input
+                  type="checkbox"
+                  disabled={busy}
+                  checked={workspaceRoles.includes(key)}
+                  onChange={(event) =>
+                    onChange(
+                      row,
+                      access,
+                      event.target.checked ? [...workspaceRoles, key] : workspaceRoles.filter((role) => role !== key)
+                    )
+                  }
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
       {expanded && (
         <div className="mt-3 space-y-3 border-t border-subtle pt-3">
           <label className="block text-12">
@@ -135,6 +163,12 @@ function WorkspaceScopes({ row, endpoint, pending, busy, administrator, own, onC
                     ) : (
                       <fieldset disabled={busy} className="flex flex-wrap gap-x-4 gap-y-2 text-12">
                         <legend className="mb-2 text-secondary">项目岗位（可多选）</legend>
+                        {!!project.inherited_roles?.length && (
+                          <p className="w-full text-secondary">
+                            工作区继承：{project.inherited_roles.map((role) => DUTY_LABELS[role] || role).join("、")}
+                            ；以下可另加项目岗位。
+                          </p>
+                        )}
                         {Object.entries(DUTY_LABELS).map(([value, label]) => (
                           <label key={value} className="flex items-center gap-1.5">
                             <input

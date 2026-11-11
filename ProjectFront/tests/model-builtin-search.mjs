@@ -114,6 +114,8 @@ test("日常表单只有聊天字段，内置检索显示只读就绪且说明�
   const tree = harness().render();
   assert.match(words(tree), /内置知识检索.*已就绪/);
   assert.match(words(tree), /平台部署管理.*无需重复设置/);
+  assert.match(words(tree), /PydanticAI/);
+  assert.match(words(tree), /检索模型：.*builtin-bge/);
   assert.doesNotMatch(words(tree), /沿用问答模型|启用语义检索/);
   assert.equal(
     nodes(tree).filter((node) => node.type === "input" && node.props.name?.startsWith("embedding_")).length,

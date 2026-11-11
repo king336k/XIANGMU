@@ -69,9 +69,7 @@ export function MemberPermissionsModal({
           </button>
         ))}
       </nav>
-      <p className="text-12 text-secondary">
-        {person.username === person.id ? person.display_name : person.username} · {person.source || "未登记来源"}
-      </p>
+      <p className="text-12 text-secondary">{person.username === person.id ? person.display_name : person.username}</p>
       {tab === "roles" && (
         <section key={`${person.id}:roles`} className="space-y-3">
           {admin ? (

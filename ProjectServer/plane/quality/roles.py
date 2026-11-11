@@ -4,7 +4,7 @@ from django.db.models import Q
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
-from plane.db.models import ProjectMember
+from plane.db.models import ProjectMember, WorkspaceMember
 from .models import BusinessRole, BusinessRoleEvent, ProjectRolePolicy
 from .permissions import (
     ROLE_NAMES,
@@ -136,12 +136,26 @@ def validate_project_role_retention(project, user_id, wanted):
                 project=project,
             ).exclude(user_id=user_id)
             administrators = ProjectMember.objects.filter(project=project, is_active=True).exclude(member_id=user_id)
-            if not any(
-                writable_member(project.pk, row.user_id, project.workspace.slug) for row in replacements
-            ) and not any(
-                is_administrator(member.member_id)
-                and writable_member(project.pk, member.member_id, project.workspace.slug)
-                for member in administrators
+            workspace_managers = (
+                WorkspaceMember.objects.filter(
+                    workspace=project.workspace,
+                    is_active=True,
+                    role__gte=15,
+                    business_roles__contains=["PROJECT_MANAGER"],
+                ).exclude(member_id=user_id)
+                if role == "PROJECT_MANAGER"
+                else WorkspaceMember.objects.none()
+            )
+            if (
+                not any(
+                    writable_member(project.pk, row.member_id, project.workspace.slug) for row in workspace_managers
+                )
+                and not any(writable_member(project.pk, row.user_id, project.workspace.slug) for row in replacements)
+                and not any(
+                    is_administrator(member.member_id)
+                    and writable_member(project.pk, member.member_id, project.workspace.slug)
+                    for member in administrators
+                )
             ):
                 raise ValidationError({"roles": "项目必须保留有效的管理员或项目经理。"})
 
@@ -166,7 +180,15 @@ def apply_project_roles(view, data):
         and ("PLATFORM_ADMIN" in wanted or "PLATFORM_ADMIN" in previous)
     ):
         raise PermissionDenied("项目经理不能授予或调整平台管理身份。")
-    validate_project_role_retention(project, data["user_id"], wanted)
+    inherited = (
+        WorkspaceMember.objects.filter(
+            workspace=project.workspace, member_id=data["user_id"], is_active=True, role__gte=15
+        )
+        .values_list("business_roles", flat=True)
+        .first()
+        or []
+    )
+    validate_project_role_retention(project, data["user_id"], set(wanted) | set(inherited))
     primary = wanted[0]
     binding, _ = BusinessRole.objects.update_or_create(
         project=project,

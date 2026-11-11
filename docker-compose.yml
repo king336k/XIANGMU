@@ -364,6 +364,7 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-engram}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请先初始化本地配置}
       RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-engramproject}
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: ${RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS:-+S 2:2 +SDcpu 1 +SDio 1}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-plane}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq

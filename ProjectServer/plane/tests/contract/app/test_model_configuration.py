@@ -69,9 +69,9 @@ def test_instance_admin_saves_encrypted_key_and_never_receives_key(session_clien
     assert response.status_code == 200, response.content
     assert response.data["configured"] is True and response.data["key_present"] is True
     assert "test-key-only-not-real" not in str(response.data)
-    row = InstanceConfiguration.objects.get(key="KNOWLEDGE_API_KEY")
+    row = InstanceConfiguration.objects.get(key=f"WS:{model_project[1].workspace_id}:KNOWLEDGE_API_KEY")
     assert row.is_encrypted and row.value != "test-key-only-not-real"
-    config = assistant.provider_config()
+    config = assistant.provider_config(model_project[1].workspace_id)
     assert config["api_key"] == "test-key-only-not-real" and config["model"] == "configured-test-model"
     assert (
         session_client.patch(
@@ -79,7 +79,7 @@ def test_instance_admin_saves_encrypted_key_and_never_receives_key(session_clien
         ).status_code
         == 200
     )
-    assert assistant.provider_config()["api_key"] == "test-key-only-not-real"
+    assert assistant.provider_config(model_project[1].workspace_id)["api_key"] == "test-key-only-not-real"
     cleared = session_client.patch(base + "configuration/", {"clear_key": True}, format="json")
     assert cleared.status_code == 200 and cleared.data["configured"] is False
 

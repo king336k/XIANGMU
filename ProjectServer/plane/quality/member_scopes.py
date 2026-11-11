@@ -63,8 +63,9 @@ def scope_row(kind, obj, target):
     filters = {"workspace": obj} if kind == "workspace" else {"project": obj}
     member = model.objects.filter(member=target, **filters).first()
     raw = {"membership": membership_snapshot(member)}
-    roles = []
+    roles = list(member.business_roles or []) if kind == "workspace" and member else []
     if kind == "workspace":
+        raw["business_roles"] = roles
         raw["project_memberships"] = list(
             ProjectMember.objects.filter(workspace=obj, member=target)
             .order_by("project_id")
@@ -90,9 +91,14 @@ def scope_row(kind, obj, target):
                 "updated_at": binding.updated_at.isoformat(),
             }
         )
-        raw["workspace"] = membership_snapshot(
-            WorkspaceMember.objects.filter(workspace=obj.workspace, member=target).first()
+        workspace_member = WorkspaceMember.objects.filter(workspace=obj.workspace, member=target).first()
+        raw["workspace"] = membership_snapshot(workspace_member)
+        inherited = (
+            list(workspace_member.business_roles or [])
+            if workspace_member and workspace_member.is_active and workspace_member.role >= 15
+            else []
         )
+        raw["inherited_roles"] = inherited
     revision = hashlib.sha256(json.dumps(raw, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
     result = {
         "kind": kind,
@@ -108,7 +114,7 @@ def scope_row(kind, obj, target):
             slug=obj.slug, project_count=Project.objects.filter(workspace=obj, archived_at__isnull=True).count()
         )
     else:
-        result.update(identifier=obj.identifier, workspace_id=str(obj.workspace_id))
+        result.update(identifier=obj.identifier, workspace_id=str(obj.workspace_id), inherited_roles=inherited)
     return result
 
 
@@ -200,12 +206,12 @@ class MemberScopes(BaseAPIView):
         for data, obj in sorted(prepared, key=lambda item: 0 if item[0]["kind"] == "workspace" else 1):
             role = int(data["access_role"])
             if data["kind"] == "workspace":
-                self.save_workspace(request, target, obj, role)
+                self.save_workspace(request, target, obj, role, data.get("roles"))
             else:
                 self.save_project(request, target, obj, role, data.get("roles"))
         return Response({"saved": len(changes), "user_id": str(target.id)})
 
-    def save_workspace(self, request, target, workspace, role):
+    def save_workspace(self, request, target, workspace, role, roles=None):
         member = WorkspaceMember.objects.filter(workspace=workspace, member=target).first()
         if target.id == request.user.id and (role == 0 or role == 5):
             raise ValidationError({"workspace": "请使用退出工作空间操作调整自己的访问。"})
@@ -226,12 +232,38 @@ class MemberScopes(BaseAPIView):
                     is_active=role != 0, **({"role": 5} if role == 5 else {})
                 )
                 audit_access(project, target, request.user, before, role)
+        if roles is not None and role >= 15:
+            from .models import BusinessRole
+
+            for project in Project.objects.filter(workspace=workspace, archived_at__isnull=True):
+                binding = BusinessRole.objects.filter(project=project, user=target).first()
+                explicit = {binding.role, *(binding.additional_roles or [])} if binding else set()
+                validate_project_role_retention(project, target.id, explicit | set(roles))
         if member:
             member.role = role or member.role
             member.is_active = role != 0
             member.save()
         elif role:
-            WorkspaceMember.objects.create(workspace=workspace, member=target, role=role, created_by=request.user)
+            member = WorkspaceMember.objects.create(
+                workspace=workspace, member=target, role=role, created_by=request.user
+            )
+        if member and roles is not None:
+            if roles and role < 15:
+                raise ValidationError({"roles": "工作区岗位需要可参与项目的访问级别。"})
+            member.business_roles = roles
+            member.save(update_fields=["business_roles"])
+            if roles:
+                for project in Project.objects.filter(workspace=workspace, archived_at__isnull=True):
+                    project_member, created = ProjectMember.objects.get_or_create(
+                        project=project, member=target, defaults={"role": 15, "is_active": True}
+                    )
+                    if not created and (not project_member.is_active or project_member.role < 15):
+                        project_member.is_active = True
+                        project_member.role = max(project_member.role, 15)
+                        project_member.save()
+        if member and role in {0, 5}:
+            member.business_roles = []
+            member.save(update_fields=["business_roles"])
 
     def save_project(self, request, target, project, role, roles):
         member = ProjectMember.objects.filter(project=project, member=target).first()
@@ -252,12 +284,17 @@ class MemberScopes(BaseAPIView):
         elif role:
             member = ProjectMember.objects.create(project=project, member=target, role=role, created_by=request.user)
         if role >= 15 and not is_administrator(target):
-            if not roles:
+            inherited = set(workspace.business_roles or [])
+            if not roles and not inherited:
                 raise ValidationError({"roles": "请至少选择一个项目岗位。"})
             adapter = SimpleNamespace(
                 project_id=project.id, workspace_slug=project.workspace.slug, request=request, project=lambda: project
             )
-            apply_project_roles(adapter, {"user_id": target.id, "roles": roles})
+            if roles:
+                apply_project_roles(adapter, {"user_id": target.id, "roles": roles})
+            else:
+                validate_project_role_retention(project, target.id, inherited)
+                BusinessRole.objects.filter(project=project, user=target).delete()
         audit_access(project, target, request.user, before, role)
         account = PlatformAccount.objects.filter(user=target, active=True).first()
         if account and role:
