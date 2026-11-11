@@ -12,3 +12,7 @@ def inherit_project_access(sender, instance, created, raw=False, **kwargs):
         ProjectMember.objects.get_or_create(
             project=instance, member_id=row.member_id, defaults={"workspace_id": instance.workspace_id, "role": 15}
         )
+
+    from plane.knowledge.base_knowledge import share_base_knowledge
+
+    share_base_knowledge(instance)

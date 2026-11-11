@@ -129,6 +129,9 @@ class ArticleWorkflow(QualityView):
             )
             article.status = "published"
             article.publication_active = True
+            from .base_knowledge import sync_base_publication
+
+            sync_base_publication(article)
             from .semantic import schedule_if_opted_in
 
             transaction.on_commit(lambda: schedule_if_opted_in(article.project))
