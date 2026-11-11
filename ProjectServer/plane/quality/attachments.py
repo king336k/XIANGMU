@@ -31,7 +31,18 @@ def directory():
 
 class FileSerializer(serializers.ModelSerializer):
     source_system = serializers.CharField(source="package.source_system", read_only=True)
-    uploader = serializers.CharField(source="created_by.display_name", read_only=True, default="成员")
+    uploader = serializers.SerializerMethodField()
+
+    def get_uploader(self, obj):
+        if obj.created_by and obj.created_by.is_bot:
+            from .daq_incidents import trusted_incident, signed_record
+            source = trusted_incident(obj.package.defect)
+            if source:
+                reporter = signed_record(source).get("reporter", {})
+                if reporter.get("username"):
+                    return reporter["username"]
+        return (obj.created_by.display_name or obj.created_by.username) if obj.created_by else "成员"
+
 
     class Meta:
         model = PackageFile

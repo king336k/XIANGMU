@@ -140,7 +140,9 @@ export const TabNavigationRoot = observer(function TabNavigationRoot(props: TTab
 
       // If default tab exists and is enabled, use it; otherwise fall back to work_items
       const targetItem =
-        defaultTabItem || allNavigationItems.find((item: TNavigationItem) => item.key === DEFAULT_TAB_KEY);
+        defaultTabItem ||
+        allNavigationItems.find((item: TNavigationItem) => item.key === DEFAULT_TAB_KEY) ||
+        allNavigationItems[0];
 
       if (targetItem) {
         navigate(targetItem.href, { replace: true });

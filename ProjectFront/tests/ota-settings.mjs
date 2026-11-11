@@ -32,7 +32,7 @@ function render(editing = false, authorized = true, enabled = true) {
             ...React,
             useState: (init) => {
               const n = i++;
-              return [editing && n === 0 ? row : n === 2 ? "ota" : init, () => {}];
+              return [editing && n === 0 ? row : n === 1 ? "ota" : init, () => {}];
             },
           }
         : name === "swr"

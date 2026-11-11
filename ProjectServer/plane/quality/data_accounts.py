@@ -326,39 +326,14 @@ class DataPlatformSources(BaseAPIView):
 
 class AccountSecurity(BaseAPIView):
     def get(self, request, **kwargs):
-        account = PlatformAccount.objects.filter(user=request.user).first()
-        identity = PlatformIdentity.objects.filter(user=request.user, active=True).first()
-        if account:
-            config = read_connection(account.source_instance) or {}
-            data = {
-                "source": "data_platform",
-                "source_label": "数据管理平台账号",
-                "username": account.source_username,
-                "can_change_local_password": False,
-                "portal_url": config.get("portal_url") or config.get("base_url", ""),
-                "email": account.source_email,
-                "platform_role": account.source_role,
-                "status": "Active",
-                "project_assigned": ProjectMember.objects.filter(member=request.user, is_active=True).exists(),
-            }
-        elif request.session.get("quality_bridge_identity") and identity:
-            data = {
-                "source": "external",
-                "source_label": "外部平台账号",
-                "username": request.user.display_name,
-                "can_change_local_password": False,
-                "portal_url": "",
-                "project_assigned": True,
-            }
-        else:
-            data = {
-                "source": "local",
-                "source_label": "项目管理平台账号",
-                "username": request.user.username,
-                "can_change_local_password": True,
-                "portal_url": "",
-                "project_assigned": ProjectMember.objects.filter(member=request.user, is_active=True).exists(),
-            }
+        data = {
+            "source": "local",
+            "source_label": "项目管理平台账号",
+            "username": request.user.username,
+            "can_change_local_password": True,
+            "portal_url": "",
+            "project_assigned": ProjectMember.objects.filter(member=request.user, is_active=True).exists(),
+        }
         data["display_name"] = data["username"]
         data["can_edit_identity"] = data["source"] == "local"
         data["can_create_api_tokens"] = data["source"] == "local"
@@ -398,11 +373,7 @@ class AccountSecurity(BaseAPIView):
 
 
 def managed_registration():
-    for key in InstanceConfiguration.objects.filter(key__startswith="QUALITY_SOURCE:").values_list("key", flat=True):
-        config = read_connection(key.split(":", 1)[1]) or {}
-        if config.get("kind") == "data_platform" and config.get("login_enabled"):
-            return True
-    return False
+    return True
 
 
 def configured_bridge_key(key_id):

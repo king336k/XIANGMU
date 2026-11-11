@@ -32,7 +32,7 @@ const source = {
   package_id: "",
   device: "",
 };
-test("来源卡展示可信项目任务名称与编号，填写的Session只称上报引用", () => {
+test("来源卡展示DAQ上报人快照和Session引用，不显示外部项目任务关联", () => {
   const { SourceCard } = load();
   const result = text(
     SourceCard({
@@ -44,12 +44,13 @@ test("来源卡展示可信项目任务名称与编号，填写的Session只称�
           platformTaskId: 24,
           platformTaskName: "机械臂抓取任务",
           sourceReference: "本地Session-A",
+          reporter: { id: 16, username: "采集员甲" },
         },
       },
     })
   );
-  assert.ok(result.includes("生产采集项目") && result.includes("9"));
-  assert.ok(result.includes("机械臂抓取任务") && result.includes("24"));
+  assert.ok(result.includes("采集员甲"));
+  assert.ok(!result.includes("生产采集项目") && !result.includes("机械臂抓取任务"));
   assert.ok(result.includes("上报引用") && result.includes("本地Session-A"));
   assert.ok(!result.includes("internal-event-id"));
 });

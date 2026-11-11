@@ -8,9 +8,9 @@ const React = require("react");
 const Field = () => null;
 const Modal = () => null;
 
-function renderForm(kind = "data_platform", editing = null) {
+function renderForm(kind = "feishu", editing = null) {
   let cursor = 0;
-  const state = [editing, undefined, kind];
+  const state = [editing, kind];
   const exports = {};
   const source = readFileSync(new URL("../core/components/quality/connection-settings.tsx", import.meta.url), "utf8");
   const mocks = {
@@ -115,12 +115,12 @@ test("explicit login and clear switches survive unchecked state", () => {
 test("basic connection form has only kind address and credential outside advanced settings", () => {
   const source = readFileSync(new URL("../core/components/quality/connection-settings.tsx", import.meta.url), "utf8");
   assert.match(source, /高级设置/);
-  assert.match(source, /kind === "legacy_hub"/);
+  assert.doesNotMatch(source, /legacy_hub|data_platform|允许来源账号登录/);
   assert.doesNotMatch(source, /首次登录岗位策略|来源实例名称 \*/);
   assert.match(source, /connectionPayload\(form, editing/);
 });
 
-test("rendered data-platform form only asks three basic fields and has no legacy directory fields", () => {
+test("rendered independent service form only asks three basic fields and has no legacy directory fields", () => {
   const fields = renderForm();
   assert.deepEqual(
     fields.filter((field) => !field.advanced).map((field) => field.label),
@@ -134,16 +134,16 @@ test("rendered data-platform form only asks three basic fields and has no legacy
 });
 
 test("rendered fields follow platform type and preserve optional existing credentials", () => {
-  const legacy = renderForm("legacy_hub");
+  const legacy = renderForm("feishu");
   assert.equal(
     legacy.some((field) => field.label === "来源服务用户编号"),
-    true
+    false
   );
   assert.equal(
     legacy.some((field) => field.label === "接收方标识"),
     false
   );
-  const existing = renderForm("data_platform", { source_instance: "old", kind: "data_platform", token_present: true });
+  const existing = renderForm("feishu", { source_instance: "old", kind: "feishu", token_present: true });
   assert.equal(
     existing.some((field) => field.label === "访问凭据（留空保留）" && !field.advanced),
     true

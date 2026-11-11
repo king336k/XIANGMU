@@ -33,16 +33,6 @@ type TAccountProfile = {
   platform_role?: string;
 };
 
-const sourceRoles: Record<string, string> = {
-  Admin: "管理员",
-  Manager: "数据经理",
-  TeamLeader: "组长",
-  Annotator: "标注员",
-  Auditor: "审核员",
-  Collector: "数采员",
-  Pending: "待分配用户",
-};
-
 type Props = {
   user: IUser;
   profile: TUserProfile;
@@ -121,12 +111,6 @@ export const GeneralProfileSettingsForm = observer(function GeneralProfileSettin
                     <dd className="mt-1 text-13 break-all">{account.email}</dd>
                   </div>
                 )}
-                {account.platform_role && (
-                  <div>
-                    <dt className="text-12 text-secondary">数据平台角色</dt>
-                    <dd className="mt-1 text-13">{sourceRoles[account.platform_role] || account.platform_role}</dd>
-                  </div>
-                )}
               </dl>
               <section className="border-t border-subtle pt-5" aria-label="我参与的项目">
                 <h3 className="mb-3 text-14 font-medium">
@@ -169,16 +153,6 @@ export const GeneralProfileSettingsForm = observer(function GeneralProfileSettin
                   <p className="text-13 text-secondary">尚未加入项目。</p>
                 )}
               </section>
-              {!account.can_edit_identity && account.portal_url && (
-                <a
-                  href={account.portal_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex text-12 text-accent-primary hover:underline"
-                >
-                  在数据管理平台管理账号
-                </a>
-              )}
             </>
           )}
         </section>

@@ -28,6 +28,14 @@ from plane.utils.content_validator import (
 
 
 class ProjectSerializer(BaseSerializer):
+    def validate_hidden_menu_items(self, value):
+        allowed = {"requirements", "work_items", "defects", "quality", "versions", "knowledge"}
+        if not isinstance(value, list) or any(not isinstance(key, str) or key not in allowed for key in value):
+            raise serializers.ValidationError("请选择有效的项目菜单。")
+        if len(value) != len(set(value)) or set(value) == allowed:
+            raise serializers.ValidationError("请至少保留一个项目菜单，且不能重复。")
+        return value
+
     def validate_timezone(self, value):
         return "Asia/Shanghai"
 

@@ -3,7 +3,6 @@ import { renderNumericDateTime } from "@plane/utils";
 import { RecordLifecycleActions } from "./record-lifecycle-actions";
 import { DocumentImportForm } from "./document-import-form";
 import { can } from "./types";
-import { ExternalReleasePlans } from "./external-release-plans";
 import { useState } from "react";
 import useSWR from "swr";
 import { Button } from "@plane/ui";
@@ -256,7 +255,6 @@ export function AssetsPanel({
           ))}
         </div>
       )}
-      {kind === "releases" && context.is_manager && <ExternalReleasePlans base={base} />}
       {kind === "releases" && context.is_manager && (
         <Button variant="neutral-primary" onClick={() => setImporting(true)}>
           导入版本清单

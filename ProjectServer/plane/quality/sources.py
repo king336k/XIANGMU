@@ -43,7 +43,8 @@ class SourceSerializer(serializers.ModelSerializer):
         payload = record["payload"]
         context = record.get("sourceContext", {})
         return {
-            "platformProjectId": payload["platformProjectId"],
+            "platformProjectId": payload.get("platformProjectId"),
+            "reporter": record.get("reporter", {}),
             "platformProjectName": context.get("projectName", ""),
             "platformTaskId": payload.get("platformTaskId"),
             "platformTaskName": context.get("taskName", ""),

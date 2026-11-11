@@ -209,33 +209,11 @@ test("经理样式标记不能替代明确验收能力，readonly不显示测试
   );
 });
 
-test("测试员可为已修复缺陷发起数据回归，数采员和未修复状态不能", () => {
-  const defect = { id: "d", status: "resolved", assignee_id: "technician", requires_data_regression: true };
-  const args = { base: "/q/", defect, projectUrl: "/w/p/P" };
-  assert.ok(
-    labels(load("data-regression-panel").DataRegressionPanel({ ...args, context: tester })).includes("发起新数据回归")
-  );
-  const reporter = { ...tester, capabilities: { report: true } };
-  assert.ok(
-    !labels(load("data-regression-panel").DataRegressionPanel({ ...args, context: reporter })).includes(
-      "发起新数据回归"
-    )
-  );
-  assert.ok(
-    !labels(
-      load("data-regression-panel").DataRegressionPanel({
-        ...args,
-        defect: { ...defect, status: "in_progress" },
-        context: tester,
-      })
-    ).includes("发起新数据回归")
-  );
-  const technician = { ...tester, user_id: "technician", capabilities: { manage_defect: true } };
-  assert.ok(
-    labels(load("data-regression-panel").DataRegressionPanel({ ...args, context: technician })).includes(
-      "发起新数据回归"
-    )
-  );
+test("缺陷与测试计划不再加载数据平台回归或Session关联入口", () => {
+  for (const name of ["defect-detail", "plan-detail"]) {
+    const source = readFileSync(new URL(`../core/components/quality/${name}.tsx`, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /DataRegressionPanel|DataEvidencePanel|data-regressions|data-evidence/);
+  }
 });
 
 test("测试员可生成测试报告快照，不因报告维护获得项目发布或外发权限", () => {

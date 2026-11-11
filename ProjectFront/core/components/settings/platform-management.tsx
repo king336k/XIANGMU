@@ -38,7 +38,7 @@ export const PlatformManagement = observer(function PlatformManagement({
     section === "members" || section === "accounts"
       ? "成员与权限"
       : section === "sources"
-        ? "来源关联"
+        ? "协作服务"
         : section === "connections"
           ? "平台连接"
           : "模型配置";
@@ -95,7 +95,7 @@ export const PlatformManagement = observer(function PlatformManagement({
       ) : (
         <>
           <p className="mb-5 text-12 text-secondary">
-            {section === "sources" ? "所选项目的来源与账号关联。" : "平台统一模型配置。"}
+            {section === "sources" ? "所选项目的通知和协作服务。" : "平台统一模型配置。"}
           </p>
           {!projectId ? (
             <p role="status" className="text-13 text-secondary">

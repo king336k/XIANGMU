@@ -16,7 +16,7 @@ import { observer } from "mobx-react";
 import { useParams, useRouter } from "next/navigation";
 import { createRoot } from "react-dom/client";
 import scrollIntoView from "smooth-scroll-into-view-if-needed";
-import { Share2, LogOut, MoreHorizontal } from "lucide-react";
+import { Share2, LogOut, Settings2 } from "lucide-react";
 import { Disclosure, Transition } from "@headlessui/react";
 // plane imports
 import { EUserPermissions, EUserPermissionsLevel, MEMBER_TRACKER_ELEMENTS } from "@plane/constants";
@@ -31,6 +31,7 @@ import { cn } from "@plane/utils";
 // components
 import { DEFAULT_TAB_KEY, getTabUrl } from "@/components/navigation/tab-navigation-utils";
 import { useTabPreferences } from "@/components/navigation/use-tab-preferences";
+import { ProjectMenuSettings } from "@/components/project/project-menu-settings";
 import { LeaveProjectModal } from "@/components/project/leave-project-modal";
 import { PublishProjectModal } from "@/components/project/publish-project/modal";
 // hooks
@@ -83,12 +84,13 @@ export const SidebarProjectsListItem = observer(function SidebarProjectsListItem
   // states
   const [leaveProjectModalOpen, setLeaveProjectModal] = useState(false);
   const [publishModalOpen, setPublishModal] = useState(false);
+  const [menuSettingsOpen, setMenuSettingsOpen] = useState(false);
   const [isMenuActive, setIsMenuActive] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const isProjectListOpen = getIsProjectListOpen(projectId);
   const [instruction, setInstruction] = useState<"DRAG_OVER" | "DRAG_BELOW" | undefined>(undefined);
   // refs
-  const actionSectionRef = useRef<HTMLButtonElement | null>(null);
+  const actionSectionRef = useRef<HTMLDivElement | null>(null);
   const projectRef = useRef<HTMLDivElement | null>(null);
   const dragHandleRef = useRef<HTMLButtonElement | null>(null);
   // router
@@ -111,7 +113,9 @@ export const SidebarProjectsListItem = observer(function SidebarProjectsListItem
   const { tabPreferences } = useTabPreferences(workspaceSlug.toString(), projectId);
   const defaultTabKey = tabPreferences.defaultTab;
   // Validate that the default tab is available
-  const validatedDefaultTabKey = availableTabKeys.includes(defaultTabKey) ? defaultTabKey : DEFAULT_TAB_KEY;
+  const validatedDefaultTabKey = availableTabKeys.includes(defaultTabKey)
+    ? defaultTabKey
+    : availableTabKeys[0] || DEFAULT_TAB_KEY;
   const defaultTabUrl = project ? getTabUrl(workspaceSlug.toString(), project.id, validatedDefaultTabKey) : "";
 
   // toggle project list open
@@ -282,6 +286,13 @@ export const SidebarProjectsListItem = observer(function SidebarProjectsListItem
 
   return (
     <>
+      {menuSettingsOpen && project && (
+        <ProjectMenuSettings
+          workspaceSlug={String(workspaceSlug)}
+          project={project}
+          onClose={() => setMenuSettingsOpen(false)}
+        />
+      )}
       <PublishProjectModal isOpen={publishModalOpen} projectId={projectId} onClose={() => setPublishModal(false)} />
       <LeaveProjectModal project={project} isOpen={leaveProjectModalOpen} onClose={() => setLeaveProjectModal(false)} />
       <Disclosure key={`${project.id}_${URLProjectId}`} defaultOpen={isProjectListOpen} as="div">
@@ -355,18 +366,11 @@ export const SidebarProjectsListItem = observer(function SidebarProjectsListItem
                   </div>
                 )}
               </ControlLink>
-              <div className="flex items-center gap-1">
+              <div ref={actionSectionRef} className="flex items-center gap-1">
                 <CustomMenu
-                  customButton={
-                    <IconButton
-                      ref={actionSectionRef}
-                      variant="ghost"
-                      size="sm"
-                      icon={MoreHorizontal}
-                      onClick={() => setIsMenuActive(!isMenuActive)}
-                      className="text-placeholder"
-                    />
-                  }
+                  ellipsis
+                  menuButtonOnClick={() => setIsMenuActive(!isMenuActive)}
+                  buttonClassName="text-placeholder"
                   className={cn(
                     "pointer-events-none flex-shrink-0 opacity-0 group-hover/project-item:pointer-events-auto group-hover/project-item:opacity-100",
                     {
@@ -396,6 +400,14 @@ export const SidebarProjectsListItem = observer(function SidebarProjectsListItem
                     </CustomMenu.MenuItem>
                   )} */}
 
+                  {isAdmin && (
+                    <CustomMenu.MenuItem onClick={() => setMenuSettingsOpen(true)}>
+                      <span className="flex items-center gap-2">
+                        <Settings2 className="size-3.5" />
+                        项目菜单设置
+                      </span>
+                    </CustomMenu.MenuItem>
+                  )}
                   {/* publish project settings */}
                   {isAdmin && (
                     <CustomMenu.MenuItem onClick={() => setPublishModal(true)}>

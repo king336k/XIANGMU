@@ -9,96 +9,82 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from plane.app.views.base import BaseAPIView
 from plane.db.models import Project
-from . import platform
 from .identity import PlatformBridgeAuthentication
-from .models import DefectEvent, PlatformAccount, SourceLink, ProblemPackage, PackageFile
-from .daq_incidents import DaqIncidents, DaqIncidentSession, IncidentInput, signed_record, receipt, TYPE, SYSTEM
+from .models import DefectEvent, SourceLink, ProblemPackage, PackageFile
+from .daq_incidents import DaqIncidents, IncidentInput, signed_record, receipt, TYPE, SYSTEM
 from .sources import PackageList
 from .attachments import PackageFiles, FileDownload, ImagePreview
 from .views import QualityPagination
 
 
-def verify_collector(source, external_actor):
-    person = platform.fetch(source, f"/internal/issue-users/{external_actor}")
-    if (
-        not isinstance(person, dict)
-        or person.get("id") != external_actor
-        or person.get("active") is not True
-        or person.get("role") != "Collector"
-    ):
-        raise AuthenticationFailed("来源账号未授予有效数采员职责。")
-    return person
-
-
-def verify_report_source(source, external_actor, external_project, task=None):
-    verify_collector(source, external_actor)
-    if not PlatformAccount.objects.filter(
-        source_instance=source,
-        external_user_id=external_actor,
-        active=True,
-        user__is_active=True,
-        user__is_bot=False,
-    ).exists():
-        raise PermissionDenied("项目平台账号已停用。")
-    permissions = platform.fetch(source, f"/internal/issue-permissions/users/{external_actor}")
-    projects = permissions.get("projects") if isinstance(permissions, dict) else None
-    if not isinstance(projects, list):
-        raise platform.PlatformUnavailable()
-    if not any(
-        isinstance(row, dict) and type(row.get("id")) is int and row["id"] == external_project for row in projects
-    ):
-        raise PermissionDenied("数据平台项目权限已撤销。")
-    context = {"projectId": external_project, "taskId": None, "sourceSessionId": None, "dataPackageId": None}
-    if task is not None:
-        context = platform.fetch(source, f"/internal/issue-integration/tasks/{task}/context")
-        if (
-            not isinstance(context, dict)
-            or type(context.get("taskId")) is not int
-            or context["taskId"] != task
-            or type(context.get("projectId")) is not int
-            or context["projectId"] != external_project
-        ):
-            raise PermissionDenied("来源任务不属于当前授权项目。")
-    return context
-
-
 class DaqReportingAuthentication(PlatformBridgeAuthentication):
+    def key_config(self, key_id):
+        import json
+        import os
+        from django.conf import settings
+
+        keys = getattr(settings, "QUALITY_DAQ_REPORT_KEYS", None)
+        if keys is None:
+            keys = json.loads(os.environ.get("QUALITY_DAQ_REPORT_KEYS_JSON", "{}"))
+        config = keys.get(key_id)
+        if not config or config.get("enabled", True) is not True:
+            return None
+        source = config.get("source_instance")
+        if not isinstance(source, str) or not source or len(source) > 120:
+            raise AuthenticationFailed("DAQ来源配置无效。")
+        from .daq_project_grants import granted_projects
+
+        return {**config, "projects": granted_projects()}
+
     @transaction.atomic
     def authenticate(self, request):
+        import hashlib
+        import json
+        from plane.db.models import User
+
         verified = self.verified_principal(request)
         if verified is None:
             return None
         config, external_actor = verified
+        principal = json.loads(request.headers["X-Issue-Principal"])
+        username = principal.get("username")
+        if not isinstance(username, str) or not username.strip() or len(username) > 128:
+            raise AuthenticationFailed("DAQ当前登录账号信息无效。")
         source = config["source_instance"]
-        person = verify_collector(source, external_actor)
-        account = (
-            PlatformAccount.objects.select_related("user")
-            .filter(source_instance=source, external_user_id=external_actor)
-            .first()
+        # One non-login service actor per device source, never one platform account per collector.
+        name = "daq-service-" + hashlib.sha256(source.encode()).hexdigest()[:32]
+        user, created = User.objects.get_or_create(
+            username=name,
+            defaults={
+                "email": name + "@accounts.invalid",
+                "display_name": "DAQ反馈服务",
+                "is_bot": True,
+            },
         )
-        if account:
-            if not account.active or not account.user.is_active or account.user.is_bot:
-                raise AuthenticationFailed("项目平台账号已停用。")
-            user = account.user
-        else:
-            from .data_accounts import authority_config, link_account
-
-            source_config = authority_config(source)
-            if (
-                not isinstance(person.get("username"), str)
-                or not person["username"].strip()
-                or len(person["username"]) > 128
-            ):
-                raise AuthenticationFailed("来源账号无效。")
-            user = link_account(source, person, source_config).user
-        return user, {"source_instance": source, "external_user_id": external_actor, "daq_report_only": True}
+        if created:
+            user.set_unusable_password()
+            user.save(update_fields=["password"])
+        if not user.is_bot or not user.is_active or user.has_usable_password():
+            raise AuthenticationFailed("DAQ反馈服务账号配置无效。")
+        return user, {
+            "source_instance": source,
+            "external_user_id": external_actor,
+            "daq_report_only": True,
+            "projects": config["projects"],
+            "reporter": {"id": external_actor, "username": username.strip()},
+        }
 
 
 class ReportingView(BaseAPIView):
     authentication_classes = [DaqReportingAuthentication]
     permission_classes = [IsAuthenticated]
 
+    def allow_project(self, project_id):
+        if str(project_id) not in self.request.auth["projects"]:
+            raise PermissionDenied("此DAQ未获准向当前项目反馈。")
+
     def bind_project(self, project):
+        self.allow_project(project.id)
         self.kwargs.update(project_id=project.id, slug=project.workspace.slug)
 
     def own_report(self, report_id):
@@ -121,10 +107,7 @@ class ReportingView(BaseAPIView):
             or link.project.archived_at
         ):
             raise PermissionDenied("只能访问本人上报的有效故障。")
-        data = record["payload"]
-        verify_report_source(
-            link.source_instance, record["externalActor"], data["platformProjectId"], data.get("platformTaskId")
-        )
+        self.allow_project(link.project_id)
         self.bind_project(link.project)
         return link
 
@@ -145,7 +128,9 @@ class ReportingView(BaseAPIView):
 class DaqProjectOptions(ReportingView):
     def get(self, request):
         query = (
-            Project.objects.filter(archived_at__isnull=True, workspace__deleted_at__isnull=True)
+            Project.objects.filter(
+                id__in=request.auth["projects"], archived_at__isnull=True, workspace__deleted_at__isnull=True
+            )
             .select_related("workspace")
             .order_by("name", "id")
         )
@@ -170,6 +155,7 @@ class DaqProjectOptions(ReportingView):
 
 
 class ReportInput(IncidentInput):
+    platformProjectId = serializers.IntegerField(min_value=1, required=False)
     hubProjectId = serializers.UUIDField()
 
 
@@ -195,6 +181,7 @@ class DaqReports(ReportingView):
                 record_type=TYPE,
                 source_instance=request.auth["source_instance"],
                 created_by=request.user,
+                record_id__startswith=str(request.auth["external_user_id"]) + ":",
                 project__archived_at__isnull=True,
                 project__deleted_at__isnull=True,
                 project__workspace__deleted_at__isnull=True,
@@ -213,17 +200,7 @@ class DaqReports(ReportingView):
             query = query.filter(
                 project_id=serializers.UUIDField().run_validation(request.query_params["hubProjectId"])
             )
-        # A count must respect current source permissions. Check the account in
-        # authentication, fetch its projects once, and check each distinct task
-        # once per request; never cache a grant across requests.
-        permissions = platform.fetch(
-            request.auth["source_instance"], f"/internal/issue-permissions/users/{request.auth['external_user_id']}"
-        )
-        projects = permissions.get("projects") if isinstance(permissions, dict) else None
-        if not isinstance(projects, list):
-            raise platform.PlatformUnavailable()
-        allowed_projects = {row["id"] for row in projects if isinstance(row, dict) and type(row.get("id")) is int}
-        task_contexts = {}
+        query = query.filter(project_id__in=request.auth["projects"])
         links = list(query)
         from .numbering import preload
 
@@ -241,26 +218,6 @@ class DaqReports(ReportingView):
             data = record["payload"]
             if wanted is not None and data.get("sourceReference", "") != wanted:
                 continue
-            if data["platformProjectId"] not in allowed_projects:
-                continue
-            task = data.get("platformTaskId")
-            if task is not None:
-                if task not in task_contexts:
-                    try:
-                        task_contexts[task] = platform.fetch(
-                            link.source_instance, f"/internal/issue-integration/tasks/{task}/context"
-                        )
-                    except (AuthenticationFailed, PermissionDenied):
-                        task_contexts[task] = None
-                context = task_contexts[task]
-                if (
-                    not isinstance(context, dict)
-                    or type(context.get("taskId")) is not int
-                    or context["taskId"] != task
-                    or type(context.get("projectId")) is not int
-                    or context["projectId"] != data["platformProjectId"]
-                ):
-                    continue
             if search and not any(
                 search in value.casefold()
                 for value in [
@@ -330,10 +287,14 @@ def report_timeline(defect):
     def actor_name(actor):
         return (actor.display_name or actor.username) if actor is not None else "系统"
 
+    from .daq_incidents import trusted_incident
+
+    source = trusted_incident(defect)
+    reporter = signed_record(source).get("reporter", {}) if source else {}
     timeline = [
         {
             "id": "created:" + str(defect.id),
-            "actor": actor_name(defect.created_by),
+            "actor": reporter.get("username") or actor_name(defect.created_by),
             "action": "提交反馈",
             "created_at": defect.created_at,
             "status": "open",
@@ -416,12 +377,6 @@ class DaqOwnReportPackages(ReportingView):
         return PackageList.post(self, request)
 
 
-class DaqOwnReportSession(ReportingView):
-    def post(self, request, report_id):
-        link = self.own_report(report_id)
-        return DaqIncidentSession.post(self, request, pk=link.defect_id)
-
-
 class DaqOwnReportFiles(ReportingView):
     def post(self, request, report_id, package_id):
         link = self.own_report(report_id)
@@ -463,13 +418,4 @@ def report_only_diagnostic_access(job):
     record = signed_record(link)
     if not record or record.get("authorityMode") != "report_only":
         return False
-    try:
-        verify_report_source(
-            link.source_instance,
-            record["externalActor"],
-            record["payload"]["platformProjectId"],
-            record["payload"].get("platformTaskId"),
-        )
-    except (AuthenticationFailed, PermissionDenied, platform.PlatformUnavailable):
-        return False
-    return True
+    return bool(record.get("reporter"))

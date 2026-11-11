@@ -319,42 +319,9 @@ export const SecurityProfileSettings = observer(function SecurityProfileSettings
             <dd className="mt-1">{data.source_label}</dd>
           </div>
         </dl>
-        {data.platform_role && (
-          <p className="text-13 text-secondary">
-            数据平台角色：
-            {(
-              {
-                Admin: "管理员",
-                Manager: "数据经理",
-                TeamLeader: "组长",
-                Annotator: "标注员",
-                Auditor: "审核员",
-                Collector: "数采员",
-                Pending: "待分配用户",
-              } as Record<string, string>
-            )[data.platform_role] || data.platform_role}
-          </p>
-        )}
         {!data.project_assigned && <p className="text-12 text-secondary">账号已登录，尚未分配项目。请联系项目经理。</p>}
       </section>
-      {data.can_change_local_password ? (
-        <NativeSecuritySettings />
-      ) : (
-        <section className="space-y-3">
-          <h2 className="text-16 font-medium">密码管理</h2>
-          <p className="text-13 text-secondary">密码由数据管理平台统一维护，修改后需重新登录。</p>
-          {data.portal_url && (
-            <a
-              href={data.portal_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex rounded-md border border-subtle px-3 py-2 text-13 text-accent-primary"
-            >
-              前往数据管理平台
-            </a>
-          )}
-        </section>
-      )}
+      <NativeSecuritySettings />
     </div>
   );
 });

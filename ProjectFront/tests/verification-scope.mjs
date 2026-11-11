@@ -66,7 +66,7 @@ function harness(manager = true, dataRequired = true, manual = false) {
     node && typeof node === "object" ? [node, ...React.Children.toArray(node.props?.children).flatMap(nodes)] : [];
   return { render, nodes, writes, changed };
 }
-test("验证方式只提供功能和数据两种；提交原版本和简短原因", async () => {
+test("验证方式使用本平台功能验证；提交原版本和简短原因", async () => {
   const h = harness();
   h.nodes(h.render())
     .find((n) => n.type === "button")
@@ -74,7 +74,7 @@ test("验证方式只提供功能和数据两种；提交原版本和简短原�
   const nodes = h.nodes(h.render());
   assert.deepEqual(
     nodes.filter((n) => n.type === "option").map((n) => n.props.children),
-    ["功能验证", "数据验证"]
+    ["功能验证"]
   );
   await nodes
     .find((n) => n.type === "modal")

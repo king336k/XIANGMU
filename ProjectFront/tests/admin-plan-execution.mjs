@@ -123,10 +123,7 @@ test("普通经理不因is_manager获得执行，普通岗位仍只操作本人�
     for (const own of [false, true])
       assert.equal(labels(workflow(ctx(role, own), "running")).includes("提交测试结果"), own);
 });
-for (const [file, exportName, label] of [
-  ["plan-detail", "PlanDetail", "执行用例"],
-  ["data-regression-panel", "DataEvidencePanel", "关联新采集Session"],
-])
+for (const [file, exportName, label] of [["plan-detail", "PlanDetail", "执行用例"]])
   test(`${label}允许管理员代操作但不放宽运行状态和普通岗位归属`, () => {
     const Component = load(file)[exportName];
     for (const [context, status, canWrite, expected] of [

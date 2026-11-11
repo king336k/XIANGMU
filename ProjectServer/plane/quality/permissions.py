@@ -64,20 +64,12 @@ def is_administrator(user):
     user_id = getattr(user, "pk", user)
     if not user_id or not User.objects.filter(pk=user_id, is_active=True, is_bot=False).exists():
         return False
+    if PlatformAccount.objects.filter(user_id=user_id).exists():
+        return False
     if InstanceAdmin.objects.filter(user_id=user_id, role=20).exists():
         return True
     if InstanceConfiguration.objects.filter(key="QUALITY_ADMIN_OVERRIDE:" + str(user_id), value="false").exists():
         return False
-    account = PlatformAccount.objects.filter(user_id=user_id).first()
-    if account:
-        # The marker is written only after live server-side authority verification.
-        return bool(
-            account.active
-            and account.source_role == "Admin"
-            and InstanceConfiguration.objects.filter(
-                key="QUALITY_VERIFIED_ADMIN:" + str(account.id), value="true"
-            ).exists()
-        )
     for row in BusinessRole.objects.filter(user_id=user_id).select_related("project__workspace"):
         if "PLATFORM_ADMIN" not in {row.role, *(row.additional_roles or [])}:
             continue

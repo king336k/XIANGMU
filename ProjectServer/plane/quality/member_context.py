@@ -4,7 +4,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from plane.app.views.base import BaseAPIView
 from plane.db.models import ProjectMember, WorkspaceMember
-from .models import BusinessRole, PlatformIdentity, PlatformAccount
+from .models import BusinessRole
 from .permissions import ROLE_NAMES
 
 
@@ -21,11 +21,6 @@ class WorkspaceMemberContext(BaseAPIView):
             is_active=True,
         ).values_list("project_id", flat=True)
         members = WorkspaceMember.objects.filter(workspace__slug=slug, is_active=True).select_related("member")
-        source_names = dict(
-            PlatformAccount.objects.filter(user_id__in=members.values("member_id")).values_list(
-                "user_id", "source_username"
-            )
-        )
         active_project_members = set(
             ProjectMember.objects.filter(
                 project_id__in=visible_projects, is_active=True, member__is_active=True
@@ -41,18 +36,13 @@ class WorkspaceMemberContext(BaseAPIView):
                 responsibilities[str(row.user_id)].append(
                     {"project": row.project.name, "role": ROLE_NAMES.get(role, role)}
                 )
-        mapped = set(
-            row.user_id
-            for row in PlatformIdentity.objects.filter(project_id__in=visible_projects, active=True)
-            if (row.project_id, row.user_id) in active_project_members
-        )
         response = Response(
             {
                 "members": {
                     str(row.member_id): {
-                        "username": source_names.get(row.member_id) or row.member.username,
+                        "username": row.member.username,
                         "business_roles": responsibilities[str(row.member_id)],
-                        "identity_mapped": row.member_id in mapped,
+                        "identity_mapped": False,
                     }
                     for row in members
                 }

@@ -25,6 +25,7 @@ export interface IPartialProject {
   member_role?: TUserPermissions | EUserProjectRoles | null;
   archived_at: string | null;
   workspace: IWorkspace | string;
+  hidden_menu_items?: string[];
   cycle_view: boolean;
   issue_views_view: boolean;
   module_view: boolean;

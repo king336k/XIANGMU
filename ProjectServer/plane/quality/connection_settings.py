@@ -45,7 +45,7 @@ def read_connection(instance):
 
 class ConnectionInput(serializers.Serializer):
     source_instance = serializers.RegexField(r"^[a-zA-Z0-9_-]{1,80}$")
-    kind = serializers.ChoiceField(choices=["data_platform", "legacy_hub", "ota", "feishu"])
+    kind = serializers.ChoiceField(choices=["ota", "feishu"])
     base_url = serializers.CharField(max_length=500)
     portal_url = serializers.CharField(max_length=500, allow_blank=True, default="")
     roots = serializers.ListField(
@@ -92,6 +92,8 @@ class ConnectionInput(serializers.Serializer):
         return normalized
 
     def validate(self, data):
+        if data.get("login_enabled") or data.get("login_auto_provision"):
+            raise ValidationError("账号仅由项目管理平台管理，不支持外部登录。")
         if data["kind"] == "ota" and directory_configuration_enabled() and "roots" not in data:
             raise ValidationError({"roots": "请填写1至20个安装包目录，每行一个绝对目录。"})
         if data["kind"] != "ota" and "roots" in data:
@@ -221,7 +223,7 @@ class ConnectionSettings(QualityView):
         rows = []
         for row in InstanceConfiguration.objects.filter(key__startswith=PREFIX):
             config = read_connection(row.key[len(PREFIX) :])
-            if config is None:
+            if config is None or config.get("kind") not in {"ota", "feishu"}:
                 continue
             rows.append(
                 {

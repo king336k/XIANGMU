@@ -28,7 +28,6 @@ KINDS = {
     "defect": "缺陷",
     "solution": "方案审核",
     "plan": "测试计划",
-    "regression": "数据回归",
 }
 
 
@@ -41,9 +40,7 @@ class TodoQuery(serializers.Serializer):
 
 
 def permitted_projects(user, workspace):
-    membership = WorkspaceMember.objects.filter(
-        workspace__slug=workspace, member=user, is_active=True
-    ).first()
+    membership = WorkspaceMember.objects.filter(workspace__slug=workspace, member=user, is_active=True).first()
     if not user.is_active or membership is None:
         raise PermissionDenied("当前账号没有此工作空间的工作权限。")
     if membership.role < 15:
@@ -74,7 +71,8 @@ def permitted_projects(user, workspace):
         ]
 
     native = [
-        pk for pk in memberships
+        pk
+        for pk in memberships
         if pk not in strict or duties.get(pk, set()) & {"PLATFORM_ADMIN", "TECHNICIAN", "PROJECT_MANAGER"}
     ]
     managers = [
@@ -255,7 +253,7 @@ def todo_query(user, options):
     plan_query = plan_query.annotate(is_regression=Exists(DataRegression.objects.filter(plan_id=OuterRef("pk"))))
     plan_rows = projection(
         plan_query,
-        Case(When(is_regression=True, then=Value("regression")), default=Value("plan")),
+        Value("plan"),
         "name",
         "status",
         "quality.testplan",

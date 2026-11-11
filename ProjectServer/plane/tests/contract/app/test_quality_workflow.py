@@ -176,7 +176,7 @@ def test_failed_execution_can_be_reported_and_reviewed_but_does_not_admit_releas
 
 
 @pytest.mark.parametrize(
-    "matches,scope,expected", [(1, "functional", "open"), (2, "functional", "resolved"), (1, "data", "resolved")]
+    "matches,scope,expected", [(1, "functional", "open"), (2, "functional", "resolved"), (1, "data", "open")]
 )
 def test_failed_functional_regression_returns_only_unambiguous_current_fix(
     session_client, scenario, matches, scope, expected
@@ -185,11 +185,19 @@ def test_failed_functional_regression_returns_only_unambiguous_current_fix(
     from plane.quality.models import Defect
 
     base, plan, tester, manager = scenario
-    defects = [Defect.objects.create(
-        project_id=base.split("/")[5], created_by=manager, title=f"待验证功能{i}",
-        case_id=plan["items"][0]["case_id"], status="resolved", fixed_build="v2",
-        resolved_at=timezone.now(), verification_scope=scope,
-    ) for i in range(matches)]
+    defects = [
+        Defect.objects.create(
+            project_id=base.split("/")[5],
+            created_by=manager,
+            title=f"待验证功能{i}",
+            case_id=plan["items"][0]["case_id"],
+            status="resolved",
+            fixed_build="v2",
+            resolved_at=timezone.now(),
+            verification_scope=scope,
+        )
+        for i in range(matches)
+    ]
     plan = action(session_client, base, plan, "assign", assignee_id=str(tester.id)).data
     session_client.force_authenticate(user=tester)
     plan = action(session_client, base, plan, "claim").data

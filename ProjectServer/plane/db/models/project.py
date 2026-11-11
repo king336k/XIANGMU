@@ -90,6 +90,7 @@ class Project(BaseModel):
     )
     emoji = models.CharField(max_length=255, null=True, blank=True)
     icon_prop = models.JSONField(null=True)
+    hidden_menu_items = models.JSONField(default=list, blank=True)
     module_view = models.BooleanField(default=False)
     cycle_view = models.BooleanField(default=False)
     issue_views_view = models.BooleanField(default=False)

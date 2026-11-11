@@ -175,26 +175,13 @@ def verify_incident_authority(link):
     if record is None:
         raise PermissionDenied("异常来源签名无效。")
     data = record["payload"]
-    if record.get("authorityMode") == "report_only":
-        from .daq_reporting import verify_report_source
-
-        return verify_report_source(
-            link.source_instance, record["externalActor"], data["platformProjectId"], data.get("platformTaskId")
-        )
-    return verify_authority(
-        link.project,
-        link.created_by,
-        link.source_instance,
-        record["externalActor"],
-        data["platformProjectId"],
-        data.get("platformTaskId"),
-    )
+    return record["payload"]
 
 
 def bridge(view):
     auth = view.request.auth
     if not isinstance(auth, dict) or not auth.get("source_instance") or type(auth.get("external_user_id")) is not int:
-        raise PermissionDenied("此入口仅接受数据平台签发的可信身份。")
+        raise PermissionDenied("此入口仅接受DAQ服务签发的可信身份。")
     return auth["source_instance"], auth["external_user_id"]
 
 
@@ -239,15 +226,10 @@ def receipt(link, view, session=None):
         "sourceReference": data.get("sourceReference", ""),
         "platformProjectName": record.get("sourceContext", {}).get("projectName", ""),
         "platformTaskName": record.get("sourceContext", {}).get("taskName", ""),
-        "source_association_active": PlatformProject.objects.filter(
-            project_id=link.project_id,
-            source_instance=link.source_instance,
-            external_project_id=data["platformProjectId"],
-            active=True,
-        ).exists(),
+        "reporter": record.get("reporter", {}),
         "sourceRecordType": data["kind"],
         "occurredAt": data["occurredAt"],
-        "platformProjectId": data["platformProjectId"],
+        "platformProjectId": data.get("platformProjectId"),
         "platformTaskId": data.get("platformTaskId"),
         "sourceSessionId": session.record_id if session else None,
         "dataPackageId": session.package_id if session else None,
@@ -264,7 +246,7 @@ def receipt(link, view, session=None):
         if not link.defect.diagnostics.exists()
         else link.defect.diagnostics.latest("created_at").status,
         "nativeUrl": f"/{view.workspace_slug}/p/{link.project.identifier}/defects/?defect={link.defect_id}",
-        "capabilities": {"canViewIssue": True, "canRunRegression": False},
+        "capabilities": {"canViewIssue": True, "canRunRegression": False, "canLoginPlatform": False},
     }
 
 
@@ -298,21 +280,8 @@ class DaqIncidents(DaqView):
         data.pop("hubProjectId", None)
         data["eventId"] = str(data["eventId"])
         project = self.project()
-        source_context = None
-        if getattr(self, "report_only", False):
-            from .daq_reporting import verify_report_source
-
-            source_context = verify_report_source(source, actor, data["platformProjectId"], data.get("platformTaskId"))
-            PlatformProject.objects.get_or_create(
-                project=project,
-                source_instance=source,
-                external_project_id=data["platformProjectId"],
-                defaults={"created_by": request.user, "name": str(source_context.get("projectName") or "")[:255]},
-            )
-        else:
-            verify_authority(
-                project, request.user, source, actor, data["platformProjectId"], data.get("platformTaskId")
-            )
+        if not getattr(self, "report_only", False):
+            raise PermissionDenied("旧来源上报入口已停用。")
         key = f"{actor}:{data['eventId']}"
         lock = int.from_bytes(hashlib.sha256((source + ":" + key).encode()).digest()[:8], "big", signed=True)
         with connection.cursor() as cursor:
@@ -329,8 +298,15 @@ class DaqIncidents(DaqView):
             if record is None or record["requestHash"] != fingerprint(data):
                 raise Conflict("同一事件编号不能对应不同内容。")
             return Response(receipt(link, self))
+        from .defect_content import defect_content
+
+        title, description = defect_content(data["title"], data["description"])
         defect = Defect.objects.create(
-            project=project, created_by=request.user, title=data["title"], description=data["description"]
+            project=project,
+            created_by=request.user,
+            title=title,
+            description=description,
+            verification_scope="functional",
         )
         link = SourceLink.objects.create(
             project=project,
@@ -351,20 +327,11 @@ class DaqIncidents(DaqView):
             "sourceInstance": source,
             "actorId": str(request.user.id),
             "externalActor": actor,
+            "reporter": request.auth.get("reporter", {}),
             "recordId": key,
             "requestHash": fingerprint(data),
             "payload": data,
             **({"authorityMode": "report_only"} if getattr(self, "report_only", False) else {}),
-            **(
-                {
-                    "sourceContext": {
-                        "projectName": str(source_context.get("projectName") or "")[:255],
-                        "taskName": str(source_context.get("taskName") or "")[:255],
-                    }
-                }
-                if source_context is not None
-                else {}
-            ),
         }
         DefectEvent.objects.create(
             project=project,

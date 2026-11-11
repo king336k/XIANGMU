@@ -21,6 +21,8 @@ def configuration(instance):
     from .connection_settings import read_connection
 
     stored = read_connection(instance)
+    if stored and stored.get("kind") == "data_platform":
+        raise PlatformUnavailable("数据管理平台连接已停用。")
     if stored is not None:
         return stored
     configs = getattr(settings, "QUALITY_PLATFORM_SOURCES", None)
@@ -32,6 +34,8 @@ def configuration(instance):
     value = configs.get(instance)
     if not isinstance(value, dict):
         raise PlatformUnavailable()
+    if value.get("kind", "data_platform") == "data_platform":
+        raise PlatformUnavailable("数据管理平台连接已停用。")
     return value
 
 

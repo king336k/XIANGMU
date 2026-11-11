@@ -35,7 +35,7 @@ function ProjectDetailSettingsLayout({ params }: Route.ComponentProps) {
         hamburgerContent={(props) => <ProjectSettingsSidebarRoot {...props} projectId={projectId} />}
         activePath={getProjectActivePath(pathname) || ""}
         displayLabel={
-          pathname.endsWith("/sources/") ? "来源关联" : pathname.endsWith("/members/") ? "成员与权限" : undefined
+          pathname.endsWith("/sources/") ? "协作服务" : pathname.endsWith("/members/") ? "成员与权限" : undefined
         }
       />
       <div className="inset-y-0 flex h-full w-full flex-row">

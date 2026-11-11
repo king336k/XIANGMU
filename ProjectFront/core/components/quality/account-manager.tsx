@@ -17,10 +17,10 @@ export function AccountManager({
   onSaved?: () => Promise<unknown>;
 }) {
   const [search, setSearch] = useState("");
-  const [source, setSource] = useState("");
+  const source = "";
   const pagination = useCollectionPagination(`accounts:${project?.workspace}:${project?.id}:${search}:${source}`);
   const { data, error, mutate } = useSWR(
-    `/api/quality-auth/accounts/?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(pagination.query)), search, ...(source ? { source_instance: source } : {}), ...(project ? { workspace_slug: project.workspace, project_id: project.id } : {}) })}`,
+    `/api/quality-auth/accounts/?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(pagination.query)), search, ...(project ? { workspace_slug: project.workspace, project_id: project.id } : {}) })}`,
     (url: string) =>
       qualityApi.read<{
         can_manage: boolean;
@@ -75,18 +75,7 @@ export function AccountManager({
     in_project?: boolean;
     source_instance?: string;
     external_user_id?: number;
-  }[] = [
-    ...data.results,
-    ...(data.external_results || []).map((row) => ({
-      source_instance: row.source_instance,
-      external_user_id: row.external_user_id,
-      username: row.username,
-      source: row.source,
-      in_project: row.in_project,
-      id: `external:${row.source_instance}:${row.external_user_id}`,
-      display_name: row.username,
-    })),
-  ];
+  }[] = [...data.results];
   return (
     <section className="space-y-3 border-t border-subtle pt-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -97,24 +86,6 @@ export function AccountManager({
           </Button>
         )}
       </div>
-      {!!data.sources?.length && (
-        <label className="flex flex-col gap-1 text-12 text-secondary">
-          账号目录
-          <select
-            aria-label="账号目录"
-            value={source}
-            onChange={(event) => setSource(event.target.value)}
-            className={fieldClass}
-          >
-            <option value="">本平台已有账号</option>
-            {data.sources.map((row) => (
-              <option key={row.id} value={row.id}>
-                数据平台：{row.name}（含未登录人员）
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
       <input
         aria-label="搜索账号"
         placeholder="搜索用户名"
@@ -150,36 +121,6 @@ export function AccountManager({
         ))}
       </div>
       <Paging {...pagination.paging} count={data.count} />
-      {data.external_results && data.external_results.length > 0 && (
-        <section className="space-y-2">
-          <h4 className="text-13 font-medium">外部目录匹配账号</h4>
-          <p role={data.external_partial ? "status" : undefined} className="text-12 text-secondary">
-            外部目录最多显示{data.external_limit ?? 100}条匹配结果，请使用上方搜索缩小范围；不计入平台账号分页总数。
-          </p>
-
-          {people
-            .filter((row) => row.external_user_id !== undefined)
-            .map((row) => (
-              <div key={row.id} className="flex items-center justify-between gap-2 p-3 text-12">
-                <span>
-                  {row.username}
-                  <span className="ml-3 text-secondary">{row.source}</span>
-                </span>
-                {project && (
-                  <Button
-                    size="sm"
-                    variant="neutral-primary"
-                    disabled={row.in_project}
-                    onClick={() => setAdding(row.id)}
-                  >
-                    {row.in_project ? "已加入" : "加入本项目"}
-                  </Button>
-                )}
-              </div>
-            ))}
-        </section>
-      )}
-
       {!projectOnly && administratorTarget && data.can_manage_administrators && (
         <Modal
           title={administratorTarget.administrator ? "设置管理员" : "取消管理员"}
@@ -270,7 +211,7 @@ export function AccountManager({
               ))}
             </select>
           </Field>
-          <p className="text-12 text-secondary">加入后可在业务岗位中增加兼职。数据平台账号仍须具备来源项目授权。</p>
+          <p className="text-12 text-secondary">加入后可在业务岗位中增加兼职，项目权限由本平台管理。</p>
         </Modal>
       )}
     </section>

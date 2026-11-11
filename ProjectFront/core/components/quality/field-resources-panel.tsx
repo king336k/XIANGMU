@@ -155,7 +155,10 @@ export function FieldResourcesPanel({ base, context }: { base: string; context: 
               {context.members
                 .filter(
                   (row) =>
-                    !context.business_roles_enabled || (row.business_roles || [row.business_role]).some((role) => typeof role === "string" && ["PLATFORM_ADMIN", "REPORTER"].includes(role))
+                    !context.business_roles_enabled ||
+                    (row.business_roles || [row.business_role]).some(
+                      (role) => typeof role === "string" && ["PLATFORM_ADMIN", "REPORTER"].includes(role)
+                    )
                 )
                 .map((row) => (
                   <option key={row.id} value={row.id}>
@@ -169,7 +172,7 @@ export function FieldResourcesPanel({ base, context }: { base: string; context: 
               name="source_instance"
               maxLength={120}
               className={fieldClass}
-              placeholder="与数据平台/DAQ集成中的实例名一致"
+              placeholder="与当前DAQ反馈服务的实例名一致"
             />
           </Field>
         </Modal>

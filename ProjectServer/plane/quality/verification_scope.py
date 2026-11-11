@@ -1,22 +1,21 @@
 """Source identity and verification requirements are separate decisions."""
 
 from rest_framework.exceptions import PermissionDenied, ValidationError
-from .models import DaqReport, DataRegression
+from .models import DataRegression
 from .data_regression import manager
 from .views import Conflict
 
 
 def requires_data_regression(defect):
-    if defect.verification_scope != "auto":
-        return defect.verification_scope == "data"
-    from .daq_incidents import trusted_incident
-
-    return DaqReport.objects.filter(defect=defect).exists() or trusted_incident(defect) is not None
+    # Verification stays inside this platform; external task/session lookup is retired.
+    return False
 
 
 def validate_scope_change(view, defect, data):
     reason = data.pop("verification_scope_reason", "")
     scope = data.get("verification_scope", defect.verification_scope)
+    if scope == "data":
+        raise ValidationError({"verification_scope": "请在本平台记录功能或测试验证结果。"})
     if scope == defect.verification_scope:
         return ""
     if not manager(view.project_id, view.request.user):

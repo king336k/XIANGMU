@@ -8,7 +8,6 @@ import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
 import { RecordProgress } from "./record-progress";
 import { PlanWorkflowPanel } from "./workflow-panel";
-import { DataEvidencePanel } from "./data-regression-panel";
 import { PlanActions } from "./plan-actions";
 import { PlanPreflight } from "./test-resources-panel";
 import { ExecutionForm } from "./execution-form";
@@ -131,7 +130,6 @@ export function PlanDetail({
           </pre>
         </details>
       )}
-      <DataEvidencePanel base={base} plan={plan} context={context} onSaved={saved} />
       <PlanPreflight base={base} plan={plan} context={context} onSaved={saved} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-14 font-medium">{plan.status === "completed" ? "本轮测试结果" : "本轮测试用例"}</h3>

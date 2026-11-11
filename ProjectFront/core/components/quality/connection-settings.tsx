@@ -4,7 +4,6 @@ import useSWR from "swr";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
 import { Field, fieldClass, Modal } from "./shared";
-import { LegacyDirectoryPanel } from "./legacy-directory-panel";
 import { connectionPayload } from "./connection-form-data";
 import type { Connection } from "./connection-form-data";
 
@@ -14,12 +13,9 @@ export function ConnectionSettings({ base = "", endpoint }: { base?: string; end
     qualityApi.read<{ can_configure: boolean; ota_directories_enabled?: boolean; results: Connection[] }>(path)
   );
   const [editing, setEditing] = useState<Connection | null | undefined>();
-  const [preview, setPreview] = useState<string>();
-  const [kind, setKind] = useState("data_platform");
+  const [kind, setKind] = useState("feishu");
   const [newSource, setNewSource] = useState("");
   const names: Record<string, string> = {
-    data_platform: "数据平台",
-    legacy_hub: "原45100账号服务",
     ota: data?.ota_directories_enabled ? "外部安装包目录" : "OTA/执行资源",
     feishu: "飞书服务",
   };
@@ -32,7 +28,7 @@ export function ConnectionSettings({ base = "", endpoint }: { base?: string; end
             variant="neutral-primary"
             onClick={() => {
               setEditing(null);
-              setKind("data_platform");
+              setKind("feishu");
               setNewSource(`source-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`);
             }}
           >
@@ -85,11 +81,6 @@ export function ConnectionSettings({ base = "", endpoint }: { base?: string; end
                   打开外部部署平台 ↗
                 </a>
               )}
-            {row.kind === "legacy_hub" && base && (
-              <Button variant="neutral-primary" onClick={() => setPreview(row.source_instance)}>
-                账号迁移预检
-              </Button>
-            )}
             <Button
               variant="neutral-primary"
               onClick={() => {
@@ -136,7 +127,7 @@ export function ConnectionSettings({ base = "", endpoint }: { base?: string; end
               defaultValue={editing?.base_url || (kind === "feishu" ? "https://open.feishu.cn" : "")}
               maxLength={500}
               className={fieldClass}
-              placeholder="例如 http://10.10.10.4:6324"
+              placeholder="请输入服务地址"
             />
           </Field>
           <Field label={editing?.token_present ? "访问凭据（留空保留）" : "访问凭据"}>
@@ -185,94 +176,6 @@ export function ConnectionSettings({ base = "", endpoint }: { base?: string; end
                   placeholder="留空使用服务器地址"
                 />
               </Field>
-              {(kind === "data_platform" || kind === "legacy_hub") && (
-                <>
-                  <input type="hidden" name="login_options_present" value="1" />
-                  <label className="flex gap-2 text-13">
-                    <input type="checkbox" name="login_enabled" defaultChecked={editing?.login_enabled || false} />
-                    允许来源账号登录
-                  </label>
-                  <label className="flex gap-2 text-13">
-                    <input
-                      type="checkbox"
-                      name="login_auto_provision"
-                      defaultChecked={editing?.login_auto_provision || false}
-                    />
-                    首次登录自动关联账号
-                  </label>
-                </>
-              )}
-              {kind === "data_platform" && (
-                <details className="space-y-3">
-                  <summary className="cursor-pointer text-13">DAQ 签名连接</summary>
-                  <Field label="密钥编号">
-                    <input
-                      name="bridge_key_id"
-                      defaultValue={editing?.bridge_key_id || ""}
-                      className={fieldClass}
-                      placeholder="自动生成"
-                    />
-                  </Field>
-                  <Field label="接收方标识">
-                    <input
-                      name="bridge_audience"
-                      defaultValue={editing?.bridge_audience || ""}
-                      className={fieldClass}
-                      placeholder="默认 plane-quality"
-                    />
-                  </Field>
-                  <Field label="签名密钥（留空保留）">
-                    <input
-                      type="password"
-                      name="bridge_secret"
-                      autoComplete="new-password"
-                      maxLength={4000}
-                      className={fieldClass}
-                      placeholder={editing?.bridge_secret_present ? "已配置" : "使用两端一致的签名密钥"}
-                    />
-                  </Field>
-                </details>
-              )}
-              {kind === "legacy_hub" && (
-                <details className="space-y-3">
-                  <summary className="cursor-pointer text-13">原45100目录认证</summary>
-                  <Field label="认证方式">
-                    <select
-                      name="directory_auth"
-                      defaultValue={editing?.directory_auth || "bearer"}
-                      className={fieldClass}
-                    >
-                      <option value="bearer">访问凭据</option>
-                      <option value="trusted_v2">已有 V2 签名</option>
-                    </select>
-                  </Field>
-                  <Field label="签名密钥编号">
-                    <input
-                      name="directory_key_id"
-                      defaultValue={editing?.directory_key_id || ""}
-                      maxLength={80}
-                      className={fieldClass}
-                    />
-                  </Field>
-                  <Field label="来源服务用户编号">
-                    <input
-                      name="directory_user_id"
-                      type="number"
-                      min={1}
-                      defaultValue={editing?.directory_user_id || ""}
-                      className={fieldClass}
-                    />
-                  </Field>
-                  <Field label="来源服务用户名">
-                    <input
-                      name="directory_username"
-                      defaultValue={editing?.directory_username || ""}
-                      maxLength={64}
-                      className={fieldClass}
-                    />
-                  </Field>
-                </details>
-              )}
               {editing?.token_present && (
                 <label className="flex gap-2 text-13">
                   <input type="checkbox" name="clear_token" />
@@ -283,7 +186,6 @@ export function ConnectionSettings({ base = "", endpoint }: { base?: string; end
           </details>
         </Modal>
       )}
-      {preview && <LegacyDirectoryPanel base={base} instance={preview} onClose={() => setPreview(undefined)} />}
     </section>
   );
 }

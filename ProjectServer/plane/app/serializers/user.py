@@ -14,32 +14,12 @@ from .base import BaseSerializer
 
 class AuthorityUserDisplay:
     def to_representation(self, instance):
-        data = super().to_representation(instance)
-        account = getattr(instance, "platform_account", None)
-        if account:
-            if "username" in data:
-                data["username"] = account.source_username
-            if "email" in data:
-                data["email"] = account.source_email
-            if "display_name" in data:
-                data["display_name"] = account.source_username
-            if "first_name" in data:
-                data["first_name"] = account.source_username
-            if "last_name" in data:
-                data["last_name"] = ""
-            data["account_source"] = "data_platform"
-        return data
+        return super().to_representation(instance)
 
 
 class UserSerializer(AuthorityUserDisplay, BaseSerializer):
     def validate_user_timezone(self, value):
         return "Asia/Shanghai"
-
-    def validate(self, attrs):
-        if self.instance and getattr(self.instance, "platform_account", None):
-            if {"username", "first_name", "last_name", "display_name", "email"}.intersection(self.initial_data):
-                raise serializers.ValidationError("账号资料由数据管理平台维护，请前往来源平台修改。")
-        return super().validate(attrs)
 
     def validate_first_name(self, value):
         if contains_url(value):

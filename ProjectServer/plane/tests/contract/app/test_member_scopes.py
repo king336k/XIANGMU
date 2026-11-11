@@ -9,7 +9,7 @@ import pytest
 from rest_framework.test import APIClient
 from plane.db.models import User, Workspace, WorkspaceMember, Project, ProjectMember
 from plane.license.models import Instance, InstanceAdmin
-from plane.quality.models import BusinessRole, PlatformAccount, PlatformProject, ProjectRolePolicy
+from plane.quality.models import BusinessRole, PlatformAccount, ProjectRolePolicy
 from plane.quality.permissions import capable
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
@@ -141,27 +141,21 @@ def test_project_requires_explicit_workspace_and_no_admin_duty(scopes):
 
 def test_source_account_revocation_cannot_be_overridden(scopes, mocker):
     client, target, spaces, projects, actor = scopes
+    from plane.quality import platform
+
+    upstream = mocker.patch.object(platform, "fetch", side_effect=AssertionError("no external authority"))
     PlatformAccount.objects.create(
         user=target,
-        source_instance="scope-dp",
+        source_instance="retired",
         external_user_id=78,
         source_username="collector",
         source_role="Collector",
     )
-    PlatformProject.objects.create(project=projects[0], source_instance="scope-dp", external_project_id=9)
-    mocker.patch("plane.quality.member_scopes.authority_config", return_value={"service_token": "synthetic-only"})
-    mocker.patch(
-        "plane.quality.member_scopes.authority_request",
-        side_effect=lambda config, path, **kw: (
-            {"id": 78, "active": True, "role": "Collector"} if "issue-users" in path else {"projects": []}
-        ),
-    )
     response = save(client, target, [change(rows(client, target)[0], 15)])
-    assert response.status_code == 200, response.content
-    row = next(row for row in rows(client, target, "project", spaces[0]) if row["id"] == str(projects[0].id))
-    response = save(client, target, [change(row, 15, ["REGRESSION_TESTER"])])
     assert response.status_code == 403, response.content
+    assert not WorkspaceMember.objects.filter(member=target).exists()
     assert not ProjectMember.objects.filter(member=target).exists()
+    upstream.assert_not_called()
 
 
 def test_remove_workspace_does_not_revive_projects_when_readded(scopes):
@@ -229,26 +223,21 @@ def test_other_invalid_batch_changes_roll_back_prior_valid_grant(scopes):
 
 def test_source_account_and_project_must_both_be_live_when_granting(scopes, mocker):
     client, target, spaces, projects, actor = scopes
-    account = PlatformAccount.objects.create(
+    from plane.quality import platform
+
+    upstream = mocker.patch.object(platform, "fetch", side_effect=AssertionError("no external authority"))
+    PlatformAccount.objects.create(
         user=target,
-        source_instance="scope-dp",
+        source_instance="retired",
         external_user_id=78,
         source_username="collector",
         source_role="Collector",
     )
-    mocker.patch("plane.quality.member_scopes.authority_config", return_value={"service_token": "synthetic-only"})
-    get = mocker.patch(
-        "plane.quality.member_scopes.authority_request", return_value={"id": 78, "active": False, "role": "Collector"}
-    )
-    row = rows(client, target)[0]
-    assert save(client, target, [change(row, 15)]).status_code == 403
-    get.return_value = {"id": 79, "active": True, "role": "Collector"}
-    assert save(client, target, [change(row, 15)]).status_code == 403
-    account.active = False
-    account.save()
-    get.return_value = {"id": 78, "active": True, "role": "Collector"}
-    assert save(client, target, [change(row, 15)]).status_code == 403
+    response = save(client, target, [change(rows(client, target)[0], 15)])
+    assert response.status_code == 403, response.content
     assert not WorkspaceMember.objects.filter(member=target).exists()
+    assert not ProjectMember.objects.filter(member=target).exists()
+    upstream.assert_not_called()
 
 
 def test_revoked_project_membership_and_duties_are_restored_without_duplicates(scopes):
@@ -280,30 +269,19 @@ def test_workspace_revision_detects_changed_child_duties(scopes):
 
 
 def test_locally_disabled_source_identity_is_not_silently_reactivated(scopes, mocker):
-    from plane.quality.models import PlatformIdentity
-
     client, target, spaces, projects, actor = scopes
-    save(client, target, [change(row, 15) for row in rows(client, target)])
+    from plane.quality import platform
+
+    upstream = mocker.patch.object(platform, "fetch", side_effect=AssertionError("no external authority"))
     PlatformAccount.objects.create(
         user=target,
-        source_instance="scope-dp",
+        source_instance="retired",
         external_user_id=78,
         source_username="collector",
         source_role="Collector",
     )
-    PlatformProject.objects.create(project=projects[0], source_instance="scope-dp", external_project_id=9)
-    PlatformIdentity.objects.create(
-        project=projects[0], source_instance="scope-dp", external_user_id=78, user=target, active=False
-    )
-    mocker.patch("plane.quality.member_scopes.authority_config", return_value={"service_token": "synthetic-only"})
-    mocker.patch(
-        "plane.quality.member_scopes.authority_request",
-        side_effect=lambda config, path, **kw: (
-            {"id": 78, "active": True, "role": "Collector"} if "issue-users" in path else {"projects": [{"id": 9}]}
-        ),
-    )
-    row = next(row for row in rows(client, target, "project", spaces[0]) if row["id"] == str(projects[0].id))
-    response = save(client, target, [change(row, 15, ["REGRESSION_TESTER"])])
+    response = save(client, target, [change(rows(client, target)[0], 15)])
     assert response.status_code == 403, response.content
-    assert not PlatformIdentity.objects.get(project=projects[0], user=target).active
-    assert not ProjectMember.objects.filter(project=projects[0], member=target).exists()
+    assert not WorkspaceMember.objects.filter(member=target).exists()
+    assert not ProjectMember.objects.filter(member=target).exists()
+    upstream.assert_not_called()

@@ -22,7 +22,7 @@ function render(account) {
     display_name: "不应显示的昵称",
     email: "internal@accounts.invalid",
   };
-  const widget = ({ children, ...props }) => React.createElement("div", null, children);
+  const widget = ({ children }) => React.createElement("div", null, children);
   new Function("require", "exports", code)((name) => {
     if (name === "react" || name === "react/jsx-runtime") return require(name);
     if (name === "@/components/quality/duty-summary") {
@@ -50,10 +50,10 @@ function render(account) {
   }, exports);
   return renderToStaticMarkup(React.createElement(exports.GeneralProfileSettingsForm, { user, profile: {} }));
 }
-test("个人资料只显示权威用户名，不显示名、姓、显示名称或内部邮箱", () => {
+test("个人资料显示本地账号，不提供外部账号维护入口", () => {
   const html = render({
     username: "admin",
-    source_label: "数据管理平台账号",
+    source_label: "项目管理平台账号",
     email: "admin@example.test",
     platform_role: "Manager",
     can_edit_identity: false,
@@ -68,16 +68,7 @@ test("个人资料只显示权威用户名，不显示名、姓、显示名称�
       },
     ],
   });
-  for (const value of [
-    "admin",
-    "数据管理平台账号",
-    "admin@example.test",
-    "数据平台角色",
-    "数据经理",
-    "项目甲",
-    "管理员",
-    "在数据管理平台管理账号",
-  ])
+  for (const value of ["admin", "项目管理平台账号", "admin@example.test", "项目甲", "管理员"])
     assert.ok(html.includes(value), value);
   for (const value of [
     "不应显示",
@@ -87,6 +78,8 @@ test("个人资料只显示权威用户名，不显示名、姓、显示名称�
     'name="display_name"',
     "显示名称",
     "停用账号",
+    "数据平台角色",
+    "在数据管理平台管理账号",
   ])
     assert.ok(!html.includes(value), value);
 });

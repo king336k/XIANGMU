@@ -14,7 +14,6 @@ from rest_framework.response import Response
 
 from plane.app.views.base import BaseAPIView
 from plane.db.models import User, Workspace, WorkspaceMember, Project, ProjectMember
-from .data_accounts import authority_config, authority_request
 from .models import BusinessRole, BusinessRoleEvent, PlatformAccount, PlatformIdentity, PlatformProject
 from .permissions import is_administrator
 from .roles import apply_project_roles, validate_project_role_retention
@@ -114,42 +113,8 @@ def scope_row(kind, obj, target):
 
 
 def verify_source_grant(target, project=None):
-    account = PlatformAccount.objects.filter(user=target).first()
-    if not account:
-        return
-    if not account.active:
-        raise PermissionDenied("此来源账号关联已停用。")
-    config = authority_config(account.source_instance)
-    person = authority_request(
-        config, f"/internal/issue-users/{account.external_user_id}", token=config.get("service_token")
-    )
-    if (
-        not isinstance(person, dict)
-        or person.get("id") != account.external_user_id
-        or person.get("active") is not True
-        or person.get("role") == "Pending"
-    ):
-        raise PermissionDenied("来源账号不存在、已停用或尚未分配。")
-    if project is None:
-        return
-    identity = PlatformIdentity.objects.filter(
-        project=project, source_instance=account.source_instance, external_user_id=account.external_user_id
-    ).first()
-    if identity and (not identity.active or identity.user_id != target.id):
-        raise PermissionDenied("此项目的来源身份关联已停用或不匹配，请先处理来源关联。")
-    mappings = PlatformProject.objects.filter(project=project, source_instance=account.source_instance)
-    if not mappings.exists():
-        return
-    permissions = authority_request(
-        config, f"/internal/issue-permissions/users/{account.external_user_id}", token=config.get("service_token")
-    )
-    allowed = (
-        {row["id"] for row in permissions.get("projects", []) if isinstance(row, dict) and type(row.get("id")) is int}
-        if isinstance(permissions, dict)
-        else set()
-    )
-    if not mappings.filter(active=True, external_project_id__in=allowed).exists():
-        raise PermissionDenied("来源平台已撤销该项目授权，不能在本平台恢复。")
+    if PlatformAccount.objects.filter(user=target).exists():
+        raise PermissionDenied("请在项目管理平台建立独立账号后分配权限。")
 
 
 def audit_access(project, target, actor, before, after):

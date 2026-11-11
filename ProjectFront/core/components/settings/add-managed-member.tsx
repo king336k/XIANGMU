@@ -30,7 +30,6 @@ export function AddManagedMember({
   onClose: () => void;
 }) {
   const [mode, setMode] = useState("existing"),
-    [source, setSource] = useState(""),
     [search, setSearch] = useState(""),
     [page, setPage] = useState(1),
     [selected, setSelected] = useState<Person>(),
@@ -40,7 +39,6 @@ export function AddManagedMember({
     page: String(page),
     per_page: "20",
     search,
-    ...(source ? { source_instance: source } : {}),
     ...(projectId ? { workspace_slug: workspace, project_id: projectId } : {}),
   });
   const { data, error } = useSWR(`/api/quality-auth/accounts/?${query}`, (url: string) =>
@@ -50,12 +48,7 @@ export function AddManagedMember({
     setSelected(person);
     progress.current = {};
   };
-  const people = [
-    ...(data?.results || []),
-    ...(data?.external_results || []).map((p) =>
-      Object.assign({}, p, { id: `external:${p.source_instance}:${p.external_user_id}` })
-    ),
-  ];
+  const people = data?.results || [];
   return (
     <Modal
       title="添加成员"
@@ -82,10 +75,7 @@ export function AddManagedMember({
         await joinMemberWithRoles({
           workspace,
           projectId,
-          person:
-            person.external_user_id !== undefined
-              ? { source_instance: person.source_instance, external_user_id: person.external_user_id }
-              : { user_id: person.id },
+          person: { user_id: person.id },
           roles: form.getAll("roles").map(String),
           progress: progress.current,
           write: (url, payload) => qualityApi.write(url, payload),
@@ -95,7 +85,7 @@ export function AddManagedMember({
     >
       <nav aria-label="添加方式" className="mb-4 flex gap-2">
         <Button type="button" variant="neutral-primary" onClick={() => setMode("existing")}>
-          已有账号与外部目录
+          选择已有账号
         </Button>
         {canAdmin && (
           <Button type="button" variant="neutral-primary" onClick={() => setMode("local")}>
@@ -105,28 +95,6 @@ export function AddManagedMember({
       </nav>
       {mode === "existing" ? (
         <>
-          {!!data?.sources?.length && (
-            <Field label="账号来源">
-              <select
-                aria-label="账号来源"
-                className={fieldClass}
-                value={source}
-                onChange={(event) => {
-                  setSource(event.target.value);
-                  setPage(1);
-                  setSelected(undefined);
-                  progress.current = {};
-                }}
-              >
-                <option value="">本平台已有账号</option>
-                {data.sources.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    数据平台：{s.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
           <Field label="搜索人员">
             <input
               className={fieldClass}
@@ -154,7 +122,6 @@ export function AddManagedMember({
               </label>
             ))}
           </div>
-          {data?.external_partial && <p className="text-12 text-secondary">仅显示前100条，请搜索查找。</p>}
           <Paging page={page} perPage={20} count={data?.count || 0} onChange={setPage} />
         </>
       ) : created ? (
@@ -188,7 +155,7 @@ export function AddManagedMember({
           ))}
         </fieldset>
       )}
-      <p className="mt-3 text-12 text-secondary">来源账号密码由原平台维护。</p>
+      <p className="mt-3 text-12 text-secondary">账号资料和密码由项目管理平台独立管理。</p>
     </Modal>
   );
 }

@@ -25,9 +25,10 @@ export const WorkspaceSettingsSidebarItemCategories = observer(function Workspac
   const administrator = accountAccess?.can_manage_administrators === true;
   const links = [
     { key: "members", label: "成员与权限", icon: Users },
-    { key: "sources", label: "来源关联", icon: Link2 },
+    { key: "sources", label: "协作服务", icon: Link2 },
     ...(administrator
       ? [
+          { key: "daq-projects", label: "DAQ 项目授权", icon: Link2 },
           { key: "connections", label: "平台连接", icon: Plug },
           { key: "models", label: "模型配置", icon: Settings2 },
         ]

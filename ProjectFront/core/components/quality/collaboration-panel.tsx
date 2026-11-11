@@ -20,7 +20,8 @@ type Source = {
   package_id: string;
   device: string;
   source_context?: {
-    platformProjectId: number;
+    platformProjectId?: number;
+    reporter?: { id: number; username: string };
     platformProjectName: string;
     platformTaskId: number | null;
     platformTaskName: string;
@@ -35,15 +36,7 @@ export function SourceCard({ source }: { source: Source }) {
       {context ? (
         <>
           <p>DAQ · {source.source_instance}</p>
-          <p className="text-secondary">
-            项目：{context.platformProjectName || "数据平台项目"}（{context.platformProjectId}）
-            {context.platformTaskId ? (
-              <>
-                {" "}
-                · 任务：{context.platformTaskName || "数采任务"}（{context.platformTaskId}）
-              </>
-            ) : null}
-          </p>
+          {context.reporter && <p className="text-secondary">DAQ 上报账号：{context.reporter.username}</p>}
           {context.sourceReference && (
             <p className="text-secondary">数据包 / Session 上报引用：{context.sourceReference}</p>
           )}

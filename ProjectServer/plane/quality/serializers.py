@@ -48,9 +48,7 @@ class ExecutionInput(serializers.Serializer):
     next_action = serializers.CharField(max_length=4000, allow_blank=True, default="")
 
     def validate(self, attrs):
-        if attrs["result"] == "inconclusive" or any(
-            step["result"] == "inconclusive" for step in attrs["step_results"]
-        ):
+        if attrs["result"] == "inconclusive" or any(step["result"] == "inconclusive" for step in attrs["step_results"]):
             errors = {}
             if not attrs["reason_category"]:
                 errors["reason_category"] = "请选择无法判定的原因：补采、环境或其他。"
@@ -274,6 +272,17 @@ class EventSerializer(serializers.ModelSerializer):
 class DefectSerializer(AuthoredRecordSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
+        from .daq_incidents import trusted_incident, signed_record
+
+        link = trusted_incident(instance)
+        if link:
+            reporter = signed_record(link).get("reporter", {})
+            if reporter:
+                data["reporter"] = reporter
+                data["created_by_name"] = reporter["username"]
+        from .defect_content import defect_content
+
+        data["title"], data["description"] = defect_content(data["title"], data["description"])
         data["source_kind"] = (
             "daq"
             if hasattr(instance, "daq_report")
@@ -310,8 +319,13 @@ class DefectSerializer(AuthoredRecordSerializer):
             obj.case_id is None
             and obj.source_execution_id is None
             and not self.get_requires_data_regression(obj)
-            and (not obj.sources.exists() or obj.verification_scope == "functional")
+            and (not obj.sources.exists() or obj.verification_scope == "functional" or self.to_daq_incident(obj))
         )
+
+    def to_daq_incident(self, obj):
+        from .daq_incidents import trusted_incident
+
+        return trusted_incident(obj) is not None
 
     case_id = serializers.UUIDField(read_only=True, allow_null=True)
     case_title = serializers.CharField(source="case.title", default=None)

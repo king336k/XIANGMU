@@ -60,12 +60,6 @@ class DaqContext(DaqView):
         )
 
 
-class DaqProjectResolve(DaqContext):
-    from .identity import ProjectResolveBridgeAuthentication
-
-    authentication_classes = [ProjectResolveBridgeAuthentication]
-
-
 class DaqIssueDetail(DaqView):
     def get(self, request, pk, **kwargs):
         from django.shortcuts import get_object_or_404

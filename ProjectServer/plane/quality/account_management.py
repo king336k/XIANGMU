@@ -8,18 +8,13 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from plane.app.views.base import BaseAPIView
 from plane.db.models import User, Profile, WorkspaceMember, ProjectMember, Project
-from plane.license.models import InstanceConfiguration
 from .models import (
     PlatformAccount,
     LocalManagedAccount,
-    PlatformIdentity,
-    PlatformProject,
     BusinessRole,
     BusinessRoleEvent,
 )
 from .permissions import ROLE_NAMES, writable_member, has_role, is_administrator
-from . import platform
-from .data_accounts import authority_config, authority_request
 
 
 def account_admin(request):
@@ -36,23 +31,10 @@ def account_admin(request):
 
 
 def managed_project(request, project):
-    kind, account = account_admin(request)
-    if kind == "local":
-        if writable_member(project.id, request.user.id, project.workspace.slug):
-            return
-        raise PermissionDenied("管理员须先获得当前项目的有效成员访问权限。")
-    if account and PlatformProject.objects.filter(project=project, source_instance=kind, active=True).exists():
-        return
-    if (
-        account
-        and project.created_by_id == request.user.id
-        and writable_member(project.id, request.user.id, project.workspace.slug)
-        and ProjectMember.objects.filter(project=project, member=request.user, is_active=True, role=20).exists()
-    ):
-        return
-    if writable_member(project.id, request.user.id, project.workspace.slug) and has_role(
-        project.id, request.user.id, "PROJECT_MANAGER"
-    ):
+    kind, _ = account_admin(request)
+    if not writable_member(project.id, request.user.id, project.workspace.slug):
+        raise PermissionDenied("您没有此项目的成员管理权限。")
+    if kind == "local" or has_role(project.id, request.user.id, "PROJECT_MANAGER"):
         return
     raise PermissionDenied("您没有此项目的成员管理权限。")
 
@@ -65,18 +47,6 @@ class LocalInput(serializers.Serializer):
 class AdministratorInput(serializers.Serializer):
     user_id = serializers.UUIDField()
     administrator = serializers.BooleanField()
-
-
-def source_directories():
-    from .connection_settings import read_connection
-
-    results = []
-    for row in InstanceConfiguration.objects.filter(key__startswith="QUALITY_SOURCE:"):
-        name = row.key.split(":", 1)[1]
-        config = read_connection(name) or {}
-        if config.get("kind") == "data_platform" and config.get("login_enabled") and config.get("login_auto_provision"):
-            results.append((name, config))
-    return results
 
 
 class AccountDirectory(BaseAPIView):
@@ -101,7 +71,9 @@ class AccountDirectory(BaseAPIView):
             request.query_params.get("per_page", 100)
         )
         offset = (page - 1) * per_page
-        queryset = User.objects.filter(is_active=True, is_bot=False)
+        queryset = User.objects.filter(is_active=True, is_bot=False).exclude(
+            id__in=PlatformAccount.objects.values("user_id")
+        )
         directory_project = None
         if request.query_params.get("project_id") or request.query_params.get("workspace_slug"):
             from django.shortcuts import get_object_or_404
@@ -135,10 +107,10 @@ class AccountDirectory(BaseAPIView):
             results.append(
                 {
                     "id": str(user.id),
-                    "username": external.source_username if external else user.username,
+                    "username": user.username,
                     "display_name": user.display_name,
                     "is_administrator": is_administrator(user),
-                    "source": "数据管理平台" if external else "项目管理平台",
+                    "source": "项目管理平台",
                     "in_project": bool(
                         directory_project
                         and ProjectMember.objects.filter(
@@ -147,47 +119,11 @@ class AccountDirectory(BaseAPIView):
                     ),
                 }
             )
-        directories = source_directories() if directory_project else []
-        if account:
-            directories = [(name, config) for name, config in directories if name == account.source_instance]
+        directories = []
         requested_source = request.query_params.get("source_instance")
-        external_results = []
         if requested_source:
-            if not directory_project or requested_source not in {name for name, _ in directories}:
-                raise PermissionDenied("没有此账号目录的访问权限。")
-            people = platform.fetch(requested_source, "/internal/issue-users")
-            if not isinstance(people, list):
-                raise platform.PlatformUnavailable("数据平台账号目录格式无效。")
-            linked = set(
-                PlatformAccount.objects.filter(source_instance=requested_source).values_list(
-                    "external_user_id", flat=True
-                )
-            )
-            for person in people:
-                if (
-                    not isinstance(person, dict)
-                    or type(person.get("id")) is not int
-                    or person["id"] <= 0
-                    or person.get("active") is not True
-                    or not isinstance(person.get("username"), str)
-                    or not person["username"].strip()
-                    or len(person["username"]) > 128
-                    or person.get("role") == "Pending"
-                    or person["id"] in linked
-                    or (term and term.casefold() not in person["username"].casefold())
-                ):
-                    continue
-                external_results.append(
-                    {
-                        "source_instance": requested_source,
-                        "external_user_id": person["id"],
-                        "username": person["username"],
-                        "source": "数据管理平台",
-                        "in_project": False,
-                    }
-                )
-                if len(external_results) >= 100:
-                    break
+            raise ValidationError({"source_instance": "只支持项目管理平台本地账号。"})
+        external_results = []
         return Response(
             {
                 "can_manage": True,
@@ -238,16 +174,12 @@ class AccountDirectory(BaseAPIView):
 
 
 class MembershipInput(serializers.Serializer):
-    user_id = serializers.UUIDField(required=False)
-    source_instance = serializers.RegexField(r"^[a-zA-Z0-9_-]{1,80}$", required=False)
-    external_user_id = serializers.IntegerField(min_value=1, required=False)
+    user_id = serializers.UUIDField()
     role = serializers.ChoiceField(choices=list(ROLE_NAMES))
 
     def validate(self, data):
-        if bool(data.get("user_id")) == bool(data.get("source_instance") or data.get("external_user_id")):
-            raise ValidationError("请选择一个本平台账号或来源数据平台账号。")
-        if not data.get("user_id") and not (data.get("source_instance") and data.get("external_user_id")):
-            raise ValidationError("来源实例与账号编号必须同时填写。")
+        if set(self.initial_data) - set(self.fields):
+            raise ValidationError("只支持选择项目管理平台本地账号。")
         return data
 
 
@@ -299,65 +231,14 @@ class AccountProjectMembers(BaseAPIView):
         data = data.validated_data
         if data["role"] == "PLATFORM_ADMIN":
             raise PermissionDenied("管理员请在账号管理中统一授权，加入项目只分配业务岗位。")
-        if data.get("source_instance"):
-            from .data_accounts import link_account
-
-            source = data["source_instance"]
-            kind, source_admin = account_admin(request)
-            if source_admin and source_admin.source_instance != source:
-                raise PermissionDenied("不能从其他来源目录添加人员。")
-            config = authority_config(source)
-            person = authority_request(
-                config, f"/internal/issue-users/{data['external_user_id']}", token=config.get("service_token")
-            )
-            if (
-                not isinstance(person, dict)
-                or person.get("id") != data["external_user_id"]
-                or person.get("active") is not True
-                or person.get("role") == "Pending"
-                or not isinstance(person.get("username"), str)
-                or not person["username"].strip()
-                or len(person["username"]) > 128
-            ):
-                raise PermissionDenied("来源账号未激活或仍待分配。")
-            account = link_account(source, {**person, "status": "Active"}, config)
-            user = account.user
-        else:
-            user = get_object_or_404(User, pk=data["user_id"], is_active=True, is_bot=False)
+        user = get_object_or_404(User, pk=data["user_id"], is_active=True, is_bot=False)
         # Existing duties must go through RoleList, including its last-manager protection.
         if BusinessRole.objects.filter(project=project, user=user).exists():
             from .views import Conflict
 
             raise Conflict("该账号已加入项目，请在成员与权限中调整岗位。")
-        external = PlatformAccount.objects.filter(user=user).first()
-        if external and not external.active:
-            raise PermissionDenied("此来源账号关联已停用，不能加入项目。")
-        if external:
-            config = authority_config(external.source_instance)
-            authority = authority_request(
-                config, f"/internal/issue-users/{external.external_user_id}", token=config.get("service_token")
-            )
-            mappings = PlatformProject.objects.filter(project=project, source_instance=external.source_instance)
-            if not isinstance(authority, dict) or authority.get("active") is not True:
-                raise PermissionDenied("该数据平台账号不存在或已停用。")
-            if mappings.exists():
-                permissions = authority_request(
-                    config,
-                    f"/internal/issue-permissions/users/{external.external_user_id}",
-                    token=config.get("service_token"),
-                )
-                if not isinstance(permissions, dict) or not any(
-                    isinstance(row, dict) and mappings.filter(active=True, external_project_id=row.get("id")).exists()
-                    for row in permissions.get("projects", [])
-                ):
-                    raise PermissionDenied("该账号尚未获得关联数据平台项目授权。")
-            if data["role"] == "REPORTER" and authority.get("role") not in {
-                "TeamLeader",
-                "Annotator",
-                "Auditor",
-                "Collector",
-            }:
-                raise PermissionDenied("此来源身份不允许默认分配数采岗位。")
+        if PlatformAccount.objects.filter(user=user).exists():
+            raise PermissionDenied("请先在项目管理平台建立独立账号。")
         ws, _ = WorkspaceMember.objects.get_or_create(workspace=project.workspace, member=user, defaults={"role": 15})
         if not ws.is_active:
             raise PermissionDenied("工作空间成员已停用，请先处理停用状态。")
@@ -375,11 +256,4 @@ class AccountProjectMembers(BaseAPIView):
         BusinessRoleEvent.objects.create(
             project=project, user=user, previous_role=old, role=binding.role, action="assign", created_by=request.user
         )
-        if external and mappings.filter(active=True).exists():
-            PlatformIdentity.objects.update_or_create(
-                project=project,
-                source_instance=external.source_instance,
-                external_user_id=external.external_user_id,
-                defaults={"user": user, "active": True, "created_by_id": config["configured_by"]},
-            )
         return Response({"user_id": str(user.id), "project_id": str(project.id), "role": binding.role})

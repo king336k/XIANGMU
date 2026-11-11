@@ -20,7 +20,7 @@ export type Connection = {
 };
 
 export function connectionPayload(form: FormData, editing: Connection | null | undefined, directoriesEnabled: boolean) {
-  const kind = String(form.get("kind") || editing?.kind || "data_platform");
+  const kind = String(form.get("kind") || editing?.kind || "feishu");
   const payload: Record<string, unknown> = { kind, base_url: String(form.get("base_url") || "").trim() };
   const source = editing?.source_instance || String(form.get("source_instance") || "").trim();
   if (source) payload.source_instance = source;

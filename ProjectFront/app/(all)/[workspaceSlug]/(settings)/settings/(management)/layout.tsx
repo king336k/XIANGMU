@@ -11,13 +11,15 @@ export default function PlatformSettingsLayout() {
         hamburgerContent={WorkspaceSettingsSidebarRoot}
         activePath=""
         displayLabel={
-          path.endsWith("/models/")
-            ? "模型配置"
-            : path.endsWith("/connections/")
-              ? "平台连接"
-              : path.endsWith("/sources/")
-                ? "来源关联"
-                : "成员与权限"
+          path.endsWith("/daq-projects/")
+            ? "DAQ 项目授权"
+            : path.endsWith("/models/")
+              ? "模型配置"
+              : path.endsWith("/connections/")
+                ? "平台连接"
+                : path.endsWith("/sources/")
+                  ? "协作服务"
+                  : "成员与权限"
         }
       />
       <div className="flex size-full">

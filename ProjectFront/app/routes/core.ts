@@ -320,6 +320,10 @@ export const coreRoutes: RouteConfigEntry[] = [
             "./(all)/[workspaceSlug]/(settings)/settings/(management)/accounts/page.tsx"
           ),
           route(
+            ":workspaceSlug/settings/daq-projects",
+            "./(all)/[workspaceSlug]/(settings)/settings/(management)/daq-projects/page.tsx"
+          ),
+          route(
             ":workspaceSlug/settings/connections",
             "./(all)/[workspaceSlug]/(settings)/settings/(management)/connections/page.tsx"
           ),

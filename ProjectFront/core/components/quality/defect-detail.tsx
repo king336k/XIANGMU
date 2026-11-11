@@ -16,9 +16,8 @@ import { DefectDispositionPanel, resolutionNames } from "./defect-disposition";
 import { DiagnosticsPanel } from "./diagnostics-panel";
 import { DeploymentSnapshots } from "./deployment-snapshots";
 import { DefectTeam } from "./defect-team";
-import { DataRegressionPanel } from "./data-regression-panel";
-import { DefectVerificationScope } from "./defect-verification-scope";
 import { SolutionPanel } from "./solution-panel";
+import { DefectVerificationScope } from "./defect-verification-scope";
 import { can, severityNames, statusNames } from "./types";
 import type { Context, Defect } from "./types";
 
@@ -243,14 +242,8 @@ export function DefectDetail({
               <SolutionPanel base={base} defectId={value.id} context={context} />
             </div>
             <div hidden={activeTab !== "regression"} className="platform-detail-panel">
+              <p className="text-13 text-secondary">在当前项目安排测试、记录复现与验证结果，再更新缺陷状态。</p>
               <DefectVerificationScope base={base} value={value} context={context} onChanged={onChanged} />
-              <DataRegressionPanel
-                base={base}
-                defect={value}
-                context={context}
-                projectUrl={projectUrl}
-                onVerify={() => onEdit("workflow")}
-              />
             </div>
             <div hidden={activeTab !== "history"} className="platform-detail-panel space-y-5">
               <CollaborationPanel base={base} value={value} context={context} onChanged={onChanged} />

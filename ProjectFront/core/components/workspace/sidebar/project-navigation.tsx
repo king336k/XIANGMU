@@ -229,7 +229,7 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
   return (
     <>
       {navigationItemsMemo.map((item) => {
-        if (!item.shouldRender) return;
+        if (!item.shouldRender || project.hidden_menu_items?.includes(item.key)) return;
 
         const hasAccess = allowPermissions(item.access, EUserPermissionsLevel.PROJECT, workspaceSlug, project.id);
         if (!hasAccess) return null;

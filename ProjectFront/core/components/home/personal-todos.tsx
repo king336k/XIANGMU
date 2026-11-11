@@ -26,7 +26,6 @@ const groups = {
   defect: "缺陷",
   solution: "方案审核",
   plan: "测试计划",
-  regression: "数据回归",
 };
 const stateNames: Record<string, string> = {
   draft: "草稿",

@@ -16,7 +16,7 @@ export function DefectVerificationScope({
 }) {
   const [editing, setEditing] = useState(false);
   const [verifying, setVerifying] = useState(false);
-  const label = value.requires_data_regression ? "数据验证" : "功能验证";
+  const label = "功能验证";
   return (
     <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-subtle bg-layer-1 px-3 py-2">
       <p className="text-13">
@@ -62,7 +62,6 @@ export function DefectVerificationScope({
               defaultValue={value.requires_data_regression ? "data" : "functional"}
             >
               <option value="functional">功能验证</option>
-              <option value="data">数据验证</option>
             </select>
           </Field>
           <Field label="调整原因">

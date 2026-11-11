@@ -154,7 +154,7 @@ export const useNavigationItems = ({
 
     // Filter by permissions and shouldRender
     const filteredItems = navItems.filter((item) => {
-      if (!item.shouldRender) return false;
+      if (!item.shouldRender || project?.hidden_menu_items?.includes(item.key)) return false;
       const hasAccess = allowPermissions(item.access, EUserPermissionsLevel.PROJECT, workspaceSlug, project?.id ?? "");
       return hasAccess;
     });
@@ -162,7 +162,7 @@ export const useNavigationItems = ({
     // Sort by sortOrder
     // oxlint-disable-next-line unicorn/no-array-sort
     return filteredItems.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
-  }, [workspaceSlug, projectId, baseNavigation, allowPermissions, project?.id]);
+  }, [workspaceSlug, projectId, baseNavigation, allowPermissions, project?.id, project?.hidden_menu_items]);
 
   return navigationItems;
 };

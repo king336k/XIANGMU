@@ -192,7 +192,7 @@ class SignUpAuthEndpoint(View):
         if managed_registration():
             from django.http import JsonResponse
 
-            return JsonResponse({"error": "普通注册已关闭，新用户由数据管理平台管理员创建。"}, status=403)
+            return JsonResponse({"error": "普通注册已关闭，请联系项目管理平台管理员创建账号。"}, status=403)
         next_path = request.POST.get("next_path")
         # Check instance configuration
         instance = Instance.objects.first()
