@@ -17,7 +17,10 @@ from .personal_todos import PersonalTodos
 from .connection_settings import GlobalConnectionSettings
 from .member_scopes import MemberScopes
 
+from .daq_connect import DaqConnect
+
 urlpatterns = [
+    path("daq-connect/", DaqConnect.as_view()),
     path("daq-project-grants/", DaqProjectGrants.as_view()),
     path("my-todos/", PersonalTodos.as_view()),
     path("record-number/", NumberLookup.as_view()),

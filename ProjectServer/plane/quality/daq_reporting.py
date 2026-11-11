@@ -27,6 +27,10 @@ class DaqReportingAuthentication(PlatformBridgeAuthentication):
         if keys is None:
             keys = json.loads(os.environ.get("QUALITY_DAQ_REPORT_KEYS_JSON", "{}"))
         config = keys.get(key_id)
+        if config is None:
+            from .daq_connect import automatic_key
+
+            config = automatic_key(key_id)
         if not config or config.get("enabled", True) is not True:
             return None
         source = config.get("source_instance")
