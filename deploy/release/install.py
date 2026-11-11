@@ -2,6 +2,7 @@
 """Validated offline code installation. Default is read-only --check; never pulls/builds."""
 import argparse
 import fcntl
+import errno
 import hashlib
 import ipaddress
 import json
@@ -38,7 +39,10 @@ def digest(raw):
 
 def file_sha(path):
     with Path(path).open('rb') as source:
-        return hashlib.file_digest(source, 'sha256').hexdigest()
+        h = hashlib.sha256()
+        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+            h.update(chunk)
+        return h.hexdigest()
 
 
 def safe_root(value):
@@ -199,14 +203,41 @@ def install_wrappers(root, record):
         record.setdefault('managed_wrappers', {})[path.name] = digest(raw)
 
 
-def initialize_env(shared, port, bind, subnets):
+def deployment_endpoint(shared, preferred, bind, host='localhost'):
+    """Select a new installation's free port; upgrades retain their saved endpoint."""
+    saved = shared/'.env'
+    if saved.exists():
+        values = read_env(saved)
+        port = int(values['HTTP_PORT'])
+        return {'port':port, 'bind':values.get('BIND_ADDRESS', '127.0.0.1'),
+                'host':values.get('APP_DOMAIN', 'localhost'),
+                'url':values.get('WEB_URL', f'http://localhost:{port}')}
+    if not 1 <= preferred <= 65535 or bind not in {'127.0.0.1', '0.0.0.0'}:
+        raise ValueError('invalid bind/port')
+    if not isinstance(host, str) or len(host) > 253 or not re.fullmatch(
+        r'[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?', host
+    ) or any(not label or len(label) > 63 or label.startswith('-') or label.endswith('-') for label in host.split('.')):
+        raise ValueError('host must be an IPv4 address or DNS name without scheme/port')
+    for port in range(preferred, min(preferred + 100, 65536)):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind((bind, port))
+            except OSError as error:
+                if error.errno in {errno.EADDRINUSE, errno.EACCES}:
+                    continue
+                raise
+        return {'port':port, 'bind':bind, 'host':host, 'url':f'http://{host}:{port}'}
+    raise ValueError('no free TCP port in the requested 100-port range')
+
+
+def initialize_env(shared, port, bind, subnets, host='localhost'):
     safe_root(str(shared))
     path = shared/'.env'
     if path.exists():
         safe_root(str(path))
         if path.stat().st_mode & 0o077: raise ValueError('shared environment must be mode0600')
         return read_env(path)
-    values = {'HTTP_PORT':str(port), 'BIND_ADDRESS':bind, 'WEB_URL':f'http://localhost:{port}', 'APP_DOMAIN':'localhost', 'CORS_ALLOWED_ORIGINS':f'http://localhost:{port}', 'POSTGRES_USER':'engram', 'POSTGRES_DB':'engramproject', 'RABBITMQ_USER':'engram', 'RABBITMQ_VHOST':'engramproject', 'AWS_ACCESS_KEY_ID':'engram-local', 'AWS_S3_BUCKET_NAME':'uploads', 'FILE_SIZE_LIMIT':'52428800', 'USE_MINIO':'1', 'DEBUG':'0', 'PLATFORM_SUBNET':subnets[0], 'HELPERS_SUBNET':subnets[1]}
+    values = {'HTTP_PORT':str(port), 'BIND_ADDRESS':bind, 'WEB_URL':f'http://{host}:{port}', 'APP_DOMAIN':host, 'CORS_ALLOWED_ORIGINS':f'http://{host}:{port}', 'POSTGRES_USER':'engram', 'POSTGRES_DB':'engramproject', 'RABBITMQ_USER':'engram', 'RABBITMQ_VHOST':'engramproject', 'AWS_ACCESS_KEY_ID':'engram-local', 'AWS_S3_BUCKET_NAME':'uploads', 'FILE_SIZE_LIMIT':'52428800', 'USE_MINIO':'1', 'DEBUG':'0', 'PLATFORM_SUBNET':subnets[0], 'HELPERS_SUBNET':subnets[1]}
     for name in ['POSTGRES_PASSWORD', 'RABBITMQ_PASSWORD', 'AWS_SECRET_ACCESS_KEY', 'SECRET_KEY', 'LIVE_SERVER_SECRET_KEY', 'BUILTIN_EMBEDDING_KEY', 'DOCUMENT_OCR_KEY']: values[name] = secrets.token_urlsafe(48)
     with os.fdopen(os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600), 'w') as out:
         out.write(''.join(k+'='+v+'\n' for k,v in values.items())); out.flush(); os.fsync(out.fileno())
@@ -404,7 +435,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--package', required=True); parser.add_argument('--deploy-root', required=True)
     group = parser.add_mutually_exclusive_group(); group.add_argument('--check', action='store_true'); group.add_argument('--apply', action='store_true')
-    parser.add_argument('--project-name'); parser.add_argument('--profile', action='append'); parser.add_argument('--port', type=int, default=18890); parser.add_argument('--bind', default='127.0.0.1')
+    parser.add_argument('--project-name'); parser.add_argument('--profile', action='append'); parser.add_argument('--port', type=int, default=18890, help='Preferred port; new installs try the next 99 ports when occupied'); parser.add_argument('--bind', default='127.0.0.1'); parser.add_argument('--host', default='localhost', help='Public IPv4 address or DNS name, without scheme or port')
     args = parser.parse_args(argv)
     receipt = None
     try:
@@ -412,24 +443,26 @@ def main(argv=None):
         if not (root/'shared/deployment.json').exists() and not pristine_target(root): raise ValueError('target contains unrelated files; no deployment ownership record')
         preflight_wrappers(root, record)
         if not 1 <= args.port <= 65535 or args.bind not in {'127.0.0.1','0.0.0.0'}: raise ValueError('invalid bind/port')
+        endpoint = deployment_endpoint(root/'shared', args.port, args.bind, args.host)
         verify_images(checked['manifest']); verify_models(root, checked['model_manifest'])
         if not (root/'shared/deployment.json').exists():
             names = command(['docker', 'volume', 'ls', '--format', '{{.Name}}']).decode().split()
             if any(n.startswith(record['project_name']+'_') for n in names): raise ValueError('existing project data volumes cannot be adopted')
         old = current_release(root); rows = owned_containers(record, old)
         if not args.apply:
-            print(json.dumps({'checked':True, 'applied':False, 'release_id':checked['release_id'], 'source_tree_sha256':checked['info']['source_tree_sha256'], 'existing_release':old.name if old else None})); return 0
+            print(json.dumps({'checked':True, 'applied':False, 'release_id':checked['release_id'], 'source_tree_sha256':checked['info']['source_tree_sha256'], 'existing_release':old.name if old else None, 'access_url':endpoint['url'], 'port':endpoint['port'], 'requested_port':args.port, 'port_changed':endpoint['port'] != args.port})); return 0
         subnets = choose_subnets() if not (root/'shared/.env').exists() else None
         root.mkdir(parents=True, exist_ok=True); shared = root/'shared'; shared.mkdir(exist_ok=True); safe_root(str(shared)); (root/'releases').mkdir(exist_ok=True)
         with open_install_lock(shared) as lock:
             fcntl.flock(lock, fcntl.LOCK_EX|fcntl.LOCK_NB)
             if current_release(root) != old: raise ValueError('deployment changed during preflight')
             atomic_json(shared/'deployment.json', record)
-            values = initialize_env(shared, args.port, args.bind, subnets); release = extract_release(Path(args.package), root, checked)
+            endpoint = deployment_endpoint(shared, args.port, args.bind, args.host)
+            values = initialize_env(shared, endpoint['port'], endpoint['bind'], subnets, endpoint['host']); release = extract_release(Path(args.package), root, checked)
             prepare_mountpoints(release)
             config = json.loads(compose_run(root, release, record, ['config', '--format', 'json']))
             validate_compose(config, root, release, checked['manifest'], record)
-            receipt = {'release_id':release.name, 'status':'prepared', 'schema_rollback_attempted':False}
+            receipt = {'release_id':release.name, 'status':'prepared', 'schema_rollback_attempted':False, 'access_url':endpoint['url'], 'port':endpoint['port']}
             atomic_json(shared/'last-install.json', receipt)
             if old:
                 if not rows or not any(r['Config']['Labels'].get('com.docker.compose.service') == 'plane-db' for r in rows): raise ValueError('existing database backup target unavailable; migration refused')
@@ -445,7 +478,7 @@ def main(argv=None):
             install_wrappers(root, record); atomic_json(shared/'deployment.json', record)
             if old: set_link(root, 'previous', old)
             set_link(root, 'current', release); receipt['status'] = 'healthy'; atomic_json(shared/'last-install.json', receipt)
-        print(json.dumps({'checked':True, 'applied':True, 'release_id':release.name, 'health_verified':True})); return 0
+        print(json.dumps({'checked':True, 'applied':True, 'release_id':release.name, 'health_verified':True, 'access_url':endpoint['url'], 'port':endpoint['port'], 'requested_port':args.port, 'port_changed':endpoint['port'] != args.port})); return 0
     except (ValueError, OSError, KeyError, TypeError, tarfile.TarError, subprocess.SubprocessError) as error:
         if receipt is not None:
             receipt['last_successful_phase'] = receipt['status']; receipt['status'] = 'failed'

@@ -346,3 +346,69 @@ def test_generated_wrappers_execute_from_space_path_and_repair_owned_mode(tmp_pa
         assert path.stat().st_mode&0o777==0o755
         result=subprocess.run([str(path)],capture_output=True,text=True,check=True)
         assert json.loads(result.stdout)==['--deploy-root',str(root),action]
+
+
+def test_new_endpoint_uses_requested_port_and_external_host(tmp_path):
+    import socket
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    endpoint = mod.deployment_endpoint(tmp_path / "shared", port, "127.0.0.1", "10.10.10.4")
+    assert endpoint == {"port": port, "bind": "127.0.0.1", "host": "10.10.10.4", "url": f"http://10.10.10.4:{port}"}
+    assert not (tmp_path / "shared").exists()
+
+
+def test_new_endpoint_skips_a_real_listening_port_without_touching_it(tmp_path):
+    import socket
+    with socket.socket() as occupied:
+        occupied.bind(("127.0.0.1", 0)); occupied.listen()
+        port = occupied.getsockname()[1]
+        endpoint = mod.deployment_endpoint(tmp_path / "shared", port, "0.0.0.0", "10.10.10.4")
+        assert port < endpoint["port"] <= min(port + 99, 65535)
+        assert endpoint["url"] == f"http://10.10.10.4:{endpoint['port']}"
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            pass
+
+
+def test_upgrade_endpoint_keeps_owned_config_even_when_port_is_in_use(tmp_path):
+    shared = tmp_path / "shared"; shared.mkdir()
+    raw = "HTTP_PORT=5090\nBIND_ADDRESS=127.0.0.1\nWEB_URL=http://localhost:5090\nAPP_DOMAIN=localhost\n"
+    (shared / ".env").write_text(raw)
+    endpoint = mod.deployment_endpoint(shared, 8886, "0.0.0.0", "10.10.10.4")
+    assert endpoint["port"] == 5090 and endpoint["url"] == "http://localhost:5090"
+    assert (shared / ".env").read_text() == raw
+
+
+def test_external_endpoint_initialization_sets_consistent_origin(tmp_path):
+    shared = tmp_path / "shared"; shared.mkdir()
+    values = mod.initialize_env(shared, 8886, "0.0.0.0", ("10.247.1.0/28", "10.247.2.0/28"), "10.10.10.4")
+    assert values["WEB_URL"] == values["CORS_ALLOWED_ORIGINS"] == "http://10.10.10.4:8886"
+    assert values["APP_DOMAIN"] == "10.10.10.4"
+
+
+@pytest.mark.parametrize("host", ["http://10.10.10.4", "10.10.10.4:8886", "x\nSECRET=value", "bad/path", "user@host"])
+def test_new_endpoint_rejects_invalid_public_host_before_writes(tmp_path, host):
+    with pytest.raises(ValueError):
+        mod.deployment_endpoint(tmp_path / "shared", 8886, "127.0.0.1", host)
+    assert not (tmp_path / "shared").exists()
+
+
+def test_file_checksum_streams_without_python311_file_digest(tmp_path, monkeypatch):
+    path = tmp_path / "artifact"; path.write_bytes(b"release" * 200000)
+    monkeypatch.delattr(mod.hashlib, "file_digest", raising=False)
+    assert mod.file_sha(path) == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_port_search_is_bounded_and_does_not_write_config(tmp_path, monkeypatch):
+    attempts = []
+    class Occupied:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def bind(self, address):
+            attempts.append(address)
+            raise OSError(mod.errno.EADDRINUSE, "fixture occupied")
+    monkeypatch.setattr(mod.socket, "socket", lambda *args: Occupied())
+    with pytest.raises(ValueError, match="no free TCP port"):
+        mod.deployment_endpoint(tmp_path / "shared", 8886, "0.0.0.0", "10.10.10.4")
+    assert len(attempts) == 100 and attempts[0][1] == 8886 and attempts[-1][1] == 8985
+    assert not (tmp_path / "shared").exists()
