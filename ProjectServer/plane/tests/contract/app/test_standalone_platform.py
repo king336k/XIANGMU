@@ -291,3 +291,22 @@ def test_structured_daq_title_is_shortened_without_losing_overview_fields(standa
     assert "问题范围：遥操与 DAQ" in result["description"]
     assert "发生阶段：启动" in result["description"]
     assert "受影响模块：相机" in result["description"]
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "sso/challenge/",
+        "sso/exchange/",
+        "daq/bindings/",
+        "daq/identities/",
+        "daq/project-mapping/",
+        "daq/reports/",
+        "daq/incidents/",
+        "integrations/catalog/",
+    ],
+)
+def test_retired_project_bridge_routes_stay_closed(standalone, suffix):
+    project, _ = standalone
+    path = f"/api/workspaces/{project.workspace.slug}/projects/{project.id}/quality/{suffix}"
+    assert APIClient().post(path, {}, format="json").status_code == 404

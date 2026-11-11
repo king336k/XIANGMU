@@ -61,6 +61,13 @@ def automatic_source_available(defect):
             row.name.lower().endswith((".log", ".txt", ".json", ".csv", ".md", ".yaml", ".yml", ".zip"))
             for row in PackageFile.objects.filter(package__defect=defect, package__status="files_verified")
         )
+    from .daq_incidents import signed_record
+
+    record = signed_record(link)
+    if record and record.get("authorityMode") == "report_only":
+        from .daq_project_grants import granted_projects
+
+        return str(defect.project_id) in granted_projects() and link.created_by.is_active
     try:
         verify_incident_authority(link)
     except Exception:

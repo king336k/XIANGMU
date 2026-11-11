@@ -55,4 +55,4 @@ docker compose --env-file deploy/local/.env -f docker-compose.yml -f services/do
 
 通过部署管理器或当前进程环境注入同一个 `DOCUMENT_OCR_API_KEY`，并为API/worker设置 `DOCUMENT_OCR_BASE_URL=http://document-ocr:18886`、`DOCUMENT_OCR_ALLOWED_HTTP_ORIGINS=http://document-ocr:18886`。不要把实际密钥提交源码。未配置服务时原文字导入行为保持，图片识别请求返回未配置。
 
-网页在“文档与知识→导入知识草稿”选择PDF、DOCX或PNG，先预检，再按需“识别图片文字”。逐页对照原件修订候选、勾选已核对后“采用核对结果”，最后确认导入草稿；未识别范围仍存在时不能采用。识别完成不代表文字准确，也不自动发布知识。
+网页在“文档与知识→导入知识草稿”选择PDF、DOCX或PNG，先预检，系统对图片、扫描页和含图片的文档自动排队识别，无需选择是否启用OCR；失败时可重试。逐页对照原件修订候选、勾选已核对后“采用核对结果”，最后确认导入草稿；未识别范围仍存在时不能采用。识别完成不代表文字准确，也不自动发布知识。

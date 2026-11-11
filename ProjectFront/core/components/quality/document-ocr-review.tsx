@@ -117,9 +117,9 @@ export function DocumentOcrReview<T>({
     <section aria-label="图片文字核对" className="min-w-0 space-y-3 rounded-md border border-subtle p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-13 font-medium">图片文字</h3>
-        {!reviewed && (
+        {!reviewed && failed && (
           <Button type="button" size="sm" variant="neutral-primary" disabled={busy || polling} onClick={start}>
-            识别图片文字
+            重试文字识别
           </Button>
         )}
       </div>

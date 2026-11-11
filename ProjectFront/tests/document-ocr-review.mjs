@@ -194,8 +194,12 @@ test("新识别请求立即阻止确认，识别失败保留外层原预检正�
       throw new Error("OCR未配置");
     },
   });
-  const p = { ...props(), initial: undefined, onPendingChange: (v) => pending.push(v) };
-  await button(h.render("DocumentOcrReview", p), "识别图片文字").props.onClick();
+  const p = {
+    ...props(),
+    initial: { ...complete, status: "failed", segments: [] },
+    onPendingChange: (v) => pending.push(v),
+  };
+  await button(h.render("DocumentOcrReview", p), "重试文字识别").props.onClick();
   const tree = h.render("DocumentOcrReview", p);
   assert.equal(pending[0], true);
   assert.match(text(tree), /OCR未配置/);
@@ -259,12 +263,12 @@ test("关闭尚未GET的轮询清timer，已关闭的POST启动响应不修改�
         resolve = done;
       }),
   });
-  const p = { ...props(), initial: undefined };
-  const pending = button(h.render("DocumentOcrReview", p), "识别图片文字").props.onClick();
+  const p = { ...props(), initial: { ...complete, status: "failed", segments: [] } };
+  const pending = button(h.render("DocumentOcrReview", p), "重试文字识别").props.onClick();
   h.unmount();
   resolve(complete);
   await pending;
-  assert.equal(h.state[0], undefined);
+  assert.equal(h.state[0].status, "failed");
 });
 test("采用后的预检才允许导入；confirmed原件及文本导入不显示OCR", () => {
   for (const kind of ["candidate", "reviewed", "confirmed", "text"]) {
@@ -370,5 +374,13 @@ test("导入表单仅知识接受PNG并提供OCR，候选未经采用不得确�
     );
     if (resource === "knowledge") assert.equal(tree.props.onSubmit, undefined);
     assert.match(text(tree), /原预检正文/);
+  }
+});
+
+test("自动排队和正常候选不再要求用户选择识别，失败才显示重试", () => {
+  for (const status of ["queued", "running", "completed"]) {
+    const h = harness("document-ocr-review");
+    const tree = h.render("DocumentOcrReview", props({ ...complete, status }));
+    assert.equal(button(tree, "重试文字识别"), undefined);
   }
 });

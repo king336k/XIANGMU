@@ -142,39 +142,43 @@ class DocumentOcr(QualityView):
         if request.data:
             raise ValidationError({"ocr": "识别请求不接受额外参数。"})
         row = editable(self, pk)
-        configuration()
-        file, _ = original(row)
-        with verified_file_handle(file):
-            pass
-        if row.extraction.get("safe_for_ocr") is not True:
-            raise ValidationError({"file": "原件未通过安全解析，不能改用图片识别绕过；请重新导入有效文件。"})
-        prior = row.extraction.get("ocr", {})
-        if prior.get("status") in {"queued", "running"}:
-            requested = prior.get("requested_at")
-            if isinstance(requested, (int, float)) and timezone.now().timestamp() - requested > 600:
-                prior = {**prior, "status": "failed"}
-        if prior.get("status") in {"queued", "running"}:
-            return Response(public_state(row), status=202)
-        if prior.get("status") == "completed" and prior.get("requires_review"):
-            return Response(public_state(row))
-        token = uuid4().hex
-        row.extraction = {
-            **row.extraction,
-            "ocr": {
-                "token": token,
-                "status": "queued",
-                "segments": [],
-                "failures": [],
-                "requires_review": True,
-                "reviewed": False,
-                "actor_id": str(request.user.id),
-                "source_sha256": file.sha256,
-                "requested_at": timezone.now().timestamp(),
-            },
-        }
-        row.save(update_fields=["extraction"])
-        transaction.on_commit(lambda: enqueue_ocr(row.id, token))
+        return request_ocr(row, request.user)
+
+
+def request_ocr(row, actor):
+    configuration()
+    file, _ = original(row)
+    with verified_file_handle(file):
+        pass
+    if row.extraction.get("safe_for_ocr") is not True:
+        raise ValidationError({"file": "原件未通过安全解析，不能改用图片识别绕过；请重新导入有效文件。"})
+    prior = row.extraction.get("ocr", {})
+    if prior.get("status") in {"queued", "running"}:
+        requested = prior.get("requested_at")
+        if isinstance(requested, (int, float)) and timezone.now().timestamp() - requested > 600:
+            prior = {**prior, "status": "failed"}
+    if prior.get("status") in {"queued", "running"}:
         return Response(public_state(row), status=202)
+    if prior.get("status") == "completed" and prior.get("requires_review"):
+        return Response(public_state(row))
+    token = uuid4().hex
+    row.extraction = {
+        **row.extraction,
+        "ocr": {
+            "token": token,
+            "status": "queued",
+            "segments": [],
+            "failures": [],
+            "requires_review": True,
+            "reviewed": False,
+            "actor_id": str(actor.id),
+            "source_sha256": file.sha256,
+            "requested_at": timezone.now().timestamp(),
+        },
+    }
+    row.save(update_fields=["extraction"])
+    transaction.on_commit(lambda: enqueue_ocr(row.id, token))
+    return Response(public_state(row), status=202)
 
 
 def finish(row_id, token, values):
@@ -502,3 +506,42 @@ class DocumentOcrReview(QualityView):
         row.rows, row.errors, row.sha256, row.extraction = rows, errors, digest, extraction
         row.save(update_fields=["rows", "errors", "sha256", "extraction"])
         return Response(representation(row))
+
+
+def queue_automatic_ocr(row, actor):
+    extraction = row.extraction or {}
+    if (
+        row.resource != "knowledge"
+        or row.source_url
+        or row.status != "preview"
+        or extraction.get("safe_for_ocr") is not True
+    ):
+        return
+    if extraction.get("format") not in {"png", "pdf", "docx"}:
+        return
+    needs_ocr = (
+        extraction.get("format") == "png"
+        or extraction.get("image_count", 0) > 0
+        or bool(extraction.get("failures"))
+        or not any(segment.get("text", "").strip() for segment in extraction.get("segments", []))
+    )
+    if not needs_ocr or extraction.get("ocr", {}).get("status") in {"queued", "running", "completed", "failed"}:
+        return
+    if not permitted(row, actor):
+        return
+    try:
+        request_ocr(row, actor)
+    except (OcrUnavailable, ValidationError):
+        row.extraction = {
+            **row.extraction,
+            "ocr": {
+                "token": "",
+                "status": "failed",
+                "segments": [],
+                "failures": [],
+                "requires_review": True,
+                "reviewed": False,
+                "error": "自动文字识别暂不可用，请稍后重试。",
+            },
+        }
+        row.save(update_fields=["extraction"])

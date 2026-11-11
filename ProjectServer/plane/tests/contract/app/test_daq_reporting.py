@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from plane.db.models import Project, ProjectMember, WorkspaceMember
 from plane.quality.models import BusinessRole, PlatformAccount, PlatformIdentity, PlatformProject, Defect, SourceLink
-from plane.tests.contract.app.test_daq_incidents import incident as incident, signature
+from plane.tests.contract.app.test_daq_incidents import signature
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 
@@ -69,30 +69,43 @@ def registered_evidence(project, user, report_id):
 
 
 @pytest.fixture
-def reporting(incident, mocker):
-    project, user, base, payload, state, post = incident
-    PlatformAccount.objects.create(
-        user=user,
-        source_instance="test-dp",
-        external_user_id=16,
-        source_username="test-collector",
-        source_role="Collector",
+def reporting(workspace, settings, mocker):
+    from plane.license.models import InstanceConfiguration
+    from plane.db.models import User
+    from django.utils import timezone
+
+    destination = Project.objects.create(workspace=workspace, name="已授权反馈项目", identifier="ANYDEST")
+    settings.QUALITY_DAQ_REPORT_KEYS = {
+        "test-incidents": {
+            "secret": "synthetic-incidents-only",
+            "audience": "plane-quality",
+            "source_instance": "daq-device",
+        }
+    }
+    grants = InstanceConfiguration.objects.create(
+        key="QUALITY_DAQ_PROJECT_GRANTS", value=json.dumps({"projects": [str(destination.id)], "revision": 1})
     )
-    destination = Project.objects.create(workspace=project.workspace, name="任意目标项目", identifier="ANYDEST")
-    from plane.quality import platform
+    mocker.patch(
+        "plane.quality.platform.fetch", side_effect=AssertionError("standalone DAQ must not contact data platform")
+    )
+    mocker.patch("plane.quality.diagnostics.enqueue")
+    response = call("/api/quality-auth/daq-project-options/")
+    assert response.status_code == 200, response.content
+    user = User.objects.get(is_bot=True)
+    payload = {
+        "eventId": str(uuid4()),
+        "kind": "startup_failure",
+        "occurredAt": timezone.now().isoformat(),
+        "title": "采集启动失败",
+        "description": "采集程序记录connect timeout",
+        "device": "robot-test",
+    }
+    return destination, user, payload, {"grants": grants, "keys": settings.QUALITY_DAQ_REPORT_KEYS}
 
-    original_fetch = platform.fetch
 
-    def source_with_username(source, path, params=None):
-        result = original_fetch(source, path, params)
-        if path.startswith("/internal/issue-users/"):
-            return {**result, "username": "test-collector"}
-        if path.startswith("/internal/issue-permissions/"):
-            return {**result, "projects": [{"role": "Member", **row} for row in result["projects"]]}
-        return result
-
-    mocker.patch("plane.quality.platform.fetch", side_effect=source_with_username)
-    return destination, user, payload, state
+def revoke_grants(state):
+    state["grants"].value = json.dumps({"projects": [], "revision": 2})
+    state["grants"].save()
 
 
 def call(path, data=None, method="GET", actor=16, headers=None):
@@ -106,7 +119,7 @@ def call(path, data=None, method="GET", actor=16, headers=None):
     )
 
 
-def test_collector_can_choose_all_nonarchived_projects_without_membership(reporting):
+def test_collector_can_choose_only_granted_nonarchived_projects_without_membership(reporting):
     destination, user, payload, state = reporting
     archived = Project.objects.create(
         workspace=destination.workspace, name="已归档", identifier="ARCREPORT", archived_at=timezone.now()
@@ -122,18 +135,18 @@ def test_collector_can_choose_all_nonarchived_projects_without_membership(report
     assert not PlatformIdentity.objects.filter(project=destination, user=user).exists()
 
 
-def test_unsigned_replay_and_demoted_source_cannot_use_project_directory(reporting):
+def test_unsigned_replay_and_disabled_device_key_cannot_use_project_directory(reporting):
     destination, user, payload, state = reporting
     path = "/api/quality-auth/daq-project-options/"
     assert APIClient().get(path).status_code in {401, 403}
     headers = signature(path, "", method="GET")
     assert call(path, headers=headers).status_code == 200
     assert call(path, headers=headers).status_code in {401, 403}
-    state["role"] = "Auditor"
+    state["keys"]["test-incidents"]["enabled"] = False
     assert call(path).status_code in {401, 403}
 
 
-def test_report_without_session_creates_mapping_and_no_project_membership_idempotently(reporting):
+def test_report_without_session_creates_no_mapping_or_project_membership_idempotently(reporting):
     destination, user, payload, state = reporting
     path = "/api/quality-auth/daq-reports/"
     data = {
@@ -155,10 +168,7 @@ def test_report_without_session_creates_mapping_and_no_project_membership_idempo
     assert first.data["category"] == "ValidationFailed" and first.data["sourceReference"] == "local-only-name"
     assert first.data["sourceSessionId"] is None and first.data["verifiedSessions"] == []
     assert first.data["hubProjectId"] == str(destination.id)
-    assert (
-        PlatformProject.objects.filter(project=destination, source_instance="test-dp", external_project_id=9).count()
-        == 1
-    )
+    assert not PlatformProject.objects.filter(project=destination).exists()
     assert [
         WorkspaceMember.objects.count(),
         ProjectMember.objects.count(),
@@ -172,14 +182,12 @@ def test_report_without_session_creates_mapping_and_no_project_membership_idempo
     assert call(old_quality).status_code in {401, 403}
 
 
-@pytest.mark.parametrize("boundary", ["wrong_task", "revoked_project", "archived_target", "invalid_category"])
+@pytest.mark.parametrize("boundary", ["revoked_project", "archived_target", "invalid_category"])
 def test_report_rejects_source_authority_or_target_without_partial_mapping(reporting, boundary):
     destination, user, payload, state = reporting
     data = {**payload, "hubProjectId": str(destination.id)}
-    if boundary == "wrong_task":
-        state["context"]["projectId"] = 999
-    elif boundary == "revoked_project":
-        state["projects"] = []
+    if boundary == "revoked_project":
+        revoke_grants(state)
     elif boundary == "archived_target":
         destination.archived_at = timezone.now()
         destination.save()
@@ -254,7 +262,7 @@ def test_own_report_materials_upload_and_download_without_project_read_access(re
     fetched = call(base + issue + "/files/" + fileid + "/")
     assert fetched.status_code == 200
     assert b"".join(fetched.streaming_content) == raw
-    state["projects"] = []
+    revoke_grants(state)
     assert call(base + issue + "/files/" + fileid + "/").status_code in {401, 403}
 
 
@@ -265,14 +273,6 @@ def test_report_scope_does_not_read_another_collectors_report_or_materials(repor
     assert first.status_code == 201
     from plane.db.models import User
 
-    other = User.objects.create(username="other-reporter", email="other-reporter@test.invalid")
-    PlatformAccount.objects.create(
-        user=other,
-        source_instance="test-dp",
-        external_user_id=17,
-        source_username="other-reporter",
-        source_role="Collector",
-    )
     assert call(base + first.data["issueId"] + "/", actor=17).status_code in {403, 404}
     assert call(
         base + first.data["issueId"] + "/packages/",
@@ -290,46 +290,16 @@ def test_report_scope_does_not_read_another_collectors_report_or_materials(repor
     assert own.status_code == 200 and own.data["count"] == 0
 
 
-def test_first_report_creates_only_source_account_not_membership(reporting, mocker):
-    destination, user, payload, state = reporting
-    PlatformAccount.objects.filter(user=user).delete()
-    mocker.patch("plane.quality.data_accounts.authority_config", return_value={"login_auto_provision": True})
-    counts = (
-        WorkspaceMember.objects.count(),
-        ProjectMember.objects.count(),
-        BusinessRole.objects.count(),
-        PlatformIdentity.objects.count(),
-    )
-    response = call("/api/quality-auth/daq-reports/", {**payload, "hubProjectId": str(destination.id)}, "POST")
-    assert response.status_code == 201, response.content
-    account = PlatformAccount.objects.get(source_instance="test-dp", external_user_id=16)
-    assert account.user_id != user.id and not account.user.has_usable_password()
-    assert counts == (
-        WorkspaceMember.objects.count(),
-        ProjectMember.objects.count(),
-        BusinessRole.objects.count(),
-        PlatformIdentity.objects.count(),
-    )
-    assert Defect.objects.get(pk=response.data["issueId"]).created_by_id == account.user_id
-
-
-def test_source_account_disabled_and_invalid_project_target_do_not_bypass_reporting(reporting):
-    destination, user, payload, state = reporting
-    account = PlatformAccount.objects.get(user=user)
-    account.active = False
-    account.save()
-    assert call("/api/quality-auth/daq-project-options/").status_code in {401, 403}
-    account.active = True
-    account.save()
-    invalid = call("/api/quality-auth/daq-reports/", {**payload, "hubProjectId": "wrong"}, "POST")
-    assert invalid.status_code == 400
-    assert not Defect.objects.filter(project=destination).exists()
-
-
 def test_project_directory_search_paginates_without_details(reporting):
     destination, user, payload, state = reporting
     for index in range(4):
-        Project.objects.create(workspace=destination.workspace, name=f"Page project {index}", identifier=f"RP{index}")
+        project = Project.objects.create(
+            workspace=destination.workspace, name=f"Page project {index}", identifier=f"RP{index}"
+        )
+        values = json.loads(state["grants"].value)
+        values["projects"].append(str(project.id))
+        state["grants"].value = json.dumps(values)
+        state["grants"].save()
     path = "/api/quality-auth/daq-project-options/?search=Page&per_page=2&page=2"
     response = call(path)
     assert response.status_code == 200, response.content
@@ -375,23 +345,10 @@ def test_automatic_report_only_diagnostic_never_fetches_project_knowledge(report
         mode="auto",
         result={"trigger": "materials_verified", "input": {"files": ["present"]}},
     )
-    state["projects"] = []
+    revoke_grants(state)
     run_diagnostic(revoked.id)
     revoked.refresh_from_db()
     assert revoked.status == "failed" and revoked.error_code == "ACCESS_REVOKED"
-
-
-def test_existing_disabled_mapping_stays_disabled_and_report_receipt_shows_it(reporting):
-    destination, user, payload, state = reporting
-    mapping = PlatformProject.objects.create(
-        project=destination, source_instance="test-dp", external_project_id=9, active=False
-    )
-    response = call("/api/quality-auth/daq-reports/", {**payload, "hubProjectId": str(destination.id)}, "POST")
-    assert response.status_code == 201, response.content
-    mapping.refresh_from_db()
-    assert not mapping.active
-    assert response.data["source_association_active"] is False
-    assert PlatformProject.objects.filter(project=destination).count() == 1
 
 
 def test_report_history_native_links_resolve_the_destination_workspace(reporting):
@@ -403,7 +360,7 @@ def test_report_history_native_links_resolve_the_destination_workspace(reporting
     assert history.data["results"][0]["nativeUrl"].startswith(
         f"/{destination.workspace.slug}/p/{destination.identifier}/defects/"
     )
-    assert response.data["source_association_active"] is True
+    assert "source_association_active" not in response.data
 
 
 def test_report_only_diagnostic_rechecks_disabled_local_account(reporting, mocker):
@@ -421,9 +378,8 @@ def test_report_only_diagnostic_rechecks_disabled_local_account(reporting, mocke
         mode="auto",
         result={"trigger": "materials_verified", "input": {"files": ["present"]}},
     )
-    account = PlatformAccount.objects.get(user=user)
-    account.active = False
-    account.save()
+    user.is_active = False
+    user.save()
     inspect = mocker.patch("plane.quality.tasks.inspect")
     run_diagnostic(job.id)
     job.refresh_from_db()
@@ -499,14 +455,6 @@ def test_archived_or_deleted_workspace_is_not_reportable_after_publication(repor
     assert not Defect.objects.filter(project=destination).exists()
 
 
-def test_source_collector_with_real_data_platform_project_member_role_can_report(reporting):
-    destination, user, payload, state = reporting
-    state["projects"] = [{"id": 9, "role": "Member"}]
-    response = call("/api/quality-auth/daq-reports/", {**payload, "hubProjectId": str(destination.id)}, "POST")
-    assert response.status_code == 201, response.content
-    assert Defect.objects.filter(project=destination).exists()
-
-
 def test_report_only_diagnostic_discards_late_model_result_after_source_revocation(reporting, mocker):
     destination, user, payload, state = reporting
     response = call("/api/quality-auth/daq-reports/", {**payload, "hubProjectId": str(destination.id)}, "POST")
@@ -528,7 +476,7 @@ def test_report_only_diagnostic_discards_late_model_result_after_source_revocati
     knowledge = mocker.patch("plane.quality.tasks.search")
 
     def revoke_during_analysis(*args):
-        state["projects"] = []
+        revoke_grants(state)
         return {"summary": "must not be published"}
 
     mocker.patch("plane.quality.tasks.analyze_diagnostic", side_effect=revoke_during_analysis)
@@ -536,67 +484,6 @@ def test_report_only_diagnostic_discards_late_model_result_after_source_revocati
     job.refresh_from_db()
     assert job.status == "failed" and job.error_code == "ACCESS_REVOKED" and job.result == {}
     knowledge.assert_not_called()
-
-
-def test_automatic_source_association_preserves_verified_project_and_task_names(reporting):
-    destination, user, payload, state = reporting
-    state["context"].update(projectName="生产采集项目", taskName="机械臂抓取任务")
-    response = call("/api/quality-auth/daq-reports/", {**payload, "hubProjectId": str(destination.id)}, "POST")
-    assert response.status_code == 201, response.content
-    assert response.data["platformProjectName"] == "生产采集项目"
-    assert response.data["platformTaskName"] == "机械臂抓取任务"
-    mapping = PlatformProject.objects.get(project=destination, source_instance="test-dp", external_project_id=9)
-    assert mapping.name == "生产采集项目"
-    detail = call("/api/quality-auth/daq-reports/" + response.data["issueId"] + "/")
-    assert detail.status_code == 200 and detail.data["source"]["platformTaskName"] == "机械臂抓取任务"
-
-
-def test_reporter_can_link_verified_baseline_session_without_gaining_project_access(reporting):
-    destination, user, payload, state = reporting
-    base = "/api/quality-auth/daq-reports/"
-    created = call(base, {**payload, "hubProjectId": str(destination.id)}, "POST")
-    report_id = created.data["issueId"]
-    path = base + report_id + "/session/"
-    state["context"].update(sourceSessionId="actual-baseline", dataPackageId="actual-baseline-package")
-    first = call(path, {"sourceSessionId": "actual-baseline", "platformTaskId": 24}, "POST")
-    assert first.status_code == 201, first.content
-    assert first.data["sourceSessionId"] == "actual-baseline"
-    assert first.data["dataPackageId"] == "actual-baseline-package"
-    again = call(path, {"sourceSessionId": "actual-baseline", "platformTaskId": 24}, "POST")
-    assert again.status_code == 200 and again.data["verifiedSessions"] == first.data["verifiedSessions"]
-    assert SourceLink.objects.filter(defect_id=report_id, record_type="verified_session").count() == 1
-    assert not ProjectMember.objects.filter(project=destination, member=user).exists()
-    wrong = call(path, {"sourceSessionId": "actual-baseline", "platformTaskId": 25}, "POST")
-    assert wrong.status_code == 409, wrong.content
-
-
-@pytest.mark.parametrize("boundary", ["foreign_actor", "wrong_project", "wrong_session", "missing_package"])
-def test_report_baseline_session_rejects_unverified_authority_and_cross_actor(reporting, boundary):
-    destination, user, payload, state = reporting
-    base = "/api/quality-auth/daq-reports/"
-    created = call(base, {**payload, "hubProjectId": str(destination.id)}, "POST")
-    report_id = created.data["issueId"]
-    state["context"].update(sourceSessionId="actual-session", dataPackageId="actual-package")
-    actor = 16
-    if boundary == "foreign_actor":
-        from plane.db.models import User
-
-        other = User.objects.create(username="session-other", email="session-other@test.invalid")
-        PlatformAccount.objects.create(
-            user=other, source_instance="test-dp", external_user_id=17, source_username="other", source_role="Collector"
-        )
-        actor = 17
-    elif boundary == "wrong_project":
-        state["context"]["projectId"] = 999
-    elif boundary == "wrong_session":
-        state["context"]["sourceSessionId"] = "other-session"
-    else:
-        state["context"]["dataPackageId"] = None
-    response = call(
-        base + report_id + "/session/", {"sourceSessionId": "actual-session", "platformTaskId": 24}, "POST", actor=actor
-    )
-    assert response.status_code in {403, 404}, response.content
-    assert not SourceLink.objects.filter(defect_id=report_id, record_type="verified_session").exists()
 
 
 @pytest.mark.parametrize("package_owner", ["reporter", "technician"])
@@ -712,106 +599,6 @@ def test_report_timeline_uses_real_actors_and_state_changes_without_internal_not
     assert str(opaque.id) not in {row["id"] for row in timeline}
     assert b"private-event-body-sentinel" not in response.content
     assert b"internal-technical-plan-sentinel" not in response.content
-
-
-def test_report_timeline_includes_only_its_testers_structured_regression_results(reporting):
-    destination, user, payload, state = reporting
-    from plane.db.models import Issue, User
-    from plane.quality.models import (
-        CaseRevision,
-        DaqBinding,
-        DataRegression,
-        DefectEvent,
-        PlanItem,
-        Solution,
-        SolutionRevision,
-        TestCase,
-        TestExecution,
-        TestPlan,
-    )
-
-    tester = User.objects.create(
-        username="timeline-tester", email="timeline-tester@test.invalid", display_name="本次测试员"
-    )
-    created = call("/api/quality-auth/daq-reports/", {**payload, "hubProjectId": str(destination.id)}, "POST")
-    report_id = created.data["issueId"]
-    defect = Defect.objects.get(pk=report_id)
-    DefectEvent.objects.create(
-        project=destination, defect=defect, created_by=user, previous_status="in_progress", status="resolved"
-    )
-    issue = Issue.objects.create(project=destination, workspace=destination.workspace, name="private-repair-task")
-    binding = DaqBinding.objects.create(
-        project=destination, issue=issue, source_instance="test-dp", platform_task_id=24, source_record_id="old-session"
-    )
-    solution = Solution.objects.create(
-        project=destination,
-        defect=defect,
-        title="private-solution",
-        root_cause="private-root-cause",
-        steps="private-steps",
-        verification="private-verification",
-    )
-    revision = SolutionRevision.objects.create(
-        project=destination, solution=solution, version=1, snapshot={}, reviewer_ids=[], required_count=1
-    )
-    plan = TestPlan.objects.create(
-        project=destination, name="private-plan", build="v2", environment="private-environment", managed=True
-    )
-    DataRegression.objects.create(
-        project=destination,
-        plan=plan,
-        defect=defect,
-        solution_revision=revision,
-        binding=binding,
-        fixed_build="v2",
-        resolved_at=timezone.now(),
-        round_started_at=timezone.now(),
-    )
-    case = TestCase.objects.create(project=destination, title="private-case-title", steps=[])
-    case_revision = CaseRevision.objects.create(
-        project=destination, case=case, version=1, title=case.title, snapshot={}
-    )
-    item = PlanItem.objects.create(project=destination, plan=plan, case=case, revision=case_revision)
-    visible = []
-    for result in ["failed", "blocked", "inconclusive", "passed", "skipped"]:
-        execution = TestExecution.objects.create(
-            project=destination,
-            item=item,
-            created_by=tester,
-            request_id=uuid4(),
-            result=result,
-            actual_result="private-actual-result-sentinel",
-            evidence="private-evidence-sentinel",
-            step_results=[{"actual": "private-step-sentinel"}],
-        )
-        if result != "skipped":
-            visible.append(execution)
-    unrelated_plan = TestPlan.objects.create(project=destination, name="unrelated-plan", build="v2", environment="env")
-    unrelated_item = PlanItem.objects.create(
-        project=destination, plan=unrelated_plan, case=case, revision=case_revision
-    )
-    unrelated = TestExecution.objects.create(
-        project=destination,
-        item=unrelated_item,
-        created_by=tester,
-        request_id=uuid4(),
-        result="passed",
-        actual_result="unrelated-execution-sentinel",
-    )
-    DefectEvent.objects.create(
-        project=destination, defect=defect, created_by=user, previous_status="resolved", status="closed"
-    )
-    response = call(f"/api/quality-auth/daq-reports/{report_id}/")
-    assert response.status_code == 200, response.content
-    timeline = response.data["timeline"]
-    execution_rows = [row for row in timeline if row["actor"] == "本次测试员"]
-    assert [row["action"] for row in execution_rows] == ["回归失败", "回归未完成", "回归未完成", "回归通过"]
-    assert {row["id"] for row in execution_rows} == {"execution:" + str(execution.id) for execution in visible}
-    assert all(set(row) == {"id", "actor", "action", "created_at", "status"} for row in execution_rows)
-    assert all(row["status"] == "resolved" for row in execution_rows)
-    assert timeline[-1]["action"] == "验收关闭" and timeline[-1]["status"] == "closed"
-    assert "execution:" + str(unrelated.id) not in {row["id"] for row in timeline}
-    assert b"private-" not in response.content and b"unrelated-" not in response.content
 
 
 def test_report_diagnostic_reads_only_materials_uploaded_by_its_reporter(reporting, settings, tmp_path, mocker):

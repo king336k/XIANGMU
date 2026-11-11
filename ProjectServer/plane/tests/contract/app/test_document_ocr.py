@@ -440,3 +440,68 @@ def test_busy_local_service_requeues_bounded_instead_of_losing_import(
     assert row.extraction["ocr"]["busy_retries"] == 1
     enqueue.assert_called_once_with(str(row.id), "busy", 5)
     assert row.rows == [] and not Article.objects.filter(project=p).exists()
+
+
+def test_png_import_automatically_queues_ocr_once(session_client, ocr_case, mocker, django_capture_on_commit_callbacks):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    base, project, user = ocr_case
+    enqueue = mocker.patch("plane.quality.document_ocr.enqueue_ocr")
+    with django_capture_on_commit_callbacks(execute=True):
+        response = session_client.post(
+            base + "document-imports/",
+            {"resource": "knowledge", "file": SimpleUploadedFile("scan.png", PNG, "image/png")},
+            format="multipart",
+        )
+    assert response.status_code == 201, response.content
+    assert response.data["extraction"]["ocr"]["status"] == "queued"
+    assert response.data["extraction"]["ocr"]["requires_review"] is True
+    assert enqueue.call_count == 1
+    with django_capture_on_commit_callbacks(execute=True):
+        duplicate = session_client.post(
+            base + "document-imports/",
+            {"resource": "knowledge", "file": SimpleUploadedFile("scan.png", PNG, "image/png")},
+            format="multipart",
+        )
+    assert duplicate.status_code == 200
+    assert duplicate.data["id"] == response.data["id"]
+    assert enqueue.call_count == 1
+
+
+def test_plain_text_import_does_not_queue_ocr(session_client, ocr_case, mocker):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    base, _, _ = ocr_case
+    enqueue = mocker.patch("plane.quality.document_ocr.enqueue_ocr")
+    response = session_client.post(
+        base + "document-imports/",
+        {"resource": "knowledge", "file": SimpleUploadedFile("guide.md", "# 排查\n检查连接".encode())},
+        format="multipart",
+    )
+    assert response.status_code == 201, response.content
+    enqueue.assert_not_called()
+
+
+def test_unsafe_document_does_not_use_automatic_ocr_to_bypass_parser(session_client, ocr_case, mocker):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    base, _, _ = ocr_case
+    enqueue = mocker.patch("plane.quality.document_ocr.enqueue_ocr")
+    mocker.patch(
+        "plane.quality.document_imports.extract_local",
+        return_value={
+            "format": "pdf",
+            "safe_for_ocr": False,
+            "segments": [],
+            "attachments": [],
+            "failures": [{"error": "unsafe document"}],
+        },
+    )
+    response = session_client.post(
+        base + "document-imports/",
+        {"resource": "knowledge", "file": SimpleUploadedFile("bad.pdf", b"%PDF-bad")},
+        format="multipart",
+    )
+    assert response.status_code == 201, response.content
+    assert "ocr" not in response.data["extraction"]
+    enqueue.assert_not_called()

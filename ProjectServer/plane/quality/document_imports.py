@@ -181,6 +181,9 @@ def save_preview(view, resource, name, rows, source_url="", original=None, extra
     ).hexdigest()
     existing = DocumentImport.objects.filter(project=project, resource=resource, sha256=digest).first()
     if existing:
+        from .document_ocr import queue_automatic_ocr
+
+        queue_automatic_ocr(existing, view.request.user)
         return Response(representation(existing))
     row = DocumentImport.objects.create(
         project=project,
@@ -200,6 +203,9 @@ def save_preview(view, resource, name, rows, source_url="", original=None, extra
             for a in (extraction or {}).get("attachments", [])
         )
         save_files(row, view.request.user, entries)
+    from .document_ocr import queue_automatic_ocr
+
+    queue_automatic_ocr(row, view.request.user)
     return Response(representation(row), status=201)
 
 
