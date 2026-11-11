@@ -1,0 +1,52 @@
+/**
+ * Copyright (c) 2023-present Plane Software, Inc. and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * See the LICENSE file for details.
+ */
+
+import React from "react";
+import { observer } from "mobx-react";
+import { useParams } from "next/navigation";
+import useSWR from "swr";
+// plane package imports
+import { useTranslation } from "@plane/i18n";
+import { Loader } from "@plane/ui";
+// plane web hooks
+import { useAnalytics } from "@/hooks/store/use-analytics";
+import { useProject } from "@/hooks/store/use-project";
+// plane web components
+import AnalyticsSectionWrapper from "../analytics-section-wrapper";
+import ActiveProjectItem from "./active-project-item";
+
+const ActiveProjects = observer(function ActiveProjects() {
+  const { t } = useTranslation();
+  const { fetchProjectAnalyticsCount } = useProject();
+  const { workspaceSlug } = useParams();
+  const { selectedProjects } = useAnalytics();
+  const { data: projectAnalyticsCount, isLoading: isProjectAnalyticsCountLoading } = useSWR(
+    workspaceSlug ? ["projectAnalyticsCount", workspaceSlug, selectedProjects.join(",")] : null,
+    workspaceSlug
+      ? () =>
+          fetchProjectAnalyticsCount(workspaceSlug.toString(), {
+            fields: "total_issues,completed_issues",
+            ...(selectedProjects.length ? { project_ids: selectedProjects.join(",") } : {}),
+          })
+      : null
+  );
+  return (
+    <AnalyticsSectionWrapper
+      title={`${t("workspace_analytics.active_projects")}`}
+      subtitle="全部时间"
+      className="md:col-span-2"
+    >
+      <div className="flex h-[350px] flex-col gap-4 overflow-auto">
+        {isProjectAnalyticsCountLoading &&
+          Array.from({ length: 5 }).map((_, index) => <Loader.Item key={index} height="40px" width="100%" />)}
+        {!isProjectAnalyticsCountLoading &&
+          projectAnalyticsCount?.map((project) => <ActiveProjectItem key={project.id} project={project} />)}
+      </div>
+    </AnalyticsSectionWrapper>
+  );
+});
+
+export default ActiveProjects;

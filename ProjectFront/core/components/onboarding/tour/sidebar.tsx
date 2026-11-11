@@ -1,0 +1,77 @@
+/**
+ * Copyright (c) 2023-present Plane Software, Inc. and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * See the LICENSE file for details.
+ */
+
+// plane imports
+import { CycleIcon, ModuleIcon, PageIcon, ViewsIcon, WorkItemsIcon } from "@plane/propel/icons";
+import type { ISvgIcons } from "@plane/propel/icons";
+// types
+import type { TTourSteps } from "./root";
+
+const sidebarOptions: {
+  key: TTourSteps;
+  label: string;
+  Icon: React.FC<ISvgIcons>;
+}[] = [
+  {
+    key: "work-items",
+    label: "工作项",
+    Icon: WorkItemsIcon,
+  },
+  {
+    key: "cycles",
+    label: "周期",
+    Icon: CycleIcon,
+  },
+  {
+    key: "modules",
+    label: "模块",
+    Icon: ModuleIcon,
+  },
+  {
+    key: "views",
+    label: "视图",
+    Icon: ViewsIcon,
+  },
+  {
+    key: "pages",
+    label: "项目文档",
+    Icon: PageIcon,
+  },
+];
+
+type Props = {
+  step: TTourSteps;
+  setStep: React.Dispatch<React.SetStateAction<TTourSteps>>;
+};
+
+export function TourSidebar({ step, setStep }: Props) {
+  return (
+    <div className="col-span-3 hidden bg-surface-2 p-8 lg:block">
+      <h3 className="text-16 font-medium">
+        功能说明
+        <br />
+        按项目组织工作。
+      </h3>
+      <div className="mt-8 space-y-5">
+        {sidebarOptions.map((option) => (
+          // oxlint-disable-next-line jsx_a11y/click-events-have-key-events
+          <h5
+            key={option.key}
+            className={`flex cursor-pointer items-center gap-2 border-l-[3px] py-0.5 pr-2 pl-3 text-13 font-medium capitalize ${
+              step === option.key ? "border-accent-strong text-accent-primary" : "border-transparent text-secondary"
+            }`}
+            onClick={() => setStep(option.key)}
+            // oxlint-disable-next-line jsx_a11y/prefer-tag-over-role
+            role="button"
+          >
+            <option.Icon className="h-4 w-4" aria-hidden="true" />
+            {option.label}
+          </h5>
+        ))}
+      </div>
+    </div>
+  );
+}

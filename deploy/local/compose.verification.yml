@@ -1,0 +1,35 @@
+# 本机既有验收实例的镜像覆盖；与独立部署入口分开使用。
+services:
+  api:
+    image: engramproject/api:local
+    environment:
+      KNOWLEDGE_EMBEDDING_ALLOWED_HTTP_ORIGINS: http://10.251.231.20:18885
+  worker:
+    image: engramproject/api:local
+    environment:
+      KNOWLEDGE_EMBEDDING_ALLOWED_HTTP_ORIGINS: http://10.251.231.20:18885
+    command: ["bash", "-c", "python manage.py wait_for_db && python manage.py wait_for_migrations && exec celery -A plane worker -l info --concurrency=2 --prefetch-multiplier=1 -Q celery"]
+  beat-worker:
+    image: engramproject/api:local
+    environment:
+      KNOWLEDGE_EMBEDDING_ALLOWED_HTTP_ORIGINS: http://10.251.231.20:18885
+  web:
+    image: engramproject/web:local
+  diagnostic-worker:
+    extends:
+      file: /home/engram/Documents/tmp/artifacts/plane-local-2026-11-06/docker-compose.yml
+      service: worker
+    image: engramproject/diagnostic-worker:local
+    command: ["bash", "-c", "python manage.py wait_for_db && python manage.py wait_for_migrations && exec celery -A plane worker -l info --concurrency=2 --prefetch-multiplier=1 -Q diagnostics"]
+    stop_grace_period: 190s
+    volumes:
+      - /home/engram/Documents/tmp/artifacts/plane-local-2026-11-06/quality-attachments:/code/quality-attachments
+    environment:
+      KNOWLEDGE_LLM_ALLOWED_HTTP_ORIGINS: http://10.10.10.193:3000
+      KNOWLEDGE_EMBEDDING_ALLOWED_HTTP_ORIGINS: http://10.251.231.20:18885
+    mem_limit: 768m
+    cpus: 1.0
+
+  proxy:
+    volumes:
+      - /home/engram/Documents/EngramProject/deploy/local/Caddyfile:/etc/caddy/Caddyfile:ro

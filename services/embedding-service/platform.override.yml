@@ -1,0 +1,52 @@
+x-builtin-env: &builtin-env
+  KNOWLEDGE_BUILTIN_EMBEDDING_BASE_URL: http://builtin-embedding:18885/v1
+  KNOWLEDGE_BUILTIN_EMBEDDING_MODEL: bge-small-zh-v1.5
+  KNOWLEDGE_BUILTIN_EMBEDDING_API_KEY: ${KNOWLEDGE_BUILTIN_EMBEDDING_API_KEY:?use setup_platform.py to supply the key in RAM}
+  KNOWLEDGE_EMBEDDING_ALLOWED_HTTP_ORIGINS: ${KNOWLEDGE_EMBEDDING_ALLOWED_HTTP_ORIGINS:-},http://builtin-embedding:18885
+services:
+  builtin-embedding:
+    profiles: [embedding]
+    image: ${BUILTIN_EMBEDDING_IMAGE:-engramproject/embedding:bge-small-zh-v1.5}
+    environment:
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:?use setup_platform.py}
+      MODEL_DIR: /model
+    volumes:
+      - type: bind
+        source: ${EMBEDDING_MODEL_DIR:?use setup_platform.py --model-dir}
+        target: /model
+        read_only: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 2
+    pids_limit: 128
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request;urllib.request.urlopen('http://127.0.0.1:18885/health',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    networks: [embedding]
+  api:
+    environment: *builtin-env
+    networks: [default, embedding]
+  worker:
+    environment: *builtin-env
+    networks: [default, embedding]
+  beat-worker:
+    environment: *builtin-env
+    networks: [default, embedding]
+  migrator:
+    environment: *builtin-env
+    networks: [default, embedding]
+  diagnostic-worker:
+    environment: *builtin-env
+    networks: [default, embedding]
+networks:
+  embedding:
+    name: ${BUILTIN_EMBEDDING_NETWORK:-engramproject_embedding}
+    internal: true

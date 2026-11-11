@@ -1,0 +1,41 @@
+{
+  "command_k": {
+    "empty_state": {
+      "search": {
+        "title": "未找到结果"
+      }
+    }
+  },
+  "sidebar": {
+    "stickies": "便签",
+    "your_work": "我的工作",
+    "projects": "项目",
+    "pages": "文档",
+    "new_work_item": "新工作项",
+    "home": "主页",
+    "inbox": "通知",
+    "workspace": "工作区",
+    "views": "任务视图",
+    "analytics": "分析",
+    "work_items": "任务",
+    "cycles": "迭代周期",
+    "modules": "功能模块",
+    "intake": "待评估事项",
+    "drafts": "我的草稿",
+    "favorites": "收藏",
+    "pro": "专业版",
+    "upgrade": "升级",
+    "pi_chat": "AI 聊天",
+    "epics": "史诗",
+    "upgrade_plan": "升级计划",
+    "plane_pro": "平台版本",
+    "business": "商业版",
+    "quality": "测试",
+    "defects": "缺陷",
+    "knowledge": "文档与知识",
+    "more": "更多",
+    "hide": "收起",
+    "requirements": "需求",
+    "versions": "版本迭代"
+  }
+}

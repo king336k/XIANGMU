@@ -1,0 +1,8 @@
+**
+!ProjectFront/
+!ProjectFront/build/
+!ProjectFront/build/client/
+!ProjectFront/build/client/**
+!deploy/
+!deploy/local/
+!deploy/local/nginx.web.conf

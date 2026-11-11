@@ -1,0 +1,22 @@
+# 仅模板；不会自动安装。实例名server/cloud/daq。
+[Unit]
+Description=Engram dedicated bridge (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=engram-frp
+Group=engram-frp
+WorkingDirectory=/opt/engram-frp-bridge
+EnvironmentFile=/etc/engram-frp/%i.env
+ExecStart=/usr/bin/python3 /opt/engram-frp-bridge/bridge.py %i --run
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

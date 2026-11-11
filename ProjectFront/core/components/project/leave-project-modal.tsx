@@ -1,0 +1,175 @@
+/**
+ * Copyright (c) 2023-present Plane Software, Inc. and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * See the LICENSE file for details.
+ */
+
+import { observer } from "mobx-react";
+import { useParams } from "next/navigation";
+import { Controller, useForm } from "react-hook-form";
+import { AlertTriangleIcon } from "lucide-react";
+// Plane imports
+import { Button } from "@plane/propel/button";
+import { TOAST_TYPE, setToast } from "@plane/propel/toast";
+import type { IProject } from "@plane/types";
+import { Input, EModalPosition, EModalWidth, ModalCore } from "@plane/ui";
+// hooks
+import { useUserPermissions } from "@/hooks/store/user";
+import { useAppRouter } from "@/hooks/use-app-router";
+
+type FormData = {
+  projectName: string;
+  confirmLeave: string;
+};
+
+const defaultValues: FormData = {
+  projectName: "",
+  confirmLeave: "",
+};
+
+export interface ILeaveProjectModal {
+  project: IProject;
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export const LeaveProjectModal = observer(function LeaveProjectModal(props: ILeaveProjectModal) {
+  const { project, isOpen, onClose } = props;
+  // router
+  const router = useAppRouter();
+  const { workspaceSlug } = useParams();
+  // store hooks
+  const { leaveProject } = useUserPermissions();
+
+  const {
+    control,
+    formState: { errors, isSubmitting },
+    handleSubmit,
+    reset,
+  } = useForm({ defaultValues });
+
+  const handleClose = () => {
+    reset({ ...defaultValues });
+    onClose();
+  };
+
+  const onSubmit = async (data: any) => {
+    if (!workspaceSlug) return;
+
+    if (data) {
+      if (data.projectName === project?.name) {
+        if (data.confirmLeave === "退出项目") {
+          router.push(`/${workspaceSlug}/projects`);
+          return leaveProject(workspaceSlug.toString(), project.id)
+            .then(() => {
+              handleClose();
+            })
+            .catch((_err) => {
+              setToast({
+                type: TOAST_TYPE.ERROR,
+                title: "操作失败",
+                message: "操作失败，请稍后重试。",
+              });
+            });
+        } else {
+          setToast({
+            type: TOAST_TYPE.ERROR,
+            title: "操作失败",
+            message: "请输入确认口令 退出项目。",
+          });
+        }
+      } else {
+        setToast({
+          type: TOAST_TYPE.ERROR,
+          title: "操作失败",
+          message: "请填写上方显示的项目名称。",
+        });
+      }
+    } else {
+      setToast({
+        type: TOAST_TYPE.ERROR,
+        title: "操作失败",
+        message: "请填写完整。",
+      });
+    }
+  };
+
+  return (
+    <ModalCore isOpen={isOpen} handleClose={handleClose} position={EModalPosition.CENTER} width={EModalWidth.XXL}>
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6 p-6">
+        <div className="flex w-full items-center justify-start gap-6">
+          <span className="place-items-center rounded-full bg-danger-subtle p-4">
+            <AlertTriangleIcon className="h-6 w-6 text-danger-primary" aria-hidden="true" />
+          </span>
+          <span className="flex items-center justify-start">
+            <h3 className="text-18 font-medium 2xl:text-20">退出项目</h3>
+          </span>
+        </div>
+
+        <span>
+          <p className="text-13 leading-7 text-secondary">
+            确认退出项目<span className="font-medium text-primary">{` “${project?.name}” `}</span>
+            ？退出后将无法访问项目及其中的工作项。
+          </p>
+        </span>
+
+        <div className="text-secondary">
+          <p className="text-13 break-words">
+            输入项目名称 <span className="font-medium text-primary">{project?.name}</span> 以继续操作：
+          </p>
+          <Controller
+            control={control}
+            name="projectName"
+            rules={{
+              required: "请输入项目名称",
+            }}
+            render={({ field: { value, onChange, ref } }) => (
+              <Input
+                id="projectName"
+                name="projectName"
+                type="text"
+                value={value}
+                onChange={onChange}
+                ref={ref}
+                hasError={Boolean(errors.projectName)}
+                placeholder="请输入项目名称"
+                className="mt-2 w-full"
+              />
+            )}
+          />
+        </div>
+
+        <div className="text-secondary">
+          <p className="text-13">
+            确认退出，请输入 <span className="font-medium text-primary">退出项目</span> ：
+          </p>
+          <Controller
+            control={control}
+            name="confirmLeave"
+            render={({ field: { value, onChange, ref } }) => (
+              <Input
+                id="confirmLeave"
+                name="confirmLeave"
+                type="text"
+                value={value}
+                onChange={onChange}
+                ref={ref}
+                hasError={Boolean(errors.confirmLeave)}
+                placeholder="输入确认口令 退出项目"
+                className="mt-2 w-full"
+              />
+            )}
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" size="lg" onClick={handleClose}>
+            取消
+          </Button>
+          <Button variant="error-fill" size="lg" type="submit" loading={isSubmitting}>
+            {isSubmitting ? "正在退出…" : "退出项目"}
+          </Button>
+        </div>
+      </form>
+    </ModalCore>
+  );
+});

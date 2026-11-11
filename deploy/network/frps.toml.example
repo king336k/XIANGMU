@@ -1,0 +1,12 @@
+# frp v0.72.0. 官方配置字段：
+# https://github.com/fatedier/frp/blob/v0.72.0/conf/frps_full_example.toml
+bindAddr = "0.0.0.0"
+bindPort = 7000
+proxyBindAddr = "127.0.0.1"
+auth.method = "token"
+auth.token = "{{ .Envs.FRP_AUTH_TOKEN }}"
+transport.tls.force = true
+transport.tls.certFile = "/run/secrets/server.crt"
+transport.tls.keyFile = "/run/secrets/server.key"
+log.to = "console"
+log.level = "warn"

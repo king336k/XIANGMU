@@ -1,0 +1,83 @@
+# 审核失败类规则
+# 适用于 packageType = REVIEW_FAILED / QUALITY_ISSUE
+# 规则版本：1.0.0
+
+rules:
+
+  - id: REVIEW_FAILED_QUALITY
+    name: 审核失败-数据质量问题
+    description: 数据包审核未通过（ReviewFailed），通常由数据质量问题触发
+    enabled: true
+    priority: 1
+    packageTypes:
+      - REVIEW_FAILED
+      - QUALITY_ISSUE
+    conditions:
+      - field: dataPackageStatus
+        op: EQ
+        value: "ReviewFailed"
+    result:
+      causeTitle: 数据质量不达标导致审核失败
+      causeDescription: 数据包在人工审核阶段被驳回，常见原因包括：传感器遮挡、曝光异常、关键动作缺失、环境光照不足、机器人未正确执行任务等。
+      confidence: 0.80
+      riskLevel: HIGH
+      recommendations:
+        - 查阅审核驳回意见，了解具体质量缺陷
+        - 对比审核标准检查视频数据（pose.h5 与视频时间线对齐）
+        - 确认各摄像头（task_info.json 中的 camera_list）均正常工作
+        - 根据审核意见决定是否补充采集或修正数据
+        - 重采后重新提交审核
+      suggestedRouting: 数采质控组
+      riskFlags:
+        - 数据质量不符合标注要求
+
+  - id: REVIEW_FAILED_TIMESTAMP_REGRESSION
+    name: 时间戳回归问题
+    description: 审核失败且时间戳数据异常（帧间隔异常或时间回退）
+    enabled: true
+    priority: 2
+    packageTypes:
+      - REVIEW_FAILED
+      - QUALITY_ISSUE
+    conditions:
+      - field: dataPackageStatus
+        op: EQ
+        value: "ReviewFailed"
+      - field: rosMode
+        op: NOT_NULL
+    result:
+      causeTitle: 时间戳异常（可能存在时间回退或超大帧间隔）
+      causeDescription: 数据包中可能存在时间戳异常：正常帧间隔应小于 100ms，若出现时间回退（timestamp regression）或超大间隔，会导致数据无法正确对齐，影响标注质量。
+      confidence: 0.65
+      riskLevel: HIGH
+      recommendations:
+        - 检查 frames.csv 中各相机的时间戳是否单调递增
+        - 确认采集系统时钟同步状态（NTP/PTP）
+        - 检查 ROS 系统时钟配置（use_sim_time 参数）
+        - 对比各相机时间戳，确认多相机时间同步质量
+        - 验证 pose.h5 与视频时间戳是否对齐
+      suggestedRouting: 数采硬件组
+      riskFlags:
+        - 时间戳异常可能导致多模态数据对齐失败
+
+  - id: ANNOTATION_ISSUE_GENERIC
+    name: 标注质量问题
+    description: 数据包处于标注阶段相关状态，发生数据质量异常
+    enabled: true
+    priority: 5
+    packageTypes:
+      - ANNOTATION_ISSUE
+    conditions:
+      - field: packageType
+        op: EQ
+        value: "ANNOTATION_ISSUE"
+    result:
+      causeTitle: 标注阶段数据质量问题
+      causeDescription: 数据包在标注过程中发现问题，可能是原始数据质量影响标注准确性，或标注工具与数据格式不兼容。
+      confidence: 0.60
+      riskLevel: MEDIUM
+      recommendations:
+        - 查看标注员反馈的具体问题描述
+        - 确认数据格式是否符合标注工具要求
+        - 评估是否需要重新采集或补充数据
+      riskFlags: []

@@ -1,0 +1,13 @@
+{
+  "name": "项目管理平台",
+  "short_name": "项目管理",
+  "description": "管理需求、任务、缺陷、测试与项目知识。",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f9fafb",
+  "theme_color": "#14d9ba",
+  "icons": [
+    { "src": "/icons/icon-192x192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512x512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

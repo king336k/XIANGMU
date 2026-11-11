@@ -1,0 +1,26 @@
+# 仅本客户端需要同时访问内网数据平台和公网frps。
+serverAddr = "{{ .Envs.FRP_SERVER_ADDR }}"
+serverPort = 7000
+loginFailExit = false
+auth.method = "token"
+auth.token = "{{ .Envs.FRP_AUTH_TOKEN }}"
+transport.tls.enable = true
+transport.tls.serverName = "{{ .Envs.FRP_TLS_SERVER_NAME }}"
+transport.tls.trustedCaFile = "/run/secrets/ca.crt"
+log.to = "console"
+log.level = "warn"
+
+[[proxies]]
+name = "data-authority"
+type = "stcp"
+secretKey = "{{ .Envs.FRP_AUTHORITY_SECRET }}"
+localIP = "127.0.0.1"
+localPort = 16324
+
+[[visitors]]
+name = "hub-api-visitor"
+type = "stcp"
+serverName = "hub-api"
+secretKey = "{{ .Envs.FRP_HUB_SECRET }}"
+bindAddr = "{{ .Envs.DAQ_LAN_IP }}"
+bindPort = 18000

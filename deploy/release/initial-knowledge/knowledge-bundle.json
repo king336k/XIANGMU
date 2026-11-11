@@ -1,0 +1,297 @@
+{
+  "schema": "engramproject-initial-knowledge-v1",
+  "seed_version": "legacy-157-20261109-v1",
+  "records": [
+    {
+      "source_key": "sz2607_project_hub_local:1",
+      "title": "数据包上传失败排查",
+      "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n摘要：上传失败，UPLOAD_TIMEOUT\n\n正文：检查数据包上传超时、网络连通性和重试队列。\n\n现象：上传失败，UPLOAD_TIMEOUT\n\n原记录根因（待复核）：local-dev fixture root cause\n\n处理步骤：检查数据包上传超时、网络连通性和重试队列。\n\n验证方式：重新执行验证\n\n适用机型（原记录）：ENGRAM-R1\n\n适用设备（原记录）：ZED2i\n\n适用环境：local-dev\n\n客户端版本：daq-1.0\n\n错误代码：UPLOAD_TIMEOUT",
+      "tags": [
+        "157历史资料",
+        "隔离验收样本",
+        "待复核"
+      ],
+      "provenance": {
+        "database": "sz2607_project_hub_local",
+        "source_id": "1",
+        "original_status": "PUBLISHED",
+        "classification": "historical_local",
+        "export_sha256": "7a185394a6d009edda9d1714f7948fb6c0fa4ecc2bfb39757005dae37edfee19",
+        "original_title": "数据包上传失败排查"
+      },
+      "source_versions": [
+        {
+          "version": 1,
+          "source_id": "1",
+          "title": "数据包上传失败排查",
+          "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n正文：检查数据包上传超时、网络连通性和重试队列。",
+          "original_status": "ACTIVE"
+        }
+      ],
+      "source_revision": "d80467a9e1725eb1c366ac86fb5a4fb7b1d8476bfde2a73fcbf26257ccb297d9"
+    },
+    {
+      "source_key": "sz2607_project_hub_local:2",
+      "title": "数据包存储空间不足处理",
+      "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n摘要：存储空间不足，STORAGE_FULL\n\n正文：清理已完成任务的临时文件后重新上传数据包。\n\n现象：存储空间不足，STORAGE_FULL\n\n原记录根因（待复核）：local-dev fixture root cause\n\n处理步骤：清理已完成任务的临时文件后重新上传数据包。\n\n验证方式：重新执行验证\n\n适用机型（原记录）：ENGRAM-R1\n\n适用设备（原记录）：ZED2i\n\n适用环境：local-dev\n\n客户端版本：daq-1.0\n\n错误代码：STORAGE_FULL",
+      "tags": [
+        "157历史资料",
+        "隔离验收样本",
+        "待复核"
+      ],
+      "provenance": {
+        "database": "sz2607_project_hub_local",
+        "source_id": "2",
+        "original_status": "PUBLISHED",
+        "classification": "historical_local",
+        "export_sha256": "7a185394a6d009edda9d1714f7948fb6c0fa4ecc2bfb39757005dae37edfee19",
+        "original_title": "数据包存储空间不足处理"
+      },
+      "source_versions": [
+        {
+          "version": 1,
+          "source_id": "2",
+          "title": "数据包存储空间不足处理",
+          "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n正文：清理已完成任务的临时文件后重新上传数据包。",
+          "original_status": "ACTIVE"
+        }
+      ],
+      "source_revision": "dce0cde9738f928d0e823faa1b79e2acc01c69ff4b38c9b60d5036f5b37c638c"
+    },
+    {
+      "source_key": "sz2607_project_hub_local:3",
+      "title": "采集任务配置不一致排查",
+      "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n摘要：采集任务配置不一致\n\n正文：核对任务配置、机器人型号和客户端软件版本后重新下发。\n\n现象：采集任务配置不一致\n\n原记录根因（待复核）：local-dev fixture root cause\n\n处理步骤：核对任务配置、机器人型号和客户端软件版本后重新下发。\n\n验证方式：重新执行验证\n\n适用机型（原记录）：ENGRAM-R1\n\n适用设备（原记录）：ZED2i\n\n适用环境：local-dev\n\n客户端版本：daq-1.0\n\n错误代码：CONFIG_MISMATCH",
+      "tags": [
+        "157历史资料",
+        "隔离验收样本",
+        "待复核"
+      ],
+      "provenance": {
+        "database": "sz2607_project_hub_local",
+        "source_id": "3",
+        "original_status": "PUBLISHED",
+        "classification": "historical_local",
+        "export_sha256": "7a185394a6d009edda9d1714f7948fb6c0fa4ecc2bfb39757005dae37edfee19",
+        "original_title": "采集任务配置不一致排查"
+      },
+      "source_versions": [
+        {
+          "version": 1,
+          "source_id": "3",
+          "title": "采集任务配置不一致排查",
+          "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n正文：核对任务配置、机器人型号和客户端软件版本后重新下发。",
+          "original_status": "ACTIVE"
+        }
+      ],
+      "source_revision": "6a26b87ac9d3ffa89613f95a9000abb84f0d30a687534e4daa9af14a7b8d3914"
+    },
+    {
+      "source_key": "sz2607_project_hub_local:4",
+      "title": "待审核知识负向样本",
+      "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n摘要：负向检索样本\n\n正文：该知识不得出现在已发布知识检索结果中。\n\n现象：负向检索样本\n\n原记录根因（待复核）：local-dev fixture root cause\n\n处理步骤：该知识不得出现在已发布知识检索结果中。\n\n验证方式：重新执行验证\n\n适用机型（原记录）：ENGRAM-R1\n\n适用设备（原记录）：ZED2i\n\n适用环境：local-dev\n\n客户端版本：daq-1.0\n\n错误代码：NEGATIVE_FIXTURE",
+      "tags": [
+        "157历史资料",
+        "隔离验收样本",
+        "待复核"
+      ],
+      "provenance": {
+        "database": "sz2607_project_hub_local",
+        "source_id": "4",
+        "original_status": "DRAFT",
+        "classification": "historical_local",
+        "export_sha256": "7a185394a6d009edda9d1714f7948fb6c0fa4ecc2bfb39757005dae37edfee19",
+        "original_title": "待审核知识负向样本"
+      },
+      "source_versions": [],
+      "source_revision": "aa010bedbf08a06ff26b13145c6ea552f77e804e5ddd083d00de9d37aa266996"
+    },
+    {
+      "source_key": "sz2607_project_hub_local:5",
+      "title": "已失效知识负向样本",
+      "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n摘要：负向检索样本\n\n正文：该知识不得出现在已发布知识检索结果中。\n\n现象：负向检索样本\n\n原记录根因（待复核）：local-dev fixture root cause\n\n处理步骤：该知识不得出现在已发布知识检索结果中。\n\n验证方式：重新执行验证\n\n适用机型（原记录）：ENGRAM-R1\n\n适用设备（原记录）：ZED2i\n\n适用环境：local-dev\n\n客户端版本：daq-1.0\n\n错误代码：NEGATIVE_FIXTURE",
+      "tags": [
+        "157历史资料",
+        "隔离验收样本",
+        "待复核"
+      ],
+      "provenance": {
+        "database": "sz2607_project_hub_local",
+        "source_id": "5",
+        "original_status": "PUBLISHED",
+        "classification": "historical_local",
+        "export_sha256": "7a185394a6d009edda9d1714f7948fb6c0fa4ecc2bfb39757005dae37edfee19",
+        "original_title": "已失效知识负向样本"
+      },
+      "source_versions": [
+        {
+          "version": 1,
+          "source_id": "4",
+          "title": "已失效知识负向样本",
+          "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n正文：该知识不得出现在已发布知识检索结果中。",
+          "original_status": "ACTIVE"
+        }
+      ],
+      "source_revision": "50ad976a8f23bbda09bc006d890ba8242f8aa7d674bb1ec755e01396e9b86fd5"
+    },
+    {
+      "source_key": "sz2607_project_hub_acceptance_20260902:1",
+      "title": "数据包上传失败排查",
+      "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n摘要：上传失败，UPLOAD_TIMEOUT\n\n正文：检查数据包上传超时、网络连通性和重试队列。\n\n现象：上传失败，UPLOAD_TIMEOUT\n\n原记录根因（待复核）：local-dev fixture root cause\n\n处理步骤：检查数据包上传超时、网络连通性和重试队列。\n\n验证方式：重新执行验证\n\n适用机型（原记录）：ENGRAM-R1\n\n适用设备（原记录）：ZED2i\n\n适用环境：local-dev\n\n客户端版本：daq-1.0\n\n错误代码：UPLOAD_TIMEOUT",
+      "tags": [
+        "157历史资料",
+        "隔离验收样本",
+        "待复核"
+      ],
+      "provenance": {
+        "database": "sz2607_project_hub_acceptance_20260902",
+        "source_id": "1",
+        "original_status": "PUBLISHED",
+        "classification": "historical_acceptance",
+        "export_sha256": "a4feb5ef6b712a6aac39bf0e89fdc09c119fe73695c29451cd67bd007d7f12f7",
+        "original_title": "数据包上传失败排查"
+      },
+      "source_versions": [
+        {
+          "version": 1,
+          "source_id": "1",
+          "title": "数据包上传失败排查",
+          "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n正文：检查数据包上传超时、网络连通性和重试队列。",
+          "original_status": "ACTIVE"
+        }
+      ],
+      "source_revision": "b0453e37bc633c82e68343d4212ecc2eb607e4e76e08b626eb38daaa4a77d60c"
+    },
+    {
+      "source_key": "sz2607_project_hub_acceptance_20260902:2",
+      "title": "数据包存储空间不足处理",
+      "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n摘要：存储空间不足，STORAGE_FULL\n\n正文：清理已完成任务的临时文件后重新上传数据包。\n\n现象：存储空间不足，STORAGE_FULL\n\n原记录根因（待复核）：local-dev fixture root cause\n\n处理步骤：清理已完成任务的临时文件后重新上传数据包。\n\n验证方式：重新执行验证\n\n适用机型（原记录）：ENGRAM-R1\n\n适用设备（原记录）：ZED2i\n\n适用环境：local-dev\n\n客户端版本：daq-1.0\n\n错误代码：STORAGE_FULL",
+      "tags": [
+        "157历史资料",
+        "隔离验收样本",
+        "待复核"
+      ],
+      "provenance": {
+        "database": "sz2607_project_hub_acceptance_20260902",
+        "source_id": "2",
+        "original_status": "PUBLISHED",
+        "classification": "historical_acceptance",
+        "export_sha256": "a4feb5ef6b712a6aac39bf0e89fdc09c119fe73695c29451cd67bd007d7f12f7",
+        "original_title": "数据包存储空间不足处理"
+      },
+      "source_versions": [
+        {
+          "version": 1,
+          "source_id": "2",
+          "title": "数据包存储空间不足处理",
+          "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n正文：清理已完成任务的临时文件后重新上传数据包。",
+          "original_status": "ACTIVE"
+        }
+      ],
+      "source_revision": "739b1fed2741ea79269800529efc89ab17a6161d70fa6eb149bcd47a2a1b3cf5"
+    },
+    {
+      "source_key": "sz2607_project_hub_acceptance_20260902:3",
+      "title": "采集任务配置不一致排查",
+      "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n摘要：采集任务配置不一致\n\n正文：核对任务配置、机器人型号和客户端软件版本后重新下发。\n\n现象：采集任务配置不一致\n\n原记录根因（待复核）：local-dev fixture root cause\n\n处理步骤：核对任务配置、机器人型号和客户端软件版本后重新下发。\n\n验证方式：重新执行验证\n\n适用机型（原记录）：ENGRAM-R1\n\n适用设备（原记录）：ZED2i\n\n适用环境：local-dev\n\n客户端版本：daq-1.0\n\n错误代码：CONFIG_MISMATCH",
+      "tags": [
+        "157历史资料",
+        "隔离验收样本",
+        "待复核"
+      ],
+      "provenance": {
+        "database": "sz2607_project_hub_acceptance_20260902",
+        "source_id": "3",
+        "original_status": "PUBLISHED",
+        "classification": "historical_acceptance",
+        "export_sha256": "a4feb5ef6b712a6aac39bf0e89fdc09c119fe73695c29451cd67bd007d7f12f7",
+        "original_title": "采集任务配置不一致排查"
+      },
+      "source_versions": [
+        {
+          "version": 1,
+          "source_id": "3",
+          "title": "采集任务配置不一致排查",
+          "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n正文：核对任务配置、机器人型号和客户端软件版本后重新下发。",
+          "original_status": "ACTIVE"
+        }
+      ],
+      "source_revision": "b6049c456195df454f308d743537b858f417140c56b0c077a0125758ee49e866"
+    },
+    {
+      "source_key": "sz2607_project_hub_acceptance_20260902:4",
+      "title": "待审核知识负向样本",
+      "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n摘要：负向检索样本\n\n正文：该知识不得出现在已发布知识检索结果中。\n\n现象：负向检索样本\n\n原记录根因（待复核）：local-dev fixture root cause\n\n处理步骤：该知识不得出现在已发布知识检索结果中。\n\n验证方式：重新执行验证\n\n适用机型（原记录）：ENGRAM-R1\n\n适用设备（原记录）：ZED2i\n\n适用环境：local-dev\n\n客户端版本：daq-1.0\n\n错误代码：NEGATIVE_FIXTURE",
+      "tags": [
+        "157历史资料",
+        "隔离验收样本",
+        "待复核"
+      ],
+      "provenance": {
+        "database": "sz2607_project_hub_acceptance_20260902",
+        "source_id": "4",
+        "original_status": "DRAFT",
+        "classification": "historical_acceptance",
+        "export_sha256": "a4feb5ef6b712a6aac39bf0e89fdc09c119fe73695c29451cd67bd007d7f12f7",
+        "original_title": "待审核知识负向样本"
+      },
+      "source_versions": [],
+      "source_revision": "90dbe70c135dda82a3d1ba9dd498782f5174e19c8ab59caf2bfddf6e38705dc9"
+    },
+    {
+      "source_key": "sz2607_project_hub_acceptance_20260902:5",
+      "title": "已失效知识负向样本",
+      "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n摘要：负向检索样本\n\n正文：该知识不得出现在已发布知识检索结果中。\n\n现象：负向检索样本\n\n原记录根因（待复核）：local-dev fixture root cause\n\n处理步骤：该知识不得出现在已发布知识检索结果中。\n\n验证方式：重新执行验证\n\n适用机型（原记录）：ENGRAM-R1\n\n适用设备（原记录）：ZED2i\n\n适用环境：local-dev\n\n客户端版本：daq-1.0\n\n错误代码：NEGATIVE_FIXTURE",
+      "tags": [
+        "157历史资料",
+        "隔离验收样本",
+        "待复核"
+      ],
+      "provenance": {
+        "database": "sz2607_project_hub_acceptance_20260902",
+        "source_id": "5",
+        "original_status": "PUBLISHED",
+        "classification": "historical_acceptance",
+        "export_sha256": "a4feb5ef6b712a6aac39bf0e89fdc09c119fe73695c29451cd67bd007d7f12f7",
+        "original_title": "已失效知识负向样本"
+      },
+      "source_versions": [
+        {
+          "version": 1,
+          "source_id": "4",
+          "title": "已失效知识负向样本",
+          "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n正文：该知识不得出现在已发布知识检索结果中。",
+          "original_status": "ACTIVE"
+        }
+      ],
+      "source_revision": "54a11195f57a86b69e5c0c202e3bff1cf19a0e132b2dfbaa94807e849c52ab31"
+    },
+    {
+      "source_key": "sz2607_project_hub_acceptance_20260902:6",
+      "title": "[草稿] TK-20260902-0001 技术处理经验",
+      "content": "历史隔离/验收资料；不是现场设备手册。请复核适用范围和证据后扫描、审核、发布；原发布状态不代表当前可信。\n\n摘要：断网重连 20 次均可自动续传，数据包与时间戳校验通过\n\n正文：## 工单\nTK-20260902-0001\n\n## 问题现象\nDAQ 断网重连后数据包上传超时\n采集 Session 完成后上传卡在 92%，恢复网络后未自动续传。\n\n## 回归结论\n断网重连 20 次均可自动续传，数据包与时间戳校验通过\n\n## 回归证据\n新采集数据已关联；日志显示续传游标和服务端分片一致\n\n## 调查摘要\nRound 3: 检查 DAQ 采集时间线、网络恢复与上传重试记录\n\n## 根因\nRound 3: 采集缓存在网络恢复后未正确续传\n\n## 解决步骤\nRound 3: 修正续传游标，补充上传重试日志，增加一致性校验\n\n## 验证方法\n断网重连 20 次，重新采集并校验数据包、时间戳和日志\n\n## 影响范围\nDAQ 上传与中断恢复\n\n## 适用版本\nDAQ 2.6.x\n\n## 风险\n低风险，可能影响断点续传进度记录\n\n## 回滚\n回退到前一个稳定 Commit 并重启上传队列\n\n## 代码仓库\nssh://[redacted]:222/engram_data/engram_DAQ.git\n\n## 分支\nfix/sz2607-round-3\n\n## Commit SHA\n2607003\n\n## Merge Request\nhttp://127.0.0.1/local-acceptance/mr/3\n\n## 回归轮次\n3\n\n现象：DAQ 断网重连后数据包上传超时\n采集 Session 完成后上传卡在 92%，恢复网络后未自动续传。\n\n原记录根因（待复核）：Round 3: 采集缓存在网络恢复后未正确续传\n\n排查步骤：Round 3: 检查 DAQ 采集时间线、网络恢复与上传重试记录\n\n处理步骤：Round 3: 修正续传游标，补充上传重试日志，增加一致性校验\n\n验证方式：断网重连 20 次，重新采集并校验数据包、时间戳和日志\n\n风险：低风险，可能影响断点续传进度记录\n\n适用范围：DAQ 上传与中断恢复",
+      "tags": [
+        "157历史资料",
+        "隔离验收样本",
+        "待复核"
+      ],
+      "provenance": {
+        "database": "sz2607_project_hub_acceptance_20260902",
+        "source_id": "6",
+        "original_status": "DRAFT",
+        "classification": "historical_acceptance",
+        "export_sha256": "a4feb5ef6b712a6aac39bf0e89fdc09c119fe73695c29451cd67bd007d7f12f7",
+        "original_title": "[草稿] TK-20260902-0001 技术处理经验"
+      },
+      "source_versions": [],
+      "source_revision": "f5405615e78e146f7020567e9207b16a25e5e33bd43de63b879c8be0e5d82a64"
+    }
+  ],
+  "missing_attachments": [
+    {
+      "size": 184,
+      "sha256": "3cb78ecea3331adedd61507176cc634a26e6e9316002352fbf02725643732c17",
+      "status": "source_missing"
+    }
+  ]
+}

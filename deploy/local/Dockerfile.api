@@ -1,0 +1,6 @@
+FROM docker.1panel.live/makeplane/plane-backend:v1.4.3
+RUN pip install --no-cache-dir pypdf==7.0.0
+COPY ProjectServer/plane /code/plane
+COPY ProjectServer/templates /code/templates
+COPY ProjectServer/bin /code/bin
+COPY ProjectServer/manage.py /code/manage.py

@@ -1,0 +1,180 @@
+/**
+ * Copyright (c) 2023-present Plane Software, Inc. and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * See the LICENSE file for details.
+ */
+
+import { useState } from "react";
+import { observer } from "mobx-react";
+// plane imports
+import { Button } from "@plane/propel/button";
+import { CloseIcon } from "@plane/propel/icons";
+// assets
+import CyclesTour from "@/app/assets/onboarding/cycles.webp?url";
+import IssuesTour from "@/app/assets/onboarding/issues.webp?url";
+import ModulesTour from "@/app/assets/onboarding/modules.webp?url";
+import PagesTour from "@/app/assets/onboarding/pages.webp?url";
+import ViewsTour from "@/app/assets/onboarding/views.webp?url";
+// hooks
+import { useCommandPalette } from "@/hooks/store/use-command-palette";
+import { useUser } from "@/hooks/store/user";
+// local imports
+import { TourSidebar } from "./sidebar";
+
+export type TOnboardingTourProps = {
+  onComplete: () => void;
+};
+
+export type TTourSteps = "welcome" | "work-items" | "cycles" | "modules" | "views" | "pages";
+
+const TOUR_STEPS: {
+  key: TTourSteps;
+  title: string;
+  description: string;
+  image: string;
+  prevStep?: TTourSteps;
+  nextStep?: TTourSteps;
+}[] = [
+  {
+    key: "work-items",
+    title: "安排工作项",
+    description: "工作项记录任务内容、负责人、状态和日期，可按项目安排工作。",
+    image: IssuesTour,
+    nextStep: "cycles",
+  },
+  {
+    key: "cycles",
+    title: "按周期推进",
+    description: "周期管理一段时间内的工作，例如两周迭代。加入工作项后可查看本轮进度。",
+    image: CyclesTour,
+    prevStep: "work-items",
+    nextStep: "modules",
+  },
+  {
+    key: "modules",
+    title: "按模块归类",
+    description: "模块归集同一功能或子系统的工作项，可设置负责人和目标日期。",
+    image: ModulesTour,
+    prevStep: "cycles",
+    nextStep: "views",
+  },
+  {
+    key: "views",
+    title: "保存常用视图",
+    description: "视图保存常用筛选和展示方式，便于再次查看或与成员共享。",
+    image: ViewsTour,
+    prevStep: "modules",
+    nextStep: "pages",
+  },
+  {
+    key: "pages",
+    title: "记录项目文档",
+    description: "项目文档支持协作编辑，可记录需求说明、会议结论和操作指引。",
+    image: PagesTour,
+    prevStep: "views",
+  },
+];
+
+export const TourRoot = observer(function TourRoot(props: TOnboardingTourProps) {
+  const { onComplete } = props;
+  // states
+  const [step, setStep] = useState<TTourSteps>("welcome");
+  // store hooks
+  const { toggleCreateProjectModal } = useCommandPalette();
+  const { data: currentUser } = useUser();
+
+  const currentStepIndex = TOUR_STEPS.findIndex((tourStep) => tourStep.key === step);
+  const currentStep = TOUR_STEPS[currentStepIndex];
+
+  return (
+    <>
+      {step === "welcome" ? (
+        <div className="w-4/5 overflow-hidden rounded-[10px] bg-surface-1 md:w-1/2 lg:w-2/5">
+          <div className="h-full overflow-hidden">
+            <div className="grid h-64 place-items-center bg-accent-primary">
+              <span className="text-24 font-semibold text-on-color">项目管理平台</span>
+            </div>
+            <div className="flex flex-col overflow-y-auto p-6">
+              <h3 className="font-semibold sm:text-18">
+                {currentUser?.username ? `你好，${currentUser.username}` : "你好"}
+              </h3>
+              <p className="mt-3 text-13 text-secondary">
+                从项目开始，管理需求、任务、缺陷、测试与项目知识。可先查看功能说明，或直接进入平台。
+              </p>
+              <div className="flex h-full items-end">
+                <div className="mt-12 flex items-center gap-6">
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      setStep("work-items");
+                    }}
+                  >
+                    查看功能说明
+                  </Button>
+                  <button
+                    type="button"
+                    className="bg-transparent text-11 font-medium text-accent-primary outline-subtle-1"
+                    onClick={() => {
+                      onComplete();
+                    }}
+                  >
+                    直接进入平台
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="relative grid h-3/5 w-4/5 grid-cols-10 overflow-hidden rounded-[10px] bg-surface-1 sm:h-3/4 md:w-1/2 lg:w-3/5">
+          <button
+            type="button"
+            className="fixed top-[19%] right-[9%] z-10 translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border border-strong bg-surface-1 p-1 sm:top-[11.5%] md:right-[24%] lg:right-[19%]"
+            onClick={onComplete}
+          >
+            <CloseIcon className="border-strong- h-3 w-3 text-primary" />
+          </button>
+          <TourSidebar step={step} setStep={setStep} />
+          <div className="col-span-10 h-full overflow-hidden lg:col-span-7">
+            <div
+              className={`flex h-1/2 items-end overflow-hidden bg-accent-primary sm:h-3/5 ${
+                currentStepIndex % 2 === 0 ? "justify-end" : "justify-start"
+              }`}
+            >
+              <img src={currentStep?.image} className="h-full w-full object-cover" alt={currentStep?.title} />
+            </div>
+            <div className="flex h-1/2 flex-col overflow-y-auto p-4 sm:h-2/5">
+              <h3 className="font-semibold sm:text-18">{currentStep?.title}</h3>
+              <p className="mt-3 text-13 text-secondary">{currentStep?.description}</p>
+              <div className="mt-3 flex h-full items-end justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  {currentStep?.prevStep && (
+                    <Button variant="secondary" onClick={() => setStep(currentStep.prevStep ?? "welcome")}>
+                      上一步
+                    </Button>
+                  )}
+                  {currentStep?.nextStep && (
+                    <Button variant="primary" onClick={() => setStep(currentStep.nextStep ?? "work-items")}>
+                      下一步
+                    </Button>
+                  )}
+                </div>
+                {currentStepIndex === TOUR_STEPS.length - 1 && (
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      onComplete();
+                      toggleCreateProjectModal(true);
+                    }}
+                  >
+                    创建项目
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+});

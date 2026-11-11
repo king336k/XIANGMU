@@ -1,0 +1,71 @@
+/**
+ * Copyright (c) 2023-present Plane Software, Inc. and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * See the LICENSE file for details.
+ */
+
+import { E_PASSWORD_STRENGTH } from "@plane/constants";
+
+export interface StrengthInfo {
+  message: string;
+  textColor: string;
+  activeFragments: number;
+}
+
+/**
+ * Get strength information including message, color, and active fragments
+ */
+export const getStrengthInfo = (strength: E_PASSWORD_STRENGTH): StrengthInfo => {
+  switch (strength) {
+    case E_PASSWORD_STRENGTH.EMPTY:
+      return {
+        message: "请输入密码",
+        textColor: "text-primary",
+        activeFragments: 0,
+      };
+    case E_PASSWORD_STRENGTH.LENGTH_NOT_VALID:
+      return {
+        message: "密码长度不足",
+        textColor: "text-danger-primary",
+        activeFragments: 1,
+      };
+    case E_PASSWORD_STRENGTH.STRENGTH_NOT_VALID:
+      return {
+        message: "密码强度较弱",
+        textColor: "text-orange-500",
+        activeFragments: 2,
+      };
+    case E_PASSWORD_STRENGTH.STRENGTH_VALID:
+      return {
+        message: "密码强度较高",
+        textColor: "text-success-primary",
+        activeFragments: 3,
+      };
+    default:
+      return {
+        message: "请输入密码",
+        textColor: "text-primary",
+        activeFragments: 0,
+      };
+  }
+};
+
+/**
+ * Get fragment color based on position and active state
+ */
+export const getFragmentColor = (fragmentIndex: number, activeFragments: number): string => {
+  if (fragmentIndex >= activeFragments) {
+    return "bg-layer-1";
+  }
+
+  switch (activeFragments) {
+    case 1:
+      return "bg-danger-primary";
+    case 2:
+      return "bg-orange-500";
+    case 3:
+      return "bg-success-primary";
+    default:
+      return "bg-layer-1";
+  }
+};

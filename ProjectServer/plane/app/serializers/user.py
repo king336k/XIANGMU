@@ -1,0 +1,242 @@
+# Copyright (c) 2023-present Plane Software, Inc. and contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+# See the LICENSE file for details.
+
+# Third party imports
+from rest_framework import serializers
+
+# Module import
+from plane.db.models import Account, Profile, User, Workspace, WorkspaceMemberInvite
+from plane.utils.url import contains_url
+
+from .base import BaseSerializer
+
+
+class AuthorityUserDisplay:
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        account = getattr(instance, "platform_account", None)
+        if account:
+            if "username" in data:
+                data["username"] = account.source_username
+            if "email" in data:
+                data["email"] = account.source_email
+            if "display_name" in data:
+                data["display_name"] = account.source_username
+            if "first_name" in data:
+                data["first_name"] = account.source_username
+            if "last_name" in data:
+                data["last_name"] = ""
+            data["account_source"] = "data_platform"
+        return data
+
+
+class UserSerializer(AuthorityUserDisplay, BaseSerializer):
+    def validate_user_timezone(self, value):
+        return "Asia/Shanghai"
+
+    def validate(self, attrs):
+        if self.instance and getattr(self.instance, "platform_account", None):
+            if {"username", "first_name", "last_name", "display_name", "email"}.intersection(self.initial_data):
+                raise serializers.ValidationError("账号资料由数据管理平台维护，请前往来源平台修改。")
+        return super().validate(attrs)
+
+    def validate_first_name(self, value):
+        if contains_url(value):
+            raise serializers.ValidationError("账号名称不能包含网址。")
+        return value
+
+    def validate_last_name(self, value):
+        if contains_url(value):
+            raise serializers.ValidationError("账号名称不能包含网址。")
+        return value
+
+    class Meta:
+        model = User
+        # Exclude password field from the serializer
+        fields = [field.name for field in User._meta.fields if field.name != "password"]
+        # Make all system fields and email read only
+        read_only_fields = [
+            "id",
+            "username",
+            "mobile_number",
+            "email",
+            "token",
+            "created_at",
+            "updated_at",
+            "is_superuser",
+            "is_staff",
+            "is_managed",
+            "last_active",
+            "last_login_time",
+            "last_logout_time",
+            "last_login_ip",
+            "last_logout_ip",
+            "last_login_uagent",
+            "last_location",
+            "last_login_medium",
+            "created_location",
+            "is_bot",
+            "is_password_autoset",
+            "is_email_verified",
+            "is_active",
+            "token_updated_at",
+        ]
+
+        # If the user has already filled first name or last name then he is onboarded
+        def get_is_onboarded(self, obj):
+            return bool(obj.first_name) or bool(obj.last_name)
+
+
+class UserMeSerializer(AuthorityUserDisplay, BaseSerializer):
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "avatar",
+            "cover_image",
+            "avatar_url",
+            "cover_image_url",
+            "date_joined",
+            "display_name",
+            "email",
+            "first_name",
+            "last_name",
+            "is_active",
+            "is_bot",
+            "is_email_verified",
+            "user_timezone",
+            "username",
+            "is_password_autoset",
+            "is_email_verified",
+            "last_login_medium",
+            "last_login_time",
+        ]
+        read_only_fields = fields
+
+
+class UserMeSettingsSerializer(AuthorityUserDisplay, BaseSerializer):
+    workspace = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ["id", "email", "workspace"]
+        read_only_fields = fields
+
+    def get_workspace(self, obj):
+        workspace_invites = WorkspaceMemberInvite.objects.filter(email=obj.email).count()
+
+        # profile
+        profile = Profile.objects.get(user=obj)
+        if (
+            profile.last_workspace_id is not None
+            and Workspace.objects.filter(
+                pk=profile.last_workspace_id,
+                workspace_member__member=obj.id,
+                workspace_member__is_active=True,
+            ).exists()
+        ):
+            workspace = Workspace.objects.filter(
+                pk=profile.last_workspace_id,
+                workspace_member__member=obj.id,
+                workspace_member__is_active=True,
+            ).first()
+            logo_asset_url = workspace.logo_asset.asset_url if workspace.logo_asset is not None else ""
+            return {
+                "last_workspace_id": profile.last_workspace_id,
+                "last_workspace_slug": (workspace.slug if workspace is not None else ""),
+                "last_workspace_name": (workspace.name if workspace is not None else ""),
+                "last_workspace_logo": (logo_asset_url),
+                "fallback_workspace_id": profile.last_workspace_id,
+                "fallback_workspace_slug": (workspace.slug if workspace is not None else ""),
+                "invites": workspace_invites,
+            }
+        else:
+            fallback_workspace = (
+                Workspace.objects.filter(workspace_member__member_id=obj.id, workspace_member__is_active=True)
+                .order_by("created_at")
+                .first()
+            )
+            return {
+                "last_workspace_id": None,
+                "last_workspace_slug": None,
+                "fallback_workspace_id": (fallback_workspace.id if fallback_workspace is not None else None),
+                "fallback_workspace_slug": (fallback_workspace.slug if fallback_workspace is not None else None),
+                "invites": workspace_invites,
+            }
+
+
+class UserLiteSerializer(AuthorityUserDisplay, BaseSerializer):
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "avatar",
+            "avatar_url",
+            "is_bot",
+            "display_name",
+        ]
+        read_only_fields = ["id", "is_bot"]
+
+
+class UserAdminLiteSerializer(AuthorityUserDisplay, BaseSerializer):
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "avatar",
+            "avatar_url",
+            "is_bot",
+            "display_name",
+            "username",
+            "is_active",
+            "email",
+            "last_login_medium",
+        ]
+        read_only_fields = ["id", "is_bot"]
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    model = User
+
+    """
+    Serializer for password change endpoint.
+    """
+    old_password = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True, min_length=8)
+    confirm_password = serializers.CharField(required=True, min_length=8)
+
+    def validate(self, data):
+        if data.get("old_password") == data.get("new_password"):
+            raise serializers.ValidationError({"error": "新密码不能与原密码相同。"})
+
+        if data.get("new_password") != data.get("confirm_password"):
+            raise serializers.ValidationError({"error": "两次输入的新密码不一致。"})
+
+        return data
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    """
+    Serializer for password change endpoint.
+    """
+
+    new_password = serializers.CharField(required=True, min_length=8)
+
+
+class ProfileSerializer(BaseSerializer):
+    class Meta:
+        model = Profile
+        fields = "__all__"
+        read_only_fields = ["user"]
+
+
+class AccountSerializer(BaseSerializer):
+    class Meta:
+        model = Account
+        fields = "__all__"
+        read_only_fields = ["user"]

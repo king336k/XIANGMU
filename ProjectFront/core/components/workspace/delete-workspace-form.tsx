@@ -1,0 +1,161 @@
+/**
+ * Copyright (c) 2023-present Plane Software, Inc. and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * See the LICENSE file for details.
+ */
+
+import { observer } from "mobx-react";
+import { Controller, useForm } from "react-hook-form";
+import { AlertTriangle } from "lucide-react";
+// Plane Imports
+import { useTranslation } from "@plane/i18n";
+import { Button } from "@plane/propel/button";
+import { TOAST_TYPE, setToast } from "@plane/propel/toast";
+import type { IWorkspace } from "@plane/types";
+import { Input } from "@plane/ui";
+import { cn } from "@plane/utils";
+// hooks
+import { useWorkspace } from "@/hooks/store/use-workspace";
+import { useUserSettings } from "@/hooks/store/user";
+import { useAppRouter } from "@/hooks/use-app-router";
+
+type Props = {
+  data: IWorkspace | null;
+  onClose: () => void;
+};
+
+const defaultValues = {
+  workspaceName: "",
+  confirmDelete: "",
+};
+
+export const DeleteWorkspaceForm = observer(function DeleteWorkspaceForm(props: Props) {
+  const { data, onClose } = props;
+  // router
+  const router = useAppRouter();
+  // store hooks
+  const { deleteWorkspace } = useWorkspace();
+  const { t } = useTranslation();
+  const { getWorkspaceRedirectionUrl } = useWorkspace();
+  const { fetchCurrentUserSettings } = useUserSettings();
+  // form info
+  const {
+    control,
+    formState: { errors, isSubmitting },
+    handleSubmit,
+    reset,
+    watch,
+  } = useForm({ defaultValues });
+
+  const canDelete = watch("workspaceName") === data?.name && watch("confirmDelete") === "删除此工作空间";
+
+  const handleClose = () => {
+    const timer = setTimeout(() => {
+      reset(defaultValues);
+      clearTimeout(timer);
+    }, 350);
+
+    onClose();
+  };
+
+  const onSubmit = async () => {
+    if (!data || !canDelete) return;
+
+    try {
+      await deleteWorkspace(data.slug);
+      await fetchCurrentUserSettings();
+      handleClose();
+      router.push(getWorkspaceRedirectionUrl());
+      setToast({
+        type: TOAST_TYPE.SUCCESS,
+        title: t("workspace_settings.settings.general.delete_modal.success_title"),
+        message: t("workspace_settings.settings.general.delete_modal.success_message"),
+      });
+    } catch (_error) {
+      setToast({
+        type: TOAST_TYPE.ERROR,
+        title: t("workspace_settings.settings.general.delete_modal.error_title"),
+        message: t("workspace_settings.settings.general.delete_modal.error_message"),
+      });
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6 p-6">
+      <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+        <span
+          className={cn(
+            "grid size-12 shrink-0 place-items-center rounded-full bg-danger-subtle text-danger-primary sm:size-10"
+          )}
+        >
+          <AlertTriangle className="size-5 text-danger-primary" aria-hidden="true" />
+        </span>
+        <div>
+          <div className="text-center sm:text-left">
+            <h3 className="text-h5-medium">{t("workspace_settings.settings.general.delete_modal.title")}</h3>
+            <p className="mt-1 text-body-xs-regular text-secondary">
+              即将删除工作空间 <span className="text-body-xs-semibold break-words">{data?.name}</span>
+              。该工作空间内的全部数据将永久删除，无法恢复。
+            </p>
+          </div>
+
+          <div className="mt-4 text-secondary">
+            <p className="text-body-xs-regular break-words">请输入工作空间名称以继续。</p>
+            <Controller
+              control={control}
+              name="workspaceName"
+              render={({ field: { value, onChange, ref } }) => (
+                <Input
+                  id="workspaceName"
+                  name="workspaceName"
+                  type="text"
+                  value={value}
+                  onChange={onChange}
+                  ref={ref}
+                  hasError={Boolean(errors.workspaceName)}
+                  placeholder={data?.name}
+                  className="mt-2 w-full"
+                  autoComplete="off"
+                />
+              )}
+            />
+          </div>
+
+          <div className="mt-4 text-secondary">
+            <p className="text-body-xs-regular">
+              请再次输入 <span className="text-body-xs-medium text-primary">删除此工作空间 </span>
+              以确认删除。
+            </p>
+            <Controller
+              control={control}
+              name="confirmDelete"
+              render={({ field: { value, onChange, ref } }) => (
+                <Input
+                  id="confirmDelete"
+                  name="confirmDelete"
+                  type="text"
+                  value={value}
+                  onChange={onChange}
+                  ref={ref}
+                  hasError={Boolean(errors.confirmDelete)}
+                  placeholder=""
+                  className="mt-2 w-full"
+                  autoComplete="off"
+                />
+              )}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button variant="secondary" size="lg" onClick={handleClose}>
+          {t("cancel")}
+        </Button>
+        <Button variant="error-fill" size="lg" type="submit" disabled={!canDelete} loading={isSubmitting}>
+          {isSubmitting ? t("deleting") : t("confirm")}
+        </Button>
+      </div>
+    </form>
+  );
+});

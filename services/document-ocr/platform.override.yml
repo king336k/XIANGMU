@@ -1,0 +1,25 @@
+# 与平台主docker-compose.yml一起使用，显式--profile document-ocr才启动OCR服务。
+services:
+  api:
+    networks: [default, document_ocr]
+  worker:
+    networks: [default, document_ocr]
+  document-ocr:
+    profiles: [document-ocr]
+    image: engramproject/document-ocr:163
+    environment:
+      DOCUMENT_OCR_API_KEY: ${DOCUMENT_OCR_API_KEY:-}
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 2
+    pids_limit: 128
+    tmpfs:
+      - /work:rw,noexec,nosuid,nodev,size=134217728,uid=1000,gid=1000,mode=0700
+    networks: [document_ocr]
+networks:
+  document_ocr:
+    internal: true

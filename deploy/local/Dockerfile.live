@@ -1,0 +1,2 @@
+FROM docker.1panel.live/makeplane/plane-live:v1.4.3
+COPY services/collaboration/dist /app/services/collaboration/dist

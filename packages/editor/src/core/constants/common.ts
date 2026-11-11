@@ -1,0 +1,266 @@
+/**
+ * Copyright (c) 2023-present Plane Software, Inc. and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * See the LICENSE file for details.
+ */
+
+import type { LucideIcon } from "lucide-react";
+import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  Bold,
+  CaseSensitive,
+  Code2,
+  Heading1,
+  Heading2,
+  Heading3,
+  Heading4,
+  Heading5,
+  Heading6,
+  Image,
+  Italic,
+  List,
+  ListOrdered,
+  ListTodo,
+  Strikethrough,
+  Table,
+  TextQuote,
+  Underline,
+} from "lucide-react";
+import { MonospaceIcon, SansSerifIcon, SerifIcon } from "@plane/propel/icons";
+import type { TCommandExtraProps, TEditorCommands, TEditorFontStyle } from "@/types";
+
+export type TEditorTypes = "lite" | "document" | "sticky";
+
+// Utility type to enforce the necessary extra props or make extraProps optional
+export type ExtraPropsForCommand<T extends TEditorCommands> = T extends keyof TCommandExtraProps
+  ? TCommandExtraProps[T]
+  : object; // Default to empty object for commands without extra props
+
+export type ToolbarMenuItem<T extends TEditorCommands = TEditorCommands> = {
+  itemKey: T;
+  renderKey: string;
+  name: string;
+  icon: LucideIcon;
+  shortcut?: string[];
+  editors: TEditorTypes[];
+  extraProps?: ExtraPropsForCommand<T>;
+};
+
+export const TYPOGRAPHY_ITEMS: ToolbarMenuItem<"text" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6">[] = [
+  { itemKey: "text", renderKey: "text", name: "正文", icon: CaseSensitive, editors: ["document"] },
+  { itemKey: "h1", renderKey: "h1", name: "一级标题", icon: Heading1, editors: ["document"] },
+  { itemKey: "h2", renderKey: "h2", name: "二级标题", icon: Heading2, editors: ["document"] },
+  { itemKey: "h3", renderKey: "h3", name: "三级标题", icon: Heading3, editors: ["document"] },
+  { itemKey: "h4", renderKey: "h4", name: "四级标题", icon: Heading4, editors: ["document"] },
+  { itemKey: "h5", renderKey: "h5", name: "五级标题", icon: Heading5, editors: ["document"] },
+  { itemKey: "h6", renderKey: "h6", name: "六级标题", icon: Heading6, editors: ["document"] },
+];
+
+export const TEXT_ALIGNMENT_ITEMS: ToolbarMenuItem<"text-align">[] = [
+  {
+    itemKey: "text-align",
+    renderKey: "text-align-left",
+    name: "左对齐",
+    icon: AlignLeft,
+    shortcut: ["Cmd", "Shift", "L"],
+    editors: ["lite", "document"],
+    extraProps: {
+      alignment: "left",
+    },
+  },
+  {
+    itemKey: "text-align",
+    renderKey: "text-align-center",
+    name: "居中",
+    icon: AlignCenter,
+    shortcut: ["Cmd", "Shift", "E"],
+    editors: ["lite", "document"],
+    extraProps: {
+      alignment: "center",
+    },
+  },
+  {
+    itemKey: "text-align",
+    renderKey: "text-align-right",
+    name: "右对齐",
+    icon: AlignRight,
+    shortcut: ["Cmd", "Shift", "R"],
+    editors: ["lite", "document"],
+    extraProps: {
+      alignment: "right",
+    },
+  },
+];
+
+const BASIC_MARK_ITEMS: ToolbarMenuItem<"bold" | "italic" | "underline" | "strikethrough">[] = [
+  {
+    itemKey: "bold",
+    renderKey: "bold",
+    name: "加粗",
+    icon: Bold,
+    shortcut: ["Cmd", "B"],
+    editors: ["lite", "document"],
+  },
+  {
+    itemKey: "italic",
+    renderKey: "italic",
+    name: "斜体",
+    icon: Italic,
+    shortcut: ["Cmd", "I"],
+    editors: ["lite", "document"],
+  },
+  {
+    itemKey: "underline",
+    renderKey: "underline",
+    name: "下划线",
+    icon: Underline,
+    shortcut: ["Cmd", "U"],
+    editors: ["lite", "document"],
+  },
+  {
+    itemKey: "strikethrough",
+    renderKey: "strikethrough",
+    name: "删除线",
+    icon: Strikethrough,
+    shortcut: ["Cmd", "Shift", "S"],
+    editors: ["lite", "document"],
+  },
+];
+
+const LIST_ITEMS: ToolbarMenuItem<"bulleted-list" | "numbered-list" | "to-do-list">[] = [
+  {
+    itemKey: "bulleted-list",
+    renderKey: "bulleted-list",
+    name: "无序列表",
+    icon: List,
+    shortcut: ["Cmd", "Shift", "7"],
+    editors: ["lite", "document"],
+  },
+  {
+    itemKey: "numbered-list",
+    renderKey: "numbered-list",
+    name: "有序列表",
+    icon: ListOrdered,
+    shortcut: ["Cmd", "Shift", "8"],
+    editors: ["lite", "document"],
+  },
+  {
+    itemKey: "to-do-list",
+    renderKey: "to-do-list",
+    name: "待办列表",
+    icon: ListTodo,
+    shortcut: ["Cmd", "Shift", "9"],
+    editors: ["lite", "document"],
+  },
+];
+
+export const USER_ACTION_ITEMS: ToolbarMenuItem<"quote" | "code">[] = [
+  { itemKey: "quote", renderKey: "quote", name: "引用", icon: TextQuote, editors: ["lite", "document"] },
+  { itemKey: "code", renderKey: "code", name: "代码格式", icon: Code2, editors: ["lite", "document"] },
+];
+
+export const COMPLEX_ITEMS: ToolbarMenuItem<"table" | "image">[] = [
+  { itemKey: "table", renderKey: "table", name: "表格", icon: Table, editors: ["document"] },
+  { itemKey: "image", renderKey: "image", name: "图片", icon: Image, editors: ["lite", "document"] },
+];
+
+export const IMAGE_ITEM = COMPLEX_ITEMS.find((item): item is ToolbarMenuItem<"image"> => item.itemKey === "image")!;
+
+export const TOOLBAR_ITEMS: {
+  [editorType in TEditorTypes]: {
+    [key: string]: ToolbarMenuItem[];
+  };
+} = {
+  lite: {
+    basic: BASIC_MARK_ITEMS.filter((item) => item.editors.includes("lite")),
+    alignment: TEXT_ALIGNMENT_ITEMS.filter((item) => item.editors.includes("lite")),
+    list: LIST_ITEMS.filter((item) => item.editors.includes("lite")),
+    userAction: USER_ACTION_ITEMS.filter((item) => item.editors.includes("lite")),
+    complex: COMPLEX_ITEMS.filter((item) => item.editors.includes("lite")),
+  },
+  document: {
+    basic: BASIC_MARK_ITEMS.filter((item) => item.editors.includes("document")),
+    alignment: TEXT_ALIGNMENT_ITEMS.filter((item) => item.editors.includes("document")),
+    list: LIST_ITEMS.filter((item) => item.editors.includes("document")),
+    userAction: USER_ACTION_ITEMS.filter((item) => item.editors.includes("document")),
+    complex: COMPLEX_ITEMS.filter((item) => item.editors.includes("document")),
+  },
+  sticky: {
+    basic: BASIC_MARK_ITEMS.filter((item) => ["bold", "italic"].includes(item.itemKey)),
+    list: LIST_ITEMS.filter((item) => ["to-do-list"].includes(item.itemKey)),
+  },
+};
+
+export const COLORS_LIST: {
+  key: string;
+  label: string;
+  textColor: string;
+  backgroundColor: string;
+}[] = [
+  {
+    key: "gray",
+    label: "灰色",
+    textColor: "var(--editor-colors-gray-text)",
+    backgroundColor: "var(--editor-colors-gray-background)",
+  },
+  {
+    key: "peach",
+    label: "浅橙",
+    textColor: "var(--editor-colors-peach-text)",
+    backgroundColor: "var(--editor-colors-peach-background)",
+  },
+  {
+    key: "pink",
+    label: "粉色",
+    textColor: "var(--editor-colors-pink-text)",
+    backgroundColor: "var(--editor-colors-pink-background)",
+  },
+  {
+    key: "orange",
+    label: "橙色",
+    textColor: "var(--editor-colors-orange-text)",
+    backgroundColor: "var(--editor-colors-orange-background)",
+  },
+  {
+    key: "green",
+    label: "绿色",
+    textColor: "var(--editor-colors-green-text)",
+    backgroundColor: "var(--editor-colors-green-background)",
+  },
+  {
+    key: "light-blue",
+    label: "浅蓝",
+    textColor: "var(--editor-colors-light-blue-text)",
+    backgroundColor: "var(--editor-colors-light-blue-background)",
+  },
+  {
+    key: "dark-blue",
+    label: "深蓝",
+    textColor: "var(--editor-colors-dark-blue-text)",
+    backgroundColor: "var(--editor-colors-dark-blue-background)",
+  },
+  {
+    key: "purple",
+    label: "紫色",
+    textColor: "var(--editor-colors-purple-text)",
+    backgroundColor: "var(--editor-colors-purple-background)",
+  },
+  // {
+  //   key: "pink-blue-gradient",
+  //   label: "Pink blue gradient",
+  //   textColor: "var(--editor-colors-pink-blue-gradient-text)",
+  //   backgroundColor: "var(--editor-colors-pink-blue-gradient-background)",
+  // },
+];
+
+export const EDITOR_FONT_STYLES: {
+  key: TEditorFontStyle;
+  label: string;
+  icon: React.FC;
+}[] = [
+  { key: "sans-serif", label: "无衬线字体", icon: SansSerifIcon },
+  { key: "serif", label: "衬线字体", icon: SerifIcon },
+  { key: "monospace", label: "等宽字体", icon: MonospaceIcon },
+];

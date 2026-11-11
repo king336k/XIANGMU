@@ -1,0 +1,5 @@
+**
+!services/
+!services/collaboration/
+!services/collaboration/dist/
+!services/collaboration/dist/**

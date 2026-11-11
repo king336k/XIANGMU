@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><title>
+    缺陷工作台 · 方案预览</title
+  ><style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #f4f7f8;
+      color: #20343d;
+      font:
+        14px/1.6 system-ui,
+        "Microsoft YaHei",
+        sans-serif;
+    }
+    button,
+    select {
+      font: inherit;
+      color: inherit;
+    }
+    button {
+      cursor: pointer;
+      background: white;
+      border: 1px solid #dce5e8;
+      border-radius: 6px;
+      padding: 6px 12px;
+    }
+    button:hover {
+      background: #edf6f5;
+    }
+    header {
+      background: white;
+      border-bottom: 1px solid #e1e8eb;
+      padding: 12px 24px;
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    header strong {
+      font-size: 16px;
+      color: #146f72;
+    }
+    .preview {
+      margin-left: auto;
+      font-size: 12px;
+      color: #6b7d85;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+    }
+    aside.nav {
+      padding: 25px 16px;
+      background: white;
+      border-right: 1px solid #e1e8eb;
+      min-height: calc(100vh - 58px);
+    }
+    .nav p {
+      padding: 8px 12px;
+      margin: 4px 0;
+      color: #657981;
+    }
+    .nav .active {
+      background: #e8f4f1;
+      border-radius: 6px;
+      color: #146f72;
+      font-weight: 600;
+    }
+    main {
+      min-width: 0;
+      padding: 22px;
+    }
+    .crumb {
+      font-size: 12px;
+      color: #71828b;
+      margin-bottom: 16px;
+    }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .top h1 {
+      font-size: 21px;
+      margin: 6px 0;
+    }
+    .muted {
+      color: #73848c;
+      font-size: 12px;
+    }
+    .tag {
+      font-size: 12px;
+      border-radius: 20px;
+      background: #fff3dc;
+      color: #916316;
+      padding: 3px 9px;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 18px 0;
+      align-items: center;
+    }
+    .controls label {
+      font-size: 12px;
+      color: #657981;
+    }
+    select {
+      border: 1px solid #dce5e8;
+      border-radius: 6px;
+      padding: 6px;
+      background: white;
+    }
+    .tabs {
+      display: flex;
+      gap: 24px;
+      border-bottom: 1px solid #dce5e8;
+      overflow: auto;
+      margin-bottom: 20px;
+    }
+    .tabs button {
+      border: 0;
+      background: none;
+      border-radius: 0;
+      white-space: nowrap;
+      padding: 12px 0;
+      border-bottom: 2px solid transparent;
+    }
+    .tabs button[aria-selected="true"] {
+      color: #146f72;
+      border-color: #146f72;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      gap: 20px;
+      align-items: start;
+    }
+    .card {
+      background: white;
+      border: 1px solid #e0e8eb;
+      border-radius: 9px;
+      padding: 20px;
+      margin-bottom: 16px;
+      min-width: 0;
+    }
+    .card h2 {
+      font-size: 15px;
+      margin: 0 0 12px;
+    }
+    .card h3 {
+      font-size: 13px;
+      margin: 16px 0 6px;
+    }
+    .summary {
+      padding: 14px;
+      border-left: 3px solid #268b80;
+      background: #eef8f4;
+      border-radius: 4px;
+    }
+    .facts {
+      display: grid;
+      grid-template-columns: 90px minmax(0, 1fr);
+      gap: 12px;
+      font-size: 12px;
+    }
+    .facts dt {
+      color: #73848c;
+    }
+    .facts dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+    .primary {
+      background: #167c76;
+      color: white;
+      border-color: #167c76;
+    }
+    .primary:hover {
+      background: #12665f;
+    }
+    .step {
+      font-size: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid #edf0f2;
+      display: flex;
+      gap: 8px;
+    }
+    .step b {
+      color: #197b71;
+    }
+    .evidence {
+      border: 1px solid #e1e8eb;
+      border-radius: 6px;
+      padding: 12px;
+      margin-top: 10px;
+    }
+    .evidence summary {
+      cursor: pointer;
+      color: #196f7c;
+    }
+    pre {
+      margin: 10px 0 0;
+      background: #f5f8fa;
+      max-height: 200px;
+      overflow: auto;
+      padding: 12px;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .chip {
+      color: #197b71;
+      background: #edf7f1;
+      border-radius: 20px;
+      padding: 2px 8px;
+      font-size: 11px;
+    }
+    ul {
+      padding-left: 20px;
+    }
+    img.flow {
+      width: 100%;
+      height: auto;
+    }
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #203d44;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 7px;
+      display: none;
+      font-size: 13px;
+    }
+    .pair {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .subcard {
+      padding: 12px;
+      background: #f6f8fa;
+      border-radius: 6px;
+    }
+    @media (min-width: 1800px) {
+      main {
+        padding: 28px;
+      }
+      .grid {
+        grid-template-columns: minmax(0, 1fr) 320px;
+      }
+    }
+    @media (max-width: 1050px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      aside.nav {
+        display: none;
+      }
+      .grid {
+        grid-template-columns: minmax(0, 1fr) 250px;
+      }
+    }
+    @media (max-width: 720px) {
+      main {
+        padding: 14px;
+      }
+      .grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .pair {
+        grid-template-columns: 1fr;
+      }
+      .preview {
+        margin-left: 0;
+      }
+      header {
+        padding: 12px 14px;
+      }
+      .tabs {
+        gap: 18px;
+      }
+      .card {
+        padding: 16px;
+      }
+      .top h1 {
+        font-size: 19px;
+      }
+    }
+  </style>
+  <header>
+    <strong>项目管理平台</strong><span class="muted">采集研发 / 缺陷工作台</span
+    ><span class="preview">交互方案预览 · 示例数据</span>
+  </header>
+  <div class="layout">
+    <aside class="nav">
+      <p>我的工作</p>
+      <p>项目列表</p>
+      <p>工作项</p>
+      <p>需求</p>
+      <p class="active">缺陷</p>
+      <p>测试</p>
+      <p>版本迭代</p>
+      <p>文档与知识</p>
+    </aside>
+    <main>
+      <div class="crumb">采集研发 / 缺陷 / DAQ-D-128</div>
+      <div class="top">
+        <div>
+          <span class="muted">DAQ-D-128 · DAQ 上报</span>
+          <h1>录制过程中相机连接中断</h1>
+          <span class="tag" id="business">处理中</span> <span class="muted" id="stageText">技术员处理中</span>
+        </div>
+        <button class="primary" id="action">保存处理方案</button>
+      </div>
+      <div class="controls">
+        <label
+          >预览角色
+          <select id="role">
+            <option>技术员</option>
+            <option>项目经理</option>
+            <option>测试员</option>
+            <option>采集员</option>
+          </select></label
+        ><label
+          >工作环节
+          <select id="stage">
+            <option value="process">技术处理中</option>
+            <option value="material">等待材料</option>
+            <option value="diagnosis">自动诊断中</option>
+            <option value="review">方案待审核</option>
+            <option value="regression">回归测试中</option>
+            <option value="accept">结果待验收</option>
+            <option value="closed">已关闭</option>
+          </select></label
+        ><span class="muted">切换查看对应操作与展示</span>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="缺陷内容">
+        <button role="tab" data-tab="overview">概况</button
+        ><button role="tab" data-tab="diagnosis" aria-selected="true">诊断</button
+        ><button role="tab" data-tab="solution">处理方案</button
+        ><button role="tab" data-tab="regression">回归测试</button
+        ><button role="tab" data-tab="history">操作记录</button><button role="tab" data-tab="flow">流程图</button>
+      </nav>
+      <div class="grid">
+        <div id="content"></div>
+        <aside>
+          <section class="card">
+            <h2>属性</h2>
+            <dl class="facts">
+              <dt>严重程度</dt>
+              <dd><span class="tag">严重</span></dd>
+              <dt>负责</dt>
+              <dd>李工</dd>
+              <dt>上报人</dt>
+              <dd>采集员 03</dd>
+              <dt>设备</dt>
+              <dd>Robot-07</dd>
+              <dt>DAQ 版本</dt>
+              <dd>2026.11.09</dd>
+              <dt>Session</dt>
+              <dd>capture-1109-1421</dd>
+              <dt>项目</dt>
+              <dd>采集研发</dd>
+            </dl>
+          </section>
+          <section class="card">
+            <h2>最近进展</h2>
+            <div class="step"><b>✓</b>反馈已保存</div>
+            <div class="step"><b>✓</b>材料已校验 · 3 份</div>
+            <div class="step"><b>✓</b>报告 v2 已生成</div>
+            <div class="step"><b>●</b><span id="current">技术员核对并处理</span></div>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <div id="toast" role="status"></div>
+  <script>
+    const content = document.querySelector("#content");
+    let currentTab = "diagnosis";
+    const templates = {
+      overview: `<section class="card"><h2>问题现象</h2><p>录制约 6 分钟后，相机连接中断。采集已停止，Session 保留，尚未重新录制。</p><div class="pair"><div class="subcard"><b>来源</b><p class="muted">DAQ · 当前任务与设备已关联</p></div><div class="subcard"><b>当前进展</b><p class="muted">报告 v2 已生成，等待处理</p></div></div></section><section class="card"><h2>本次材料</h2><div class="evidence row"><span>recording.log</span><span class="chip">已读取</span></div><div class="evidence row"><span>capture_manifest.summary.json</span><span class="chip">已读取</span></div><div class="evidence row"><span>diagnostics.zip</span><span class="chip">已解析 · 2 份日志</span></div></section>`,
+      diagnosis: `<section class="card"><div class="row"><h2>诊断报告 <span class="muted">v2</span></h2><span class="chip" id="diagnosisStatus">已生成</span></div><div class="row muted"><span>规则与 Agent · 读取 3 份材料</span><span>排队 2 秒 · 执行 18 秒</span></div><h3>摘要</h3><div class="summary">录制日志中出现连接中断及重试超时。驱动进程或相机链路异常为候选原因，尚无证据确认硬件损坏。</div><h3>待验证</h3><ul><li>对照故障时段的驱动状态和通信日志。</li><li>检查供电与连接，重新录制验证是否再次出现。</li></ul><details class="evidence"><summary>候选原因与依据</summary><p><b>相机链路中断</b> · 日志先断开，再出现超时；是否由驱动退出触发仍需核对。</p><p class="muted">依据：recording.log 第128–131行；diagnostics.zip / drivers/camera.log。</p></details><details class="evidence"><summary>查看日志证据 · recording.log</summary><pre>128 14:27:32 ERROR camera connection lost
+129 14:27:33 WARN reconnect attempt 1
+130 14:27:36 ERROR reconnect timeout
+131 14:27:37 INFO recording stopped</pre></details><details class="evidence"><summary>历史案例与适用范围</summary><p><b>相机断连后的驱动恢复检查</b></p><p class="muted">同型号、相邻版本；适用于驱动退出后的恢复，不能直接证明本次根因。</p><button data-msg="预览：打开所引用的已发布知识版本">查看知识 v3</button></details><div class="row" style="margin-top:18px"><span class="muted">结论仍需技术员核实</span><button data-msg="预览：记录本报告的采纳或纠正意见">记录判断</button></div></section><details class="card"><summary>历史报告 · v1</summary><p class="muted">仅有上报描述，材料不足。后续补充材料后生成 v2，旧版保留。</p></details>`,
+      solution: `<section class="card"><div class="row"><h2>处理方案 v2</h2><span class="chip">草稿</span></div><h3>根因</h3><p>尚待核实。先比对驱动退出时间与相机断开时间。</p><h3>处理步骤</h3><ol><li>保存故障时段材料与部署版本。</li><li>核对通信与驱动状态，记录实际结果。</li><li>确认修复后重新录制并关联新 Session。</li></ol><h3>代码变更</h3><div class="subcard muted">仓库、分支、提交与变更链接随方案版本保存。</div><h3>审核意见</h3><p>上一版退回：请补充驱动状态与恢复验证方法。</p><div class="row"><button data-msg="预览：保存草稿，不改变业务状态">保存草稿</button><button class="primary" data-msg="预览：冻结本版方案并提交经理审核">提交审核</button></div></section>`,
+      regression: `<section class="card"><div class="row"><h2>第 2 轮回归</h2><span class="tag">执行中</span></div><dl class="facts"><dt>执行</dt><dd>测试员 02</dd><dt>修复版本</dt><dd>DAQ 2026.11.09-r2</dd><dt>验证环境</dt><dd>同设备、同任务</dd><dt>新 Session</dt><dd>capture-1109-1530</dd></dl><h3>检查项</h3><div class="evidence">录制持续 10 分钟，无断连与超时。</div><div class="evidence">重连后图像及时间戳连续，材料可回查。</div><p class="muted">测试通过后等待经理最终验收。</p><div class="row"><button data-msg="预览：填写失败原因，退回技术员继续修复">不通过</button><button class="primary" data-msg="预览：提交实际结果与新采集证据，等待验收">提交测试结果</button></div></section>`,
+      history: `<section class="card"><h2>处理记录</h2><div class="step">15:18 · 项目经理 · 分派给李工</div><div class="step">15:17 · 系统 · 已生成诊断报告 v2</div><div class="step">15:16 · 采集员 03 · 补充诊断材料</div><div class="step">15:14 · 系统 · v1 提示材料不足</div><div class="step">15:14 · 采集员 03 · 从 DAQ 创建缺陷</div></section>`,
+      flow: `<section class="card"><h2>问题处理流程</h2><img class="flow" src="业务流程.svg" alt="DAQ反馈、自动诊断、技术处理、经理审核、测试回归和知识复用流程"><p class="muted">完整链路在同一条缺陷中关联，失败回原处理岗位。</p></section>`,
+    };
+    function render() {
+      content.innerHTML = templates[currentTab];
+      document
+        .querySelectorAll("[data-tab]")
+        .forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === currentTab)));
+      const s = document.querySelector("#stage").value;
+      const role = document.querySelector("#role").value;
+      const stageNames = {
+        process: "技术员处理中",
+        material: "等待采集员补充",
+        diagnosis: "自动诊断中",
+        review: "等待方案审核",
+        regression: "回归测试中",
+        accept: "等待经理验收",
+        closed: "已关闭",
+      };
+      document.querySelector("#stageText").textContent = stageNames[s];
+      document.querySelector("#current").textContent = stageNames[s];
+      document.querySelector("#business").textContent =
+        s === "closed"
+          ? "已关闭"
+          : ["regression", "accept"].includes(s)
+            ? "待回归"
+            : ["material", "diagnosis"].includes(s)
+              ? "待处理"
+              : "处理中";
+      const actions = {
+        技术员: { process: "保存处理方案", review: "查看审核进度", regression: "查看回归进度", closed: "查看处理结果" },
+        项目经理: {
+          process: "分派",
+          review: "审核方案",
+          regression: "查看回归进度",
+          accept: "验收",
+          closed: "重开缺陷",
+        },
+        测试员: { regression: "提交测试结果", accept: "查看验收进度" },
+        采集员: { material: "补充材料" },
+      };
+      document.querySelector("#action").textContent = actions[role]?.[s] || "查看进展";
+      if (s === "diagnosis" && currentTab === "diagnosis") {
+        document.querySelector("#diagnosisStatus").textContent = "分析中";
+      }
+    }
+    document.querySelectorAll("[data-tab]").forEach(
+      (b) =>
+        (b.onclick = () => {
+          currentTab = b.dataset.tab;
+          render();
+        })
+    );
+    document.querySelector("#role").onchange = render;
+    document.querySelector("#stage").onchange = render;
+    let timer;
+    function notify(text) {
+      const t = document.querySelector("#toast");
+      t.textContent = text;
+      t.style.display = "block";
+      clearTimeout(timer);
+      timer = setTimeout(() => (t.style.display = "none"), 3500);
+    }
+    document.querySelector("#action").onclick = () =>
+      notify("预览：" + document.querySelector("#action").textContent + "；实际权限与提交由正式页面校验");
+    content.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-msg]");
+      if (b) notify(b.dataset.msg);
+    });
+    render();
+  </script>
+</html>

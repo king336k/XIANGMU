@@ -1,0 +1,120 @@
+/**
+ * Copyright (c) 2023-present Plane Software, Inc. and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * See the LICENSE file for details.
+ */
+
+import { useState } from "react";
+import { observer } from "mobx-react";
+import { useNativeWorkAccess } from "@/hooks/use-native-work-access";
+import { useParams } from "next/navigation";
+// plane imports
+import { EUserPermissionsLevel } from "@plane/constants";
+import { useTranslation } from "@plane/i18n";
+import { EmptyStateDetailed } from "@plane/propel/empty-state";
+import { TOAST_TYPE, setToast } from "@plane/propel/toast";
+import type { ISearchIssueResponse } from "@plane/types";
+import { EIssuesStoreType, EUserProjectRoles } from "@plane/types";
+// components
+import { ExistingIssuesListModal } from "@/components/core/modals/existing-issues-list-modal";
+// hooks
+import { useCommandPalette } from "@/hooks/store/use-command-palette";
+import { useIssues } from "@/hooks/store/use-issues";
+import { useUserPermissions } from "@/hooks/store/user";
+import { useWorkItemFilterInstance } from "@/hooks/store/work-item-filters/use-work-item-filter-instance";
+
+export const ModuleEmptyState = observer(function ModuleEmptyState() {
+  // router
+  const { workspaceSlug: routerWorkspaceSlug, projectId: routerProjectId, moduleId: routerModuleId } = useParams();
+  const workspaceSlug = routerWorkspaceSlug ? routerWorkspaceSlug.toString() : undefined;
+  const projectId = routerProjectId ? routerProjectId.toString() : undefined;
+  const moduleId = routerModuleId ? routerModuleId.toString() : undefined;
+  // states
+  const [moduleIssuesListModal, setModuleIssuesListModal] = useState(false);
+  // plane hooks
+  const { t } = useTranslation();
+  // store hooks
+  const { issues } = useIssues(EIssuesStoreType.MODULE);
+  const { toggleCreateIssueModal } = useCommandPalette();
+  const { allowPermissions } = useUserPermissions();
+  const { canArrangeWork } = useNativeWorkAccess();
+  // derived values
+  const moduleWorkItemFilter = useWorkItemFilterInstance(EIssuesStoreType.MODULE, moduleId);
+  const canPerformEmptyStateActions = canArrangeWork(projectId) && allowPermissions(
+    [EUserProjectRoles.ADMIN, EUserProjectRoles.MEMBER],
+    EUserPermissionsLevel.PROJECT
+  );
+
+  const handleAddIssuesToModule = async (data: ISearchIssueResponse[]) => {
+    if (!workspaceSlug || !projectId || !moduleId) return;
+
+    const issueIds = data.map((i) => i.id);
+    await issues
+      .addIssuesToModule(workspaceSlug.toString(), projectId?.toString(), moduleId.toString(), issueIds)
+      .then(() =>
+        setToast({
+          type: TOAST_TYPE.SUCCESS,
+          title: "成功",
+          message: "工作项已添加到模块。",
+        })
+      )
+      .catch(() =>
+        setToast({
+          type: TOAST_TYPE.ERROR,
+          title: "错误",
+          message: "所选工作项无法添加到模块，请重试。",
+        })
+      );
+  };
+
+  return (
+    <div className="relative h-full w-full overflow-y-auto">
+      <ExistingIssuesListModal
+        workspaceSlug={workspaceSlug?.toString()}
+        projectId={projectId?.toString()}
+        isOpen={moduleIssuesListModal}
+        handleClose={() => setModuleIssuesListModal(false)}
+        searchParams={{ module: moduleId != undefined ? moduleId.toString() : "" }}
+        handleOnSubmit={handleAddIssuesToModule}
+      />
+      <div className="grid h-full w-full place-items-center">
+        {moduleWorkItemFilter?.hasActiveFilters ? (
+          <EmptyStateDetailed
+            assetKey="search"
+            title={t("common_empty_state.search.title")}
+            description={t("common_empty_state.search.description")}
+            actions={[
+              {
+                label: "清除筛选",
+                onClick: moduleWorkItemFilter?.clearFilters,
+                disabled: !moduleWorkItemFilter,
+                variant: "secondary",
+              },
+            ]}
+          />
+        ) : (
+          <EmptyStateDetailed
+            assetKey="work-item"
+            title={t("project_empty_state.module_work_items.title")}
+            actions={[
+              {
+                label: t("project_empty_state.module_work_items.cta_primary"),
+                onClick: () => {
+                  toggleCreateIssueModal(true, EIssuesStoreType.MODULE);
+                },
+                disabled: !canPerformEmptyStateActions,
+                variant: "primary",
+              },
+              {
+                label: t("project_empty_state.module_work_items.cta_secondary"),
+                onClick: () => setModuleIssuesListModal(true),
+                disabled: !canPerformEmptyStateActions,
+                variant: "secondary",
+              },
+            ]}
+          />
+        )}
+      </div>
+    </div>
+  );
+});

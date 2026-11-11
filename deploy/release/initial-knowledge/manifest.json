@@ -1,0 +1,17 @@
+{
+  "schema": "engramproject-initial-knowledge-manifest-v1",
+  "seed_version": "legacy-157-20261109-v1",
+  "files": {
+    "knowledge-bundle.json": {
+      "size": 20228,
+      "sha256": "de01aca8f9096c24d5bbbe1bab447b522db661707f2629f0a6069fe6b1f37040"
+    }
+  },
+  "source_counts": {
+    "drafts": 11,
+    "history_versions": 8,
+    "missing_attachments": 1
+  },
+  "publication_policy": "historical_records_always_draft_no_auto_share",
+  "source": "verified redacted 157 local+acceptance exports; whitelisted knowledge-only fields"
+}

@@ -1,0 +1,6 @@
+allprojects {
+    afterEvaluate {
+        sourceSets.main.java.srcDir(System.getenv('BRIDGE_VERIFICATION_JAVA'))
+        tasks.named('bootJar') { mainClass = 'com.transcengram.bridge_validation.BridgeValidationApplication' }
+    }
+}

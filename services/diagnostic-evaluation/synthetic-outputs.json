@@ -1,0 +1,1 @@
+{"provenance":"hand-written synthetic outputs; not model responses","outputs":[{"case_id":"network-connection-refused","answer":"连接拒绝：核实目标端口是否监听。","citations":["FILE-fixture:system.log"],"abstained":false},{"case_id":"unknown-hardware","answer":"信息不足，需要实际设备状态及现场日志。","citations":[],"abstained":true}]}

@@ -1,0 +1,609 @@
+@import "@plane/tailwind-config/index.css";
+@import "@plane/editor/styles";
+@import "@plane/propel/styles/react-day-picker.css";
+@import "./power-k.css";
+@import "./emoji.css";
+@plugin "@tailwindcss/typography";
+
+/* stickies and editor colors */
+:root {
+  /* text colors */
+  --editor-colors-gray-text: #5c5e63;
+  --editor-colors-peach-text: #ff5b59;
+  --editor-colors-pink-text: #f65385;
+  --editor-colors-orange-text: #fd9038;
+  --editor-colors-green-text: #0fc27b;
+  --editor-colors-light-blue-text: #17bee9;
+  --editor-colors-dark-blue-text: #266df0;
+  --editor-colors-purple-text: #9162f9;
+  /* end text colors */
+
+  /* background colors */
+  --editor-colors-gray-background: #d6d6d8;
+  --editor-colors-peach-background: #ffd5d7;
+  --editor-colors-pink-background: #fdd4e3;
+  --editor-colors-orange-background: #ffe3cd;
+  --editor-colors-green-background: #c3f0de;
+  --editor-colors-light-blue-background: #c5eff9;
+  --editor-colors-dark-blue-background: #c9dafb;
+  --editor-colors-purple-background: #e3d8fd;
+  /* end background colors */
+}
+/* background colors */
+[data-theme*="light"] {
+  --editor-colors-gray-background: #d6d6d8;
+  --editor-colors-peach-background: #ffd5d7;
+  --editor-colors-pink-background: #fdd4e3;
+  --editor-colors-orange-background: #ffe3cd;
+  --editor-colors-green-background: #c3f0de;
+  --editor-colors-light-blue-background: #c5eff9;
+  --editor-colors-dark-blue-background: #c9dafb;
+  --editor-colors-purple-background: #e3d8fd;
+}
+[data-theme*="dark"] {
+  --editor-colors-gray-background: #404144;
+  --editor-colors-peach-background: #593032;
+  --editor-colors-pink-background: #562e3d;
+  --editor-colors-orange-background: #583e2a;
+  --editor-colors-green-background: #1d4a3b;
+  --editor-colors-light-blue-background: #1f495c;
+  --editor-colors-dark-blue-background: #223558;
+  --editor-colors-purple-background: #3d325a;
+}
+/* end background colors */
+
+.shadow-custom {
+  box-shadow: 2px 2px 8px 2px rgba(234, 231, 250, 0.3); /* Convert #EAE7FA4D to rgba */
+}
+/* backdrop filter */
+.backdrop-blur-custom {
+  @apply backdrop-filter blur-[9px];
+}
+
+.epr-search-container > input {
+  @apply bg-surface-2! text-primary!;
+  border: none !important;
+}
+
+.epr-search-container > input::placeholder {
+  @apply text-placeholder!;
+}
+
+.epr-search-container > .epr-icn-search {
+  @apply text-placeholder!;
+}
+
+/* Lock icon animations */
+@keyframes textSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateX(-8px);
+    max-width: 0px;
+  }
+  40% {
+    opacity: 0.7;
+    max-width: 60px;
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+    max-width: 60px;
+  }
+}
+
+@keyframes textFadeOut {
+  0% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
+@keyframes lockIconAnimation {
+  0% {
+    transform: rotate(-5deg) scale(1);
+  }
+  25% {
+    transform: rotate(0deg) scale(1.15);
+  }
+  50% {
+    transform: rotate(5deg) scale(1.08);
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+@keyframes unlockIconAnimation {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  40% {
+    transform: rotate(-8deg) scale(1.15);
+  }
+  80% {
+    transform: rotate(3deg) scale(1.05);
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+@keyframes fadeOut {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-text-slide-in {
+  animation: textSlideIn 400ms ease-out forwards;
+}
+
+.animate-text-fade-out {
+  animation: textFadeOut 600ms ease-in 300ms forwards;
+}
+
+.animate-lock-icon {
+  animation: lockIconAnimation 600ms ease-out forwards;
+}
+
+.animate-unlock-icon {
+  animation: unlockIconAnimation 600ms ease-out forwards;
+}
+
+.animate-fade-out {
+  animation: fadeOut 500ms ease-in 100ms forwards;
+}
+
+@keyframes highlight {
+  0% {
+    background-color: var(--background-color-layer-2);
+    border-radius: 4px;
+  }
+  100% {
+    background-color: transparent;
+    border-radius: 4px;
+  }
+}
+
+/* Progress Bar Styles */
+:root {
+  --bprogress-color: var(--background-color-accent-primary);
+  --bprogress-height: 2.5px !important;
+}
+
+.bprogress {
+  pointer-events: none;
+}
+
+.bprogress .bar {
+  background: linear-gradient(
+    90deg,
+    --alpha(var(--background-color-accent-primary) / 80%) 0%,
+    --alpha(var(--background-color-accent-primary) / 100%) 100%
+  ) !important;
+  will-change: width, opacity;
+}
+
+.bprogress .peg {
+  display: block;
+  box-shadow:
+    0 0 8px --alpha(var(--background-color-accent-primary) / 60%),
+    0 0 4px --alpha(var(--background-color-accent-primary) / 40%) !important;
+  will-change: transform, opacity;
+}
+
+/* Shared Chinese reading and record navigation hierarchy. */
+:root {
+  --font-body:
+    "Inter Variable", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC",
+    ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-body);
+  --platform-record-color: #17697a;
+  --platform-record-hover: #104f5d;
+}
+[data-theme*="dark"] {
+  --platform-record-color: #7ac7d5;
+  --platform-record-hover: #a4dfeb;
+}
+body {
+  font-family: var(--font-body);
+  text-rendering: optimizeLegibility;
+}
+.platform-record-link {
+  color: var(--platform-record-color);
+  font-weight: 500;
+  line-height: 1.55;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.platform-record-link:hover {
+  color: var(--platform-record-hover);
+  text-decoration-line: underline;
+}
+.platform-record-link:focus-visible,
+button:focus-visible .platform-record-link,
+a:focus-visible .platform-record-link {
+  outline: 2px solid var(--platform-record-color);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+.platform-record-link:disabled,
+.platform-record-link[aria-disabled="true"] {
+  color: var(--text-color-placeholder);
+  text-decoration: none;
+}
+.platform-page-title {
+  font-family: var(--font-heading);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+/* Detail columns follow the space left by navigation, including embedded previews. */
+.work-item-detail-workspace {
+  container-type: inline-size;
+  container-name: work-item-detail;
+}
+.work-item-detail-canvas {
+  width: 100%;
+  max-width: none;
+  margin-inline: auto;
+  padding: clamp(12px, 2cqi, 28px);
+}
+.work-item-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "content" "properties" "activity";
+  align-items: start;
+  align-content: start;
+  gap: 16px;
+}
+.work-item-detail-content,
+.work-item-detail-properties,
+.work-item-detail-activity {
+  min-width: 0;
+  border: 1px solid var(--border-color-subtle);
+  border-radius: 10px;
+  background: var(--background-color-surface-1);
+  padding: clamp(16px, 2cqi, 24px);
+}
+.work-item-detail-content {
+  grid-area: content;
+}
+.work-item-detail-properties {
+  grid-area: properties;
+}
+.work-item-detail-activity {
+  grid-area: activity;
+}
+.work-item-detail-properties .sidebar-property-label {
+  width: 100px;
+}
+.work-item-detail-properties .sidebar-property-row > :last-child {
+  flex: 1 1 0;
+}
+.work-item-detail-content #title-input {
+  font-size: clamp(20px, 2cqi, 24px);
+  line-height: 1.5;
+}
+.work-item-detail-content .tiptap {
+  overflow-wrap: anywhere;
+}
+.work-item-detail-activity .work-item-activity {
+  max-width: none;
+}
+.platform-comment-editor {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+.platform-comment-editor:focus-within {
+  border-color: var(--platform-record-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--platform-record-color) 10%, transparent);
+}
+.platform-comment-editor .tiptap {
+  min-height: 22px;
+  max-height: min(240px, 32dvh);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+}
+.platform-comment-editor[data-expanded="true"] .tiptap {
+  min-height: 64px;
+}
+.platform-comment-editor .comment-toolbar button {
+  min-height: 26px;
+}
+@container work-item-detail (min-width: 640px) {
+  .work-item-detail-properties .work-item-property-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 24px;
+  }
+  .work-item-detail-properties .work-item-property-fields > * {
+    margin: 0;
+  }
+}
+@container work-item-detail (min-width: 960px) {
+  .work-item-detail-grid {
+    grid-template-columns: minmax(0, 1fr) clamp(320px, 25cqi, 420px);
+    grid-template-areas: "content properties" "activity properties";
+    grid-template-rows: min-content min-content;
+    gap: 20px;
+  }
+  .work-item-detail-properties .work-item-property-fields {
+    display: block;
+  }
+  .work-item-detail-properties .work-item-property-fields > * + * {
+    margin-top: 6px;
+  }
+  .work-item-detail-properties {
+    padding: 20px 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .platform-comment-editor {
+    transition: none;
+  }
+}
+
+.record-detail-modal {
+  container-type: inline-size;
+  container-name: record-detail;
+  max-height: 90dvh;
+}
+.record-detail-body {
+  overflow-wrap: anywhere;
+}
+.record-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+}
+.record-detail-grid > aside {
+  min-width: 0;
+  border-top: 1px solid var(--border-color-subtle);
+  padding-top: 16px;
+}
+.record-detail-body textarea {
+  min-width: 0;
+  max-height: min(240px, 32dvh);
+  overflow-y: auto;
+}
+@container record-detail (min-width: 760px) {
+  .record-detail-grid {
+    grid-template-columns: minmax(0, 1fr) 220px;
+  }
+  .record-detail-grid > aside {
+    border-top: 0;
+    border-left: 1px solid var(--border-color-subtle);
+    padding-top: 0;
+    padding-left: 20px;
+  }
+}
+
+@container work-item-detail (min-width: 1600px) {
+  .work-item-detail-grid {
+    grid-template-columns: minmax(0, 1fr) clamp(420px, 32cqi, 620px) clamp(320px, 22cqi, 380px);
+    grid-template-areas: "content activity properties";
+    grid-template-rows: min-content;
+  }
+}
+
+.record-detail-heading {
+  flex-direction: column;
+  align-items: stretch;
+}
+.record-detail-heading > :first-child {
+  min-width: 0;
+  width: 100%;
+}
+.record-detail-heading > :last-child {
+  flex-wrap: wrap;
+}
+@container record-detail (min-width: 760px) {
+  .record-detail-heading {
+    flex-direction: row;
+    align-items: start;
+  }
+  .record-detail-heading > :first-child {
+    width: auto;
+    flex: 1 1 280px;
+  }
+}
+
+.profile-workspace {
+  container-type: inline-size;
+  container-name: profile-workspace;
+}
+@media (min-width: 768px) {
+  .profile-sidebar {
+    width: clamp(240px, var(--profile-sidebar-width, 300px), 440px);
+    max-width: max(240px, calc(100cqi - 480px));
+  }
+}
+.profile-work-items {
+  container-type: inline-size;
+  container-name: profile-work-items;
+}
+@container profile-work-items (min-width: 1000px) {
+  .profile-work-items .issue-list-record {
+    justify-content: flex-start;
+  }
+  .profile-work-items .issue-list-record-title {
+    flex: 0 1 clamp(300px, 30cqi, 440px);
+    width: clamp(300px, 30cqi, 440px);
+  }
+  .profile-work-items .issue-list-record-properties {
+    flex: 0 1 auto;
+    max-width: none;
+  }
+}
+
+/* Defect workspace: calm sections and consistent hierarchy across all five tabs. */
+.platform-record-section,
+.platform-detail-panel {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.5rem;
+  background: var(--bg-surface-1);
+  padding: 1rem;
+}
+.platform-record-section > summary {
+  border-radius: 0.25rem;
+}
+.platform-record-section > summary:focus-visible {
+  outline: 2px solid var(--text-color-accent-primary);
+  outline-offset: 4px;
+}
+.record-detail-grid > aside,
+.work-item-detail-properties {
+  align-self: start;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.5rem;
+  background: var(--bg-layer-1);
+  padding: 1rem;
+}
+
+/* A shared visual language for requirements, tasks, quality, and version workspaces. */
+.platform-workspace > header,
+.record-detail-modal > div:first-child {
+  background: var(--bg-surface-1);
+  border-bottom-color: var(--border-subtle);
+}
+.platform-workspace > main {
+  background: color-mix(in srgb, var(--bg-layer-1) 45%, var(--bg-surface-1));
+}
+.platform-workspace table {
+  background: var(--bg-surface-1);
+}
+.platform-workspace th,
+.record-detail-body th {
+  background: var(--bg-layer-1);
+  color: var(--txt-secondary);
+  font-weight: 500;
+}
+.platform-workspace tbody tr:hover {
+  background: var(--bg-accent-subtle);
+}
+.platform-workspace nav:not([aria-label="分页"]):has(> button[aria-current="page"]),
+.record-detail-body [role="tablist"] {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  margin: 0.75rem 1.25rem 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.5rem;
+  background: var(--bg-layer-1);
+  overflow-x: auto;
+}
+.record-detail-body [role="tablist"] {
+  margin: 0;
+}
+.platform-workspace nav:not([aria-label="分页"]) > button[aria-current],
+.platform-workspace nav:not([aria-label="分页"]):has(> button[aria-current="page"]) > button,
+.record-detail-body [role="tab"] {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 0.375rem;
+  padding: 0.5rem 1rem;
+  color: var(--txt-secondary);
+  background: transparent;
+}
+.platform-workspace nav:not([aria-label="分页"]) > button[aria-current="page"],
+.record-detail-body [role="tab"][aria-selected="true"] {
+  background: var(--bg-accent-subtle);
+  color: var(--txt-accent-primary);
+  font-weight: 600;
+}
+.platform-workspace nav > button:focus-visible,
+.record-detail-body [role="tab"]:focus-visible {
+  outline: 2px solid var(--txt-accent-primary);
+  outline-offset: 2px;
+}
+.record-detail-body > section {
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.5rem;
+  background: var(--bg-surface-1);
+  padding: 1rem;
+}
+.work-item-detail-content,
+.work-item-detail-properties,
+.work-item-detail-activity {
+  border-radius: 0.5rem;
+}
+
+/* Workspace-wide surfaces also cover home, my work, reports, drafts, notes and archives. */
+.platform-content,
+.platform-workspace {
+  background-color: color-mix(in srgb, var(--bg-layer-1) 45%, var(--bg-surface-1));
+}
+.platform-page-header {
+  background: var(--bg-surface-1);
+}
+.platform-page-header h1,
+.platform-page-title {
+  font-size: 1rem;
+  line-height: 1.5;
+  font-weight: 600;
+}
+.platform-sidebar {
+  background: var(--bg-surface-1);
+}
+.platform-sidebar-item {
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.platform-sidebar-item:has(a[aria-current="page"]) {
+  border-color: var(--border-accent-subtle);
+  background: var(--bg-accent-subtle);
+  color: var(--txt-accent-primary);
+}
+.platform-sidebar-item:focus-within {
+  outline: 2px solid var(--txt-accent-primary);
+  outline-offset: 1px;
+}
+.platform-content [role="tablist"] {
+  gap: 0.25rem;
+  border-radius: 0.5rem;
+  background: var(--bg-layer-1);
+  padding: 0.25rem;
+}
+.platform-content [role="tab"][aria-selected="true"],
+.platform-content [role="tab"][data-state="active"] {
+  background: var(--bg-accent-subtle);
+  color: var(--txt-accent-primary);
+  border-radius: 0.375rem;
+}
+.platform-content table {
+  background: var(--bg-surface-1);
+}
+.platform-content thead {
+  background: var(--bg-layer-1);
+  color: var(--txt-secondary);
+}
+.platform-content table tbody tr:hover {
+  background: var(--bg-accent-subtle);
+}
+[data-slot="dialog-content"] {
+  border-radius: 0.5rem;
+  border-color: var(--border-subtle);
+  background: var(--bg-surface-1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .platform-sidebar-item {
+    transition: none;
+  }
+}

@@ -1,0 +1,1575 @@
+{
+  "issue_tickets": {
+    "columns": [
+      "id",
+      "ticket_no",
+      "data_package_id",
+      "task_id",
+      "project_id",
+      "reporter_id",
+      "reporter_name",
+      "task_name",
+      "project_name",
+      "device_id",
+      "device_name",
+      "schema_version",
+      "robot_type",
+      "category",
+      "tags",
+      "description",
+      "status",
+      "created_at",
+      "updated_at",
+      "dept_name",
+      "assignee_id",
+      "assignee_name",
+      "assigned_at",
+      "source_system",
+      "source_url",
+      "client_version",
+      "priority",
+      "ticket_type",
+      "title",
+      "completed_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V14__create_issue_tickets.sql",
+      "V15__issue_phase2_assign_comment_timeline.sql",
+      "V15__issue_phase2_assign_comment_timeline.sql",
+      "V16__issue_phase3_agent_problem_package.sql",
+      "V28__issue_collaboration_review.sql",
+      "V36__issue_v2_resolution_regression_fields.sql",
+      "V40__feature_test_tickets.sql",
+      "V40__feature_test_tickets.sql",
+      "V40__feature_test_tickets.sql",
+      "V40__feature_test_tickets.sql",
+      "V40__feature_test_tickets.sql"
+    ],
+    "ddl_sha256": "d5cbe8bcdd980689b5060a50ac540c97c2bbbeca2322022185c2b5a7a1146980"
+  },
+  "issue_attachments": {
+    "columns": [
+      "id",
+      "ticket_id",
+      "file_name",
+      "file_path",
+      "file_size",
+      "file_type",
+      "mime_type",
+      "uploader_id",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V14__create_issue_tickets.sql"
+    ],
+    "ddl_sha256": "d5cbe8bcdd980689b5060a50ac540c97c2bbbeca2322022185c2b5a7a1146980"
+  },
+  "issue_members": {
+    "columns": [
+      "id",
+      "ticket_id",
+      "user_id",
+      "user_name",
+      "role",
+      "added_by_id",
+      "added_by_name",
+      "removed_at",
+      "removed_by_id",
+      "removed_by_name",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V15__issue_phase2_assign_comment_timeline.sql"
+    ],
+    "ddl_sha256": "5e2e0c45799b37236eb61f460e63eca910417bb245662d343d406e8c3eb20f18"
+  },
+  "issue_assignments": {
+    "columns": [
+      "id",
+      "ticket_id",
+      "action",
+      "from_dept",
+      "to_dept",
+      "from_assignee_id",
+      "from_assignee_name",
+      "to_assignee_id",
+      "to_assignee_name",
+      "note",
+      "operator_id",
+      "operator_name",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V15__issue_phase2_assign_comment_timeline.sql"
+    ],
+    "ddl_sha256": "5e2e0c45799b37236eb61f460e63eca910417bb245662d343d406e8c3eb20f18"
+  },
+  "issue_comments": {
+    "columns": [
+      "id",
+      "ticket_id",
+      "content",
+      "comment_type",
+      "mentioned_ids",
+      "is_edited",
+      "author_id",
+      "author_name",
+      "deleted_at",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V15__issue_phase2_assign_comment_timeline.sql"
+    ],
+    "ddl_sha256": "5e2e0c45799b37236eb61f460e63eca910417bb245662d343d406e8c3eb20f18"
+  },
+  "issue_timeline_events": {
+    "columns": [
+      "id",
+      "ticket_id",
+      "event_type",
+      "event_data",
+      "summary",
+      "operator_id",
+      "operator_name",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V15__issue_phase2_assign_comment_timeline.sql"
+    ],
+    "ddl_sha256": "5e2e0c45799b37236eb61f460e63eca910417bb245662d343d406e8c3eb20f18"
+  },
+  "issue_notifications": {
+    "columns": [
+      "id",
+      "ticket_id",
+      "recipient_id",
+      "recipient_name",
+      "event_type",
+      "title",
+      "content",
+      "is_read",
+      "read_at",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V15__issue_phase2_assign_comment_timeline.sql"
+    ],
+    "ddl_sha256": "5e2e0c45799b37236eb61f460e63eca910417bb245662d343d406e8c3eb20f18"
+  },
+  "problem_packages": {
+    "columns": [
+      "id",
+      "package_no",
+      "issue_ticket_id",
+      "data_package_id",
+      "title",
+      "description",
+      "package_type",
+      "status",
+      "robot_type",
+      "schema_version",
+      "ros_mode",
+      "declared_steps",
+      "actual_steps",
+      "pkg_size_bytes",
+      "source_system",
+      "extra_context",
+      "submitter_id",
+      "submitter_name",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V16__issue_phase3_agent_problem_package.sql"
+    ],
+    "ddl_sha256": "e67c63c64a2894df0226d7faa2fa38d5dd17fea85265047bd44b87ffd119bb9d"
+  },
+  "problem_package_files": {
+    "columns": [
+      "id",
+      "package_id",
+      "file_name",
+      "file_type",
+      "file_path",
+      "file_size_bytes",
+      "mime_type",
+      "checksum_sha256",
+      "is_analyzed",
+      "uploaded_by_id",
+      "uploaded_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V16__issue_phase3_agent_problem_package.sql"
+    ],
+    "ddl_sha256": "e67c63c64a2894df0226d7faa2fa38d5dd17fea85265047bd44b87ffd119bb9d"
+  },
+  "agent_analysis_tasks": {
+    "columns": [
+      "id",
+      "task_no",
+      "package_id",
+      "issue_ticket_id",
+      "status",
+      "provider",
+      "priority",
+      "retry_count",
+      "max_retries",
+      "error_message",
+      "started_at",
+      "completed_at",
+      "timeout_at",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V16__issue_phase3_agent_problem_package.sql"
+    ],
+    "ddl_sha256": "e67c63c64a2894df0226d7faa2fa38d5dd17fea85265047bd44b87ffd119bb9d"
+  },
+  "agent_reports": {
+    "columns": [
+      "id",
+      "report_no",
+      "task_id",
+      "package_id",
+      "issue_ticket_id",
+      "report_version",
+      "status",
+      "completeness_score",
+      "risk_level",
+      "summary",
+      "report_json",
+      "agent_version",
+      "rule_version",
+      "provider",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V16__issue_phase3_agent_problem_package.sql"
+    ],
+    "ddl_sha256": "e67c63c64a2894df0226d7faa2fa38d5dd17fea85265047bd44b87ffd119bb9d"
+  },
+  "agent_feedback": {
+    "columns": [
+      "id",
+      "report_id",
+      "package_id",
+      "issue_ticket_id",
+      "result",
+      "score",
+      "comment",
+      "corrected_cause",
+      "feedback_by_id",
+      "feedback_by_name",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V16__issue_phase3_agent_problem_package.sql"
+    ],
+    "ddl_sha256": "e67c63c64a2894df0226d7faa2fa38d5dd17fea85265047bd44b87ffd119bb9d"
+  },
+  "agent_task_events": {
+    "columns": [
+      "id",
+      "task_id",
+      "event_type",
+      "step_name",
+      "message",
+      "detail_json",
+      "duration_ms",
+      "occurred_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V16__issue_phase3_agent_problem_package.sql"
+    ],
+    "ddl_sha256": "e67c63c64a2894df0226d7faa2fa38d5dd17fea85265047bd44b87ffd119bb9d"
+  },
+  "seq_problem_package": {
+    "columns": [
+      "next_val"
+    ],
+    "primary_key": [
+      "date_str"
+    ],
+    "ddl": [
+      "V16__issue_phase3_agent_problem_package.sql"
+    ],
+    "ddl_sha256": "e67c63c64a2894df0226d7faa2fa38d5dd17fea85265047bd44b87ffd119bb9d"
+  },
+  "seq_agent_task": {
+    "columns": [
+      "next_val"
+    ],
+    "primary_key": [
+      "date_str"
+    ],
+    "ddl": [
+      "V16__issue_phase3_agent_problem_package.sql"
+    ],
+    "ddl_sha256": "e67c63c64a2894df0226d7faa2fa38d5dd17fea85265047bd44b87ffd119bb9d"
+  },
+  "seq_agent_report": {
+    "columns": [
+      "next_val"
+    ],
+    "primary_key": [
+      "date_str"
+    ],
+    "ddl": [
+      "V16__issue_phase3_agent_problem_package.sql"
+    ],
+    "ddl_sha256": "e67c63c64a2894df0226d7faa2fa38d5dd17fea85265047bd44b87ffd119bb9d"
+  },
+  "issue_solutions": {
+    "columns": [
+      "id",
+      "solution_id",
+      "issue_ticket_id",
+      "version_no",
+      "status",
+      "root_cause",
+      "solution_steps",
+      "verification_method",
+      "investigation_summary",
+      "temporary_workaround",
+      "impact_scope",
+      "risk_description",
+      "rollback_method",
+      "applicable_versions",
+      "internal_note",
+      "submitted_by",
+      "author_id",
+      "author_name",
+      "submitted_at",
+      "created_at",
+      "updated_at",
+      "repository",
+      "branch_name",
+      "commit_sha",
+      "merge_request_url"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V17__issue_phase4_solution_regression_knowledge.sql",
+      "V36__issue_v2_resolution_regression_fields.sql"
+    ],
+    "ddl_sha256": "fcf4a31b6335bfe24673e8e102107b1ac1a0e8928e8a4734e8f1743db9aeb34b"
+  },
+  "regression_tests": {
+    "columns": [
+      "id",
+      "regression_id",
+      "issue_ticket_id",
+      "solution_id",
+      "solution_version",
+      "round_no",
+      "status",
+      "solution_snapshot_json",
+      "result",
+      "test_description",
+      "verification_evidence",
+      "result_summary",
+      "failure_reason",
+      "created_by_id",
+      "created_by_name",
+      "executor_id",
+      "verifier_id",
+      "tester_id",
+      "tester_name",
+      "started_at",
+      "submitted_at",
+      "completed_at",
+      "created_at",
+      "updated_at",
+      "test_priority",
+      "test_environment_json",
+      "test_procedure",
+      "submitted_for_test_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V17__issue_phase4_solution_regression_knowledge.sql",
+      "V36__issue_v2_resolution_regression_fields.sql"
+    ],
+    "ddl_sha256": "fcf4a31b6335bfe24673e8e102107b1ac1a0e8928e8a4734e8f1743db9aeb34b"
+  },
+  "regression_test_data": {
+    "columns": [
+      "id",
+      "regression_id",
+      "source_system",
+      "project_id",
+      "task_id",
+      "data_id",
+      "data_package_name",
+      "device_id",
+      "device_name",
+      "client_version",
+      "collected_at",
+      "metadata_json",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V17__issue_phase4_solution_regression_knowledge.sql"
+    ],
+    "ddl_sha256": "fcf4a31b6335bfe24673e8e102107b1ac1a0e8928e8a4734e8f1743db9aeb34b"
+  },
+  "regression_test_attachments": {
+    "columns": [
+      "regression_id",
+      "attachment_id",
+      "attachment_role",
+      "created_at"
+    ],
+    "primary_key": [
+      "regression_id",
+      "attachment_id"
+    ],
+    "ddl": [
+      "V17__issue_phase4_solution_regression_knowledge.sql"
+    ],
+    "ddl_sha256": "fcf4a31b6335bfe24673e8e102107b1ac1a0e8928e8a4734e8f1743db9aeb34b"
+  },
+  "knowledge_drafts": {
+    "columns": [
+      "id",
+      "draft_id",
+      "source_issue_id",
+      "source_solution_id",
+      "source_regression_id",
+      "title",
+      "phenomenon",
+      "root_cause",
+      "solution_steps",
+      "verification_method",
+      "applicable_scope",
+      "applicable_versions",
+      "risk_description",
+      "rollback_method",
+      "evidence_summary",
+      "tags",
+      "content",
+      "status",
+      "created_by",
+      "created_at",
+      "updated_at",
+      "invalidated_at",
+      "review_comment",
+      "reviewed_by",
+      "reviewed_by_name",
+      "reviewed_at",
+      "published_at",
+      "offline_at",
+      "knowledge_id",
+      "version_no",
+      "base_knowledge_version",
+      "category",
+      "summary",
+      "visibility_scope",
+      "diagnosis_steps",
+      "prerequisites",
+      "known_limitations",
+      "applicable_robot_types",
+      "applicable_device_types",
+      "applicable_schema_versions",
+      "applicable_client_versions",
+      "applicable_environments",
+      "related_error_codes",
+      "related_log_keywords",
+      "sanitization_status",
+      "edit_version",
+      "invalidation_reason"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V17__issue_phase4_solution_regression_knowledge.sql",
+      "V18__knowledge_review_publish_search.sql",
+      "V19__knowledge_detail_audit_version_sanitization.sql",
+      "V19__knowledge_detail_audit_version_sanitization.sql",
+      "V26__knowledge_imports.sql",
+      "V27__knowledge_file_import_provenance.sql"
+    ],
+    "ddl_sha256": "fcf4a31b6335bfe24673e8e102107b1ac1a0e8928e8a4734e8f1743db9aeb34b"
+  },
+  "knowledge_versions": {
+    "columns": [
+      "id",
+      "knowledge_id",
+      "version_no",
+      "status",
+      "source_draft_id",
+      "title",
+      "summary",
+      "content_snapshot",
+      "change_summary",
+      "author_id",
+      "author_name",
+      "reviewer_id",
+      "reviewer_name",
+      "publisher_id",
+      "publisher_name",
+      "created_at",
+      "published_at",
+      "deprecated_at",
+      "active_version_guard"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V19__knowledge_detail_audit_version_sanitization.sql"
+    ],
+    "ddl_sha256": "5b0eb4a2044c6d245dbc21c0936ad9a15e38e9af82f480661a386a8ef58ef1b3"
+  },
+  "knowledge_review_records": {
+    "columns": [
+      "id",
+      "knowledge_draft_id",
+      "knowledge_id",
+      "action",
+      "from_status",
+      "to_status",
+      "operator_id",
+      "operator_name",
+      "comment",
+      "request_id",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V19__knowledge_detail_audit_version_sanitization.sql"
+    ],
+    "ddl_sha256": "5b0eb4a2044c6d245dbc21c0936ad9a15e38e9af82f480661a386a8ef58ef1b3"
+  },
+  "knowledge_sanitization_records": {
+    "columns": [
+      "id",
+      "knowledge_draft_id",
+      "status",
+      "scanned_by",
+      "scanned_by_name",
+      "scanned_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V19__knowledge_detail_audit_version_sanitization.sql"
+    ],
+    "ddl_sha256": "5b0eb4a2044c6d245dbc21c0936ad9a15e38e9af82f480661a386a8ef58ef1b3"
+  },
+  "knowledge_sanitization_findings": {
+    "columns": [
+      "id",
+      "record_id",
+      "field_name",
+      "rule_code",
+      "severity",
+      "masked_preview",
+      "start_index",
+      "end_index",
+      "confirmed",
+      "false_positive",
+      "confirmed_by",
+      "confirmed_at",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V19__knowledge_detail_audit_version_sanitization.sql"
+    ],
+    "ddl_sha256": "5b0eb4a2044c6d245dbc21c0936ad9a15e38e9af82f480661a386a8ef58ef1b3"
+  },
+  "knowledge_imports": {
+    "columns": [
+      "id",
+      "knowledge_draft_id",
+      "project_id",
+      "original_filename",
+      "stored_filename",
+      "content_type",
+      "size_bytes",
+      "imported_by",
+      "created_at",
+      "content_hash"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V26__knowledge_imports.sql",
+      "V27__knowledge_file_import_provenance.sql",
+      "V32__global_knowledge_scope.sql"
+    ],
+    "ddl_sha256": "a4335dacf5e4374c2612ee05333c6718328d5d2507962c5256b3426bbbc69059"
+  },
+  "project_members": {
+    "columns": [
+      "id",
+      "project_id",
+      "user_id",
+      "user_name",
+      "active",
+      "row_version",
+      "created_by_id",
+      "created_at",
+      "updated_at",
+      "membership_source",
+      "source_synced_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V28__issue_collaboration_review.sql",
+      "V39__platform_project_member_sync.sql"
+    ],
+    "ddl_sha256": "0ae49d57dfef809bdd183430deafa28b797053db0cbaba0e22038733fba1b566"
+  },
+  "project_member_roles": {
+    "columns": [
+      "id",
+      "project_member_id",
+      "role_code",
+      "row_version",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V28__issue_collaboration_review.sql"
+    ],
+    "ddl_sha256": "0ae49d57dfef809bdd183430deafa28b797053db0cbaba0e22038733fba1b566"
+  },
+  "project_review_policies": {
+    "columns": [
+      "id",
+      "project_id",
+      "policy_name",
+      "subject_type",
+      "decision_mode",
+      "required_count",
+      "reviewer_user_ids",
+      "active",
+      "row_version",
+      "created_by_id",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V28__issue_collaboration_review.sql"
+    ],
+    "ddl_sha256": "0ae49d57dfef809bdd183430deafa28b797053db0cbaba0e22038733fba1b566"
+  },
+  "issue_review_tasks": {
+    "columns": [
+      "id",
+      "ticket_id",
+      "solution_id",
+      "policy_id",
+      "decision_mode",
+      "required_count",
+      "status",
+      "completed_at",
+      "regression_id",
+      "row_version",
+      "created_by_id",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V28__issue_collaboration_review.sql"
+    ],
+    "ddl_sha256": "0ae49d57dfef809bdd183430deafa28b797053db0cbaba0e22038733fba1b566"
+  },
+  "issue_review_assignments": {
+    "columns": [
+      "id",
+      "review_task_id",
+      "reviewer_id",
+      "reviewer_name",
+      "decision",
+      "comment",
+      "decided_at",
+      "row_version",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V28__issue_collaboration_review.sql"
+    ],
+    "ddl_sha256": "0ae49d57dfef809bdd183430deafa28b797053db0cbaba0e22038733fba1b566"
+  },
+  "issue_operation_audits": {
+    "columns": [
+      "id",
+      "project_id",
+      "ticket_id",
+      "operation",
+      "target_type",
+      "target_id",
+      "detail_json",
+      "operator_id",
+      "operator_name",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V28__issue_collaboration_review.sql"
+    ],
+    "ddl_sha256": "0ae49d57dfef809bdd183430deafa28b797053db0cbaba0e22038733fba1b566"
+  },
+  "issue_idempotency_records": {
+    "columns": [
+      "id",
+      "idempotency_key",
+      "actor_id",
+      "status",
+      "http_status",
+      "expires_at",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V29__issue_identity_and_idempotency.sql"
+    ],
+    "ddl_sha256": "ad1575e478bc5e66515badf572a73fb0a8b0d59c20c8baebf033f5ed81ec39ca"
+  },
+  "knowledge_chunks": {
+    "columns": [
+      "id",
+      "knowledge_id",
+      "knowledge_version_id",
+      "version_no",
+      "project_id",
+      "chunk_no",
+      "vector_point_id",
+      "created_at",
+      "visibility_scope"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V30__knowledge_rag_index.sql",
+      "V32__global_knowledge_scope.sql"
+    ],
+    "ddl_sha256": "5386c2499f4479fee0fa06e3e5323db25308849e9ddb2fe61a56b80ff235ede9"
+  },
+  "knowledge_index_tasks": {
+    "columns": [
+      "id",
+      "knowledge_id",
+      "knowledge_version_id",
+      "version_no",
+      "project_id",
+      "operation",
+      "status",
+      "retry_count",
+      "max_retries",
+      "error_message",
+      "available_at",
+      "started_at",
+      "lease_until",
+      "completed_at",
+      "created_at",
+      "updated_at",
+      "visibility_scope"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V30__knowledge_rag_index.sql",
+      "V32__global_knowledge_scope.sql"
+    ],
+    "ddl_sha256": "5386c2499f4479fee0fa06e3e5323db25308849e9ddb2fe61a56b80ff235ede9"
+  },
+  "issue_source_links": {
+    "columns": [
+      "id",
+      "issue_id",
+      "project_id",
+      "source_system",
+      "source_instance_id",
+      "source_type",
+      "source_record_id",
+      "platform_task_id",
+      "task_id",
+      "device_id",
+      "collected_at",
+      "source_snapshot_json",
+      "created_by",
+      "created_at",
+      "row_version"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V31__issue_daq_source_links.sql",
+      "V34__issue_source_multiple_tickets.sql"
+    ],
+    "ddl_sha256": "d65e7e222b4566275b3df0f34e14db27234679818ff479263deb6e7bfd7f9fc4"
+  },
+  "issue_ticket_number_sequences": {
+    "columns": [
+      "next_value"
+    ],
+    "primary_key": [
+      "ticket_date"
+    ],
+    "ddl": [
+      "V31__issue_daq_source_links.sql"
+    ],
+    "ddl_sha256": "d65e7e222b4566275b3df0f34e14db27234679818ff479263deb6e7bfd7f9fc4"
+  },
+  "knowledge_governance_records": {
+    "columns": [
+      "id",
+      "knowledge_id",
+      "version_no",
+      "primary_category",
+      "confidence",
+      "classification_reason",
+      "manual_review_required",
+      "duplicate_of_knowledge_id",
+      "duplicate_reason",
+      "governance_status",
+      "generated_at"
+    ],
+    "primary_key": [],
+    "ddl": [
+      "V33__knowledge_governance_records.sql"
+    ],
+    "ddl_sha256": "6c6d1677f5b71e8e988ec253ac4d474b710b8c0b92b7a8c92bf03707b4302d68"
+  },
+  "platform_project_mirrors": {
+    "columns": [
+      "source_project_id",
+      "name",
+      "description",
+      "status",
+      "start_date",
+      "end_date",
+      "source_created_at",
+      "source_updated_at",
+      "synced_at"
+    ],
+    "primary_key": [
+      "source_project_id"
+    ],
+    "ddl": [
+      "V37__platform_catalog_mirror.sql"
+    ],
+    "ddl_sha256": "62c39b3651f57e439138d814583dc33d1694d5206b90a15a1ca71d4913886232"
+  },
+  "platform_task_mirrors": {
+    "columns": [
+      "source_task_id",
+      "source_project_id",
+      "name",
+      "description",
+      "steps",
+      "required_count",
+      "scene_id",
+      "status",
+      "collector_assignment_mode",
+      "annotation_assignment_mode",
+      "audit_assignment_mode",
+      "source_created_at",
+      "source_updated_at",
+      "synced_at"
+    ],
+    "primary_key": [
+      "source_task_id"
+    ],
+    "ddl": [
+      "V37__platform_catalog_mirror.sql"
+    ],
+    "ddl_sha256": "62c39b3651f57e439138d814583dc33d1694d5206b90a15a1ca71d4913886232"
+  },
+  "platform_catalog_sync_states": {
+    "columns": [
+      "sync_key",
+      "updated_after",
+      "last_sync_at"
+    ],
+    "primary_key": [
+      "sync_key"
+    ],
+    "ddl": [
+      "V37__platform_catalog_mirror.sql"
+    ],
+    "ddl_sha256": "62c39b3651f57e439138d814583dc33d1694d5206b90a15a1ca71d4913886232"
+  },
+  "project_hub_users": {
+    "columns": [
+      "id",
+      "username",
+      "display_name",
+      "email",
+      "department",
+      "primary_role",
+      "active",
+      "platform_admin",
+      "row_version",
+      "created_by_id",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V38__project_hub_auth_and_users.sql",
+      "V55__project_hub_five_role_default.sql"
+    ],
+    "ddl_sha256": "3df16e4ce385a5598004128934d9efff6085d781b038c80c3c0fc1d97240a6e8"
+  },
+  "project_hub_sessions": {
+    "columns": [
+      "id",
+      "user_id",
+      "expires_at",
+      "revoked_at",
+      "last_seen_at",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V38__project_hub_auth_and_users.sql"
+    ],
+    "ddl_sha256": "3df16e4ce385a5598004128934d9efff6085d781b038c80c3c0fc1d97240a6e8"
+  },
+  "project_hub_user_audits": {
+    "columns": [
+      "id",
+      "operator_id",
+      "target_user_id",
+      "operation",
+      "detail_json",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V38__project_hub_auth_and_users.sql"
+    ],
+    "ddl_sha256": "3df16e4ce385a5598004128934d9efff6085d781b038c80c3c0fc1d97240a6e8"
+  },
+  "feature_test_items": {
+    "columns": [
+      "id",
+      "ticket_id",
+      "item_no",
+      "project_id",
+      "content",
+      "status",
+      "remark",
+      "created_by_id",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V40__feature_test_tickets.sql"
+    ],
+    "ddl_sha256": "97a734bf6743957733c6122fafe95d40b19a66724cd2e3f3a42201fad43503b9"
+  },
+  "feature_test_rounds": {
+    "columns": [
+      "id",
+      "ticket_id",
+      "round_no",
+      "reason",
+      "returned_by",
+      "returned_at",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V40__feature_test_tickets.sql"
+    ],
+    "ddl_sha256": "97a734bf6743957733c6122fafe95d40b19a66724cd2e3f3a42201fad43503b9"
+  },
+  "platform_project_id_mappings": {
+    "columns": [
+      "project_hub_project_id",
+      "rtp_project_id",
+      "source_system",
+      "status",
+      "last_verified_at",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "project_hub_project_id"
+    ],
+    "ddl": [
+      "V41__platform_project_id_mappings.sql"
+    ],
+    "ddl_sha256": "ed05911899e0876519d8c50a1d1776d20d1c3e1cca16e340ece471060021cf7e"
+  },
+  "platform_task_id_mappings": {
+    "columns": [
+      "project_hub_project_id",
+      "platform_task_id",
+      "rtp_task_id",
+      "status",
+      "last_verified_at",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "project_hub_project_id",
+      "platform_task_id"
+    ],
+    "ddl": [
+      "V41__platform_project_id_mappings.sql"
+    ],
+    "ddl_sha256": "ed05911899e0876519d8c50a1d1776d20d1c3e1cca16e340ece471060021cf7e"
+  },
+  "platform_user_id_mappings": {
+    "columns": [
+      "source_system",
+      "source_user_id",
+      "source_username",
+      "project_hub_user_id",
+      "status",
+      "last_verified_at",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "source_system",
+      "source_user_id"
+    ],
+    "ddl": [
+      "V42__platform_user_id_mappings.sql"
+    ],
+    "ddl_sha256": "f617c132c6cf7c605c1ede09865adf86ecfd1936b0308cb54c201ea99881d592"
+  },
+  "issue_rtp_test_task_links": {
+    "columns": [
+      "id",
+      "issue_ticket_id",
+      "issue_solution_id",
+      "review_task_id",
+      "regression_test_id",
+      "rtp_project_id",
+      "rtp_test_task_id",
+      "source_trace_id",
+      "status",
+      "request_payload",
+      "result",
+      "report_id",
+      "report_url",
+      "result_summary",
+      "failure_reason",
+      "created_by_id",
+      "created_by_name",
+      "created_at",
+      "updated_at",
+      "report_payload",
+      "attachment_manifest",
+      "verification_evidence",
+      "test_request_type",
+      "source_project_id",
+      "source_task_id",
+      "source_rtp_task_id",
+      "source_task_mapping_status"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V43__issue_rtp_test_task_links.sql",
+      "V44__issue_rtp_result_artifacts.sql",
+      "V45__rtp_test_request_type.sql",
+      "V46__rtp_test_task_source_links.sql"
+    ],
+    "ddl_sha256": "f1d853790158d80a5643332ee46c42e2331380b43218dd36990408ac4cd56870"
+  },
+  "embedded_test_tasks": {
+    "columns": [
+      "id",
+      "project_id",
+      "issue_ticket_id",
+      "issue_solution_id",
+      "regression_test_id",
+      "source_trace_id",
+      "name",
+      "request_payload",
+      "status",
+      "created_by_id",
+      "created_by_name",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V47__embedded_test_tasks.sql"
+    ],
+    "ddl_sha256": "d2ad324a9069245fc5f4077b38319414f17b0b1549d6ba7090bb9e5370a6e5fe"
+  },
+  "embedded_test_cases": {
+    "columns": [
+      "id",
+      "project_id",
+      "case_id",
+      "module",
+      "scenario",
+      "prerequisites",
+      "steps",
+      "expected_result",
+      "priority",
+      "test_types",
+      "enabled",
+      "created_by",
+      "updated_by",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V48__embedded_test_cases.sql"
+    ],
+    "ddl_sha256": "3f512c4c7adbb2386c7670dcee1bded27764057f87880a84f25a9e8ff48bb3b8"
+  },
+  "embedded_test_suites": {
+    "columns": [
+      "id",
+      "project_id",
+      "suite_key",
+      "version",
+      "name",
+      "description",
+      "test_type",
+      "tags",
+      "case_ids",
+      "status",
+      "created_by",
+      "published_by",
+      "created_at",
+      "published_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V49__embedded_test_suites.sql"
+    ],
+    "ddl_sha256": "55d3f693874415302a0357ddb8a0e9e8e6f7e1b1ddf273c1401abd27f64e1e04"
+  },
+  "embedded_requirements": {
+    "columns": [
+      "id",
+      "project_id",
+      "requirement_key",
+      "title",
+      "description",
+      "status",
+      "priority",
+      "owner_name",
+      "source_payload",
+      "enabled",
+      "created_by",
+      "updated_by",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V50__embedded_release_domains.sql"
+    ],
+    "ddl_sha256": "7bd449b0608dc66887b556ba8ec3910df2814e37c961ab2fbf22802306d23d4d"
+  },
+  "embedded_versions": {
+    "columns": [
+      "id",
+      "project_id",
+      "version_key",
+      "name",
+      "description",
+      "status",
+      "release_date",
+      "source_payload",
+      "enabled",
+      "created_by",
+      "updated_by",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V50__embedded_release_domains.sql"
+    ],
+    "ddl_sha256": "7bd449b0608dc66887b556ba8ec3910df2814e37c961ab2fbf22802306d23d4d"
+  },
+  "embedded_release_plans": {
+    "columns": [
+      "id",
+      "project_id",
+      "plan_key",
+      "name",
+      "description",
+      "status",
+      "source_url",
+      "source_payload",
+      "synced_at",
+      "created_by",
+      "updated_by",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V50__embedded_release_domains.sql"
+    ],
+    "ddl_sha256": "7bd449b0608dc66887b556ba8ec3910df2814e37c961ab2fbf22802306d23d4d"
+  },
+  "embedded_test_task_runtime": {
+    "columns": [
+      "task_id",
+      "project_id",
+      "preflight_status",
+      "telemetry_payload",
+      "telemetry_sync_status",
+      "updated_at"
+    ],
+    "primary_key": [
+      "task_id"
+    ],
+    "ddl": [
+      "V51__embedded_execution_reports_artifacts.sql"
+    ],
+    "ddl_sha256": "cbc3fa9c415328db343c50857d3474c7a5953dd1c6b8b73865d3e59aa3898297"
+  },
+  "embedded_test_executions": {
+    "columns": [
+      "id",
+      "project_id",
+      "task_id",
+      "case_id",
+      "result",
+      "payload",
+      "created_by",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V51__embedded_execution_reports_artifacts.sql"
+    ],
+    "ddl_sha256": "cbc3fa9c415328db343c50857d3474c7a5953dd1c6b8b73865d3e59aa3898297"
+  },
+  "embedded_test_reports": {
+    "columns": [
+      "id",
+      "project_id",
+      "task_id",
+      "name",
+      "status",
+      "conclusion_json",
+      "admission_json",
+      "report_payload",
+      "feishu_payload",
+      "created_by",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V51__embedded_execution_reports_artifacts.sql"
+    ],
+    "ddl_sha256": "cbc3fa9c415328db343c50857d3474c7a5953dd1c6b8b73865d3e59aa3898297"
+  },
+  "embedded_test_artifacts": {
+    "columns": [
+      "id",
+      "project_id",
+      "issue_id",
+      "record_id",
+      "filename",
+      "content_type",
+      "content",
+      "metadata_json",
+      "created_by",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V51__embedded_execution_reports_artifacts.sql"
+    ],
+    "ddl_sha256": "cbc3fa9c415328db343c50857d3474c7a5953dd1c6b8b73865d3e59aa3898297"
+  },
+  "embedded_field_agents": {
+    "columns": [
+      "id",
+      "project_id",
+      "agent_key",
+      "name",
+      "enabled",
+      "snapshot_json",
+      "created_by",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V52__embedded_platform_management.sql"
+    ],
+    "ddl_sha256": "ca5610facf8b6665b9d404932ee2c74dc7535ba1f470d3b1b6876dc6c81f8db6"
+  },
+  "embedded_task_package_imports": {
+    "columns": [
+      "id",
+      "project_id",
+      "filename",
+      "content_type",
+      "content",
+      "status",
+      "payload_json",
+      "created_by",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V52__embedded_platform_management.sql"
+    ],
+    "ddl_sha256": "ca5610facf8b6665b9d404932ee2c74dc7535ba1f470d3b1b6876dc6c81f8db6"
+  },
+  "embedded_release_settings": {
+    "columns": [
+      "project_id",
+      "section",
+      "payload_json",
+      "updated_by",
+      "updated_at"
+    ],
+    "primary_key": [
+      "project_id",
+      "section"
+    ],
+    "ddl": [
+      "V52__embedded_platform_management.sql"
+    ],
+    "ddl_sha256": "ca5610facf8b6665b9d404932ee2c74dc7535ba1f470d3b1b6876dc6c81f8db6"
+  },
+  "embedded_notification_targets": {
+    "columns": [
+      "id",
+      "project_id",
+      "name",
+      "target_type",
+      "enabled",
+      "payload_json",
+      "created_by",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V52__embedded_platform_management.sql"
+    ],
+    "ddl_sha256": "ca5610facf8b6665b9d404932ee2c74dc7535ba1f470d3b1b6876dc6c81f8db6"
+  },
+  "embedded_test_resources": {
+    "columns": [
+      "id",
+      "project_id",
+      "name",
+      "resource_type",
+      "status",
+      "payload_json",
+      "created_by",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V52__embedded_platform_management.sql"
+    ],
+    "ddl_sha256": "ca5610facf8b6665b9d404932ee2c74dc7535ba1f470d3b1b6876dc6c81f8db6"
+  },
+  "embedded_release_issues": {
+    "columns": [
+      "id",
+      "project_id",
+      "issue_ticket_id",
+      "source_key",
+      "title",
+      "status",
+      "severity",
+      "payload_json",
+      "created_by",
+      "created_at",
+      "updated_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V53__embedded_release_issues.sql"
+    ],
+    "ddl_sha256": "83f7edade04c9520163aaaa3381397ab250f0d62ab5eda82688a5f43ac6dcaa7"
+  },
+  "embedded_release_issue_records": {
+    "columns": [
+      "id",
+      "project_id",
+      "issue_id",
+      "content",
+      "payload_json",
+      "created_by",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V53__embedded_release_issues.sql"
+    ],
+    "ddl_sha256": "83f7edade04c9520163aaaa3381397ab250f0d62ab5eda82688a5f43ac6dcaa7"
+  },
+  "embedded_knowledge_bases": {
+    "columns": [
+      "id",
+      "project_id",
+      "name",
+      "description",
+      "status",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V54__embedded_knowledge_adapter.sql"
+    ],
+    "ddl_sha256": "3c8bb9c73cf41b2d1096029590fea3223a7184a486b9b9cd2e63824f8fbfeed1"
+  },
+  "embedded_knowledge_documents": {
+    "columns": [
+      "id",
+      "project_id",
+      "knowledge_base_id",
+      "source_url",
+      "title",
+      "status",
+      "payload_json",
+      "created_by",
+      "created_at"
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "ddl": [
+      "V54__embedded_knowledge_adapter.sql"
+    ],
+    "ddl_sha256": "3c8bb9c73cf41b2d1096029590fea3223a7184a486b9b9cd2e63824f8fbfeed1"
+  }
+}

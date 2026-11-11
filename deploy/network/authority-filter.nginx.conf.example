@@ -1,0 +1,25 @@
+# 部署时只替换DATA_PLATFORM_LAN_HOST；不使用通用HTTP代理或动态proxy_pass。
+# 在DAQ容器/进程私有网络中监听，不映射公网端口。
+events {}
+http {
+    access_log off;
+    server {
+        listen 127.0.0.1:16324;
+        client_max_body_size 64k;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 10s;
+        location = /api/user/login {
+            limit_except POST { deny all; }
+            proxy_pass http://DATA_PLATFORM_LAN_HOST:6324;
+        }
+        location = /api/user/info {
+            limit_except GET { deny all; }
+            proxy_pass http://DATA_PLATFORM_LAN_HOST:6324;
+        }
+        location ~ ^/internal/issue-(users/[0-9]+|permissions/users/[0-9]+|integration/(tasks/[0-9]+/context|catalog/projects(/[0-9]+(/members|/tasks)?)?))$ {
+            limit_except GET { deny all; }
+            proxy_pass http://DATA_PLATFORM_LAN_HOST:6324;
+        }
+        location / { return 403; }
+    }
+}

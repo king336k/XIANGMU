@@ -1,0 +1,88 @@
+# 转换失败类规则
+# 适用于 packageType = CONVERT_FAILED
+# 规则版本：1.0.0
+
+rules:
+
+  - id: CONVERT_FAILED_SCHEMA_MISMATCH
+    name: 数据转换失败-模式不匹配
+    description: 数据包状态为 ConvertFailed 且 schemaVersion 非空，判断为数据模式版本不兼容
+    enabled: true
+    priority: 1
+    packageTypes:
+      - CONVERT_FAILED
+    conditions:
+      - field: dataPackageStatus
+        op: EQ
+        value: "ConvertFailed"
+      - field: schemaVersion
+        op: NOT_NULL
+    result:
+      causeTitle: 数据模式版本不兼容导致转换失败
+      causeDescription: 数据包存在 schema 版本信息，转换失败可能源于采集端 schema 版本与平台转换器期望版本不兼容，导致数据结构解析错误。
+      confidence: 0.80
+      riskLevel: HIGH
+      recommendations:
+        - 确认当前采集客户端版本与平台支持的 schema 版本列表
+        - 查看转换服务日志，确认具体不兼容的字段或格式
+        - 联系平台开发组确认是否需要更新转换适配器
+        - 若采集客户端版本落后，升级至平台支持的最新版本
+      suggestedRouting: 平台开发组
+      riskFlags:
+        - schema 版本不兼容，转换器需要更新适配
+
+  - id: CONVERT_FAILED_FRAME_LOSS
+    name: 数据转换失败-帧率严重丢失
+    description: 数据包转换失败，实际步数不足声明步数的 80%，推测帧数据严重缺失
+    enabled: true
+    priority: 2
+    packageTypes:
+      - CONVERT_FAILED
+    conditions:
+      - field: dataPackageStatus
+        op: EQ
+        value: "ConvertFailed"
+      - field: actualSteps
+        op: NOT_NULL
+      - field: declaredSteps
+        op: NOT_NULL
+      - field: stepDiffRatio
+        op: RATIO_GT
+        value: "0.20"
+    result:
+      causeTitle: 帧数据严重缺失导致转换失败
+      causeDescription: 实际步数不足声明步数的 80%，数据包中帧数据严重不完整，转换流程无法正常完成或产出可用数据集。
+      confidence: 0.85
+      riskLevel: CRITICAL
+      recommendations:
+        - 确认原始 rosbag/数据目录是否完整（有无文件损坏）
+        - 检查 frames.csv 中记录的帧数与实际视频帧数是否一致
+        - 查看转换日志中丢帧记录
+        - 若数据损坏无法恢复，联系采集员重新采集
+      suggestedRouting: 数采质控组
+      riskFlags:
+        - 数据完整性严重不足（<80%），可能需要重采
+
+  - id: CONVERT_FAILED_GENERIC
+    name: 数据转换失败-未知原因
+    description: 数据包状态为 ConvertFailed，未匹配到具体原因，归类为通用转换失败
+    enabled: true
+    priority: 9
+    packageTypes:
+      - CONVERT_FAILED
+    conditions:
+      - field: dataPackageStatus
+        op: EQ
+        value: "ConvertFailed"
+    result:
+      causeTitle: 数据转换失败（具体原因待查）
+      causeDescription: 数据包在转换阶段失败，未能自动识别具体原因。可能涉及文件格式问题、资源不足或转换服务故障。
+      confidence: 0.50
+      riskLevel: MEDIUM
+      recommendations:
+        - 查看转换服务日志获取错误详情
+        - 确认文件格式符合 ROS 数据规范（ros1_mixed/ros1_full/ros2_mixed/ros2_full）
+        - 检查平台转换服务健康状态
+        - 尝试重新提交转换任务
+      suggestedRouting: 平台运维组
+      riskFlags: []

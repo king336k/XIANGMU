@@ -1,0 +1,221 @@
+# Copyright (c) 2023-present Plane Software, Inc. and contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+# See the LICENSE file for details.
+
+from datetime import datetime, timedelta, date
+from zoneinfo import ZoneInfo
+from django.utils import timezone
+from typing import Dict, Optional, List, Union, Tuple, Any
+
+from plane.db.models import User
+
+
+def china_date_filter(start_date, end_date):
+    """Inclusive China calendar days, independent of the request user's active timezone."""
+    zone = ZoneInfo("Asia/Shanghai")
+    filters = {}
+    if start_date is not None:
+        filters["created_at__gte"] = datetime.combine(start_date, datetime.min.time(), tzinfo=zone)
+    if end_date is not None:
+        filters["created_at__lt"] = datetime.combine(end_date + timedelta(days=1), datetime.min.time(), tzinfo=zone)
+    return filters
+
+
+def get_analytics_date_range(
+    date_filter: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Optional[Dict[str, Dict[str, datetime]]]:
+    """
+    Get date range for analytics with current and previous periods for comparison.
+    Returns a dictionary with current and previous date ranges.
+
+    Args:
+        date_filter (str): The type of date filter to apply
+        start_date (str): Start date for custom range (format: YYYY-MM-DD)
+        end_date (str): End date for custom range (format: YYYY-MM-DD)
+
+    Returns:
+        dict: Dictionary containing current and previous date ranges
+    """
+    if not date_filter:
+        return None
+
+    today = timezone.localdate(timezone.now(), ZoneInfo("Asia/Shanghai"))
+
+    if date_filter == "yesterday":
+        yesterday = today - timedelta(days=1)
+        return {
+            "current": {
+                "gte": datetime.combine(yesterday, datetime.min.time(), tzinfo=ZoneInfo("Asia/Shanghai")),
+                "lte": datetime.combine(yesterday, datetime.max.time(), tzinfo=ZoneInfo("Asia/Shanghai")),
+            }
+        }
+    elif date_filter == "last_7_days":
+        return {
+            "current": {
+                "gte": datetime.combine(
+                    today - timedelta(days=6), datetime.min.time(), tzinfo=ZoneInfo("Asia/Shanghai")
+                ),
+                "lte": datetime.combine(today, datetime.max.time(), tzinfo=ZoneInfo("Asia/Shanghai")),
+            },
+            "previous": {
+                "gte": datetime.combine(
+                    today - timedelta(days=13), datetime.min.time(), tzinfo=ZoneInfo("Asia/Shanghai")
+                ),
+                "lte": datetime.combine(
+                    today - timedelta(days=7), datetime.max.time(), tzinfo=ZoneInfo("Asia/Shanghai")
+                ),
+            },
+        }
+    elif date_filter == "last_30_days":
+        return {
+            "current": {
+                "gte": datetime.combine(
+                    today - timedelta(days=29), datetime.min.time(), tzinfo=ZoneInfo("Asia/Shanghai")
+                ),
+                "lte": datetime.combine(today, datetime.max.time(), tzinfo=ZoneInfo("Asia/Shanghai")),
+            },
+            "previous": {
+                "gte": datetime.combine(
+                    today - timedelta(days=59), datetime.min.time(), tzinfo=ZoneInfo("Asia/Shanghai")
+                ),
+                "lte": datetime.combine(
+                    today - timedelta(days=30), datetime.max.time(), tzinfo=ZoneInfo("Asia/Shanghai")
+                ),
+            },
+        }
+    elif date_filter == "last_3_months":
+        return {
+            "current": {
+                "gte": datetime.combine(
+                    today - timedelta(days=89), datetime.min.time(), tzinfo=ZoneInfo("Asia/Shanghai")
+                ),
+                "lte": datetime.combine(today, datetime.max.time(), tzinfo=ZoneInfo("Asia/Shanghai")),
+            },
+            "previous": {
+                "gte": datetime.combine(
+                    today - timedelta(days=179), datetime.min.time(), tzinfo=ZoneInfo("Asia/Shanghai")
+                ),
+                "lte": datetime.combine(
+                    today - timedelta(days=90), datetime.max.time(), tzinfo=ZoneInfo("Asia/Shanghai")
+                ),
+            },
+        }
+    elif date_filter == "custom" and start_date and end_date:
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end = datetime.strptime(end_date, "%Y-%m-%d").date()
+            return {
+                "current": {
+                    "gte": datetime.combine(start, datetime.min.time(), tzinfo=ZoneInfo("Asia/Shanghai")),
+                    "lte": datetime.combine(end, datetime.max.time(), tzinfo=ZoneInfo("Asia/Shanghai")),
+                }
+            }
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def get_chart_period_range(
+    date_filter: Optional[str] = None,
+) -> Optional[Tuple[date, date]]:
+    """
+    Get date range for chart visualization.
+    Returns a tuple of (start_date, end_date) for the specified period.
+
+    Args:
+        date_filter (str): The type of date filter to apply. Options are:
+            - "yesterday": Yesterday's date
+            - "last_7_days": Last 7 days
+            - "last_30_days": Last 30 days
+            - "last_3_months": Last 90 days
+            Defaults to "last_7_days" if not specified or invalid.
+
+    Returns:
+        tuple: A tuple containing (start_date, end_date) as date objects
+    """
+    if not date_filter:
+        return None
+
+    today = timezone.localdate(timezone.now(), ZoneInfo("Asia/Shanghai"))
+    period_ranges = {
+        "yesterday": (
+            today - timedelta(days=1),
+            today - timedelta(days=1),
+        ),
+        "last_7_days": (today - timedelta(days=6), today),
+        "last_30_days": (today - timedelta(days=29), today),
+        "last_3_months": (today - timedelta(days=89), today),
+    }
+
+    return period_ranges.get(date_filter, None)
+
+
+def get_analytics_filters(
+    slug: str,
+    user: User,
+    type: str,
+    date_filter: Optional[str] = None,
+    project_ids: Optional[Union[str, List[str]]] = None,
+) -> Dict[str, Any]:
+    """
+    Get combined project and date filters for analytics endpoints
+
+    Args:
+        slug: The workspace slug
+        user: The current user
+        type: The type of filter ("analytics" or "chart")
+        date_filter: Optional date filter string
+        project_ids: Optional list of project IDs or comma-separated string of project IDs
+
+    Returns:
+        dict: A dictionary containing:
+            - base_filters: Base filters for the workspace and user
+            - project_filters: Project-specific filters
+            - analytics_date_range: Date range filters for analytics comparison
+            - chart_period_range: Date range for chart visualization
+    """
+    # Get project IDs from request
+    if project_ids and isinstance(project_ids, str):
+        project_ids = [str(project_id) for project_id in project_ids.split(",")]
+
+    # Base filters for workspace and user
+    base_filters = {
+        "workspace__slug": slug,
+        "project__project_projectmember__member": user,
+        "project__project_projectmember__is_active": True,
+        "project__deleted_at__isnull": True,
+        "project__archived_at__isnull": True,
+    }
+
+    # Project filters
+    project_filters = {
+        "workspace__slug": slug,
+        "project_projectmember__member": user,
+        "project_projectmember__is_active": True,
+        "deleted_at__isnull": True,
+        "archived_at__isnull": True,
+    }
+
+    # Add project IDs to filters if provided
+    if project_ids:
+        base_filters["project_id__in"] = project_ids
+        project_filters["id__in"] = project_ids
+
+    # Initialize date range variables
+    analytics_date_range = None
+    chart_period_range = None
+
+    # Get date range filters based on type
+    if type == "analytics":
+        analytics_date_range = get_analytics_date_range(date_filter)
+    elif type == "chart":
+        chart_period_range = get_chart_period_range(date_filter)
+
+    return {
+        "base_filters": base_filters,
+        "project_filters": project_filters,
+        "analytics_date_range": analytics_date_range,
+        "chart_period_range": chart_period_range,
+    }

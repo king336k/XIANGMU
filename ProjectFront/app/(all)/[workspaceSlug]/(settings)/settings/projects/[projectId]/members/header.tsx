@@ -1,0 +1,33 @@
+/**
+ * Copyright (c) 2023-present Plane Software, Inc. and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * See the LICENSE file for details.
+ */
+
+import { observer } from "mobx-react";
+// plane imports
+import { Breadcrumbs } from "@plane/ui";
+// components
+import { BreadcrumbLink } from "@/components/common/breadcrumb-link";
+import { SettingsPageHeader } from "@/components/settings/page-header";
+import { PROJECT_SETTINGS_ICONS } from "@/components/settings/project/sidebar/item-icon";
+
+export const MembersProjectSettingsHeader = observer(function MembersProjectSettingsHeader() {
+  // translation
+  // derived values
+  const Icon = PROJECT_SETTINGS_ICONS.members;
+
+  return (
+    <SettingsPageHeader
+      leftItem={
+        <div className="flex items-center gap-2">
+          <Breadcrumbs>
+            <Breadcrumbs.Item
+              component={<BreadcrumbLink label="成员与权限" icon={<Icon className="size-4 text-tertiary" />} />}
+            />
+          </Breadcrumbs>
+        </div>
+      }
+    />
+  );
+});

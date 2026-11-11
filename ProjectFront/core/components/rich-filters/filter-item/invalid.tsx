@@ -1,0 +1,45 @@
+/**
+ * Copyright (c) 2023-present Plane Software, Inc. and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * See the LICENSE file for details.
+ */
+
+import { useTranslation } from "@plane/i18n";
+import React from "react";
+import { observer } from "mobx-react";
+import { CircleAlert } from "lucide-react";
+// plane imports
+import type { TExternalFilter, TFilterProperty } from "@plane/types";
+// local imports
+import { FilterItemCloseButton } from "./close-button";
+import { FilterItemContainer } from "./container";
+import { FilterItemProperty } from "./property";
+import type { IFilterItemProps } from "./root";
+
+export const InvalidFilterItem = observer(function InvalidFilterItem<
+  P extends TFilterProperty,
+  E extends TExternalFilter,
+>(props: IFilterItemProps<P, E>) {
+  const { t } = useTranslation();
+  const { condition, filter, isDisabled = false, showTransition = true } = props;
+
+  return (
+    <FilterItemContainer
+      conditionValue={condition.value}
+      showTransition={showTransition}
+      variant="error"
+      tooltipContent="筛选条件已失效，相关属性可能已删除或访问权限已变更。"
+    >
+      {/* Property section */}
+      <FilterItemProperty
+        conditionId={condition.id}
+        icon={CircleAlert}
+        label={t("filters_workspace.invalid")}
+        filter={filter}
+        isDisabled={isDisabled}
+      />
+      {/* Remove button */}
+      {!isDisabled && <FilterItemCloseButton conditionId={condition.id} filter={filter} />}
+    </FilterItemContainer>
+  );
+});

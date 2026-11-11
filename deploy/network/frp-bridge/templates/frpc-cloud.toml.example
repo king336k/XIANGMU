@@ -1,0 +1,26 @@
+# 在公网平台的专用容器网络运行。6324不发布到宿主机或公网。
+serverAddr = "{{ .Envs.FRP_SERVER_ADDR }}"
+serverPort = 7000
+loginFailExit = false
+auth.method = "token"
+auth.token = "{{ .Envs.FRP_AUTH_TOKEN }}"
+transport.tls.enable = true
+transport.tls.serverName = "{{ .Envs.FRP_TLS_SERVER_NAME }}"
+transport.tls.trustedCaFile = "{{ .Envs.FRP_CA_FILE }}"
+log.to = "console"
+log.level = "warn"
+
+[[proxies]]
+name = "hub-api"
+type = "stcp"
+secretKey = "{{ .Envs.FRP_HUB_SECRET }}"
+localIP = "{{ .Envs.HUB_INTERNAL_HOST }}"
+localPort = 8000
+
+[[visitors]]
+name = "data-authority-visitor"
+type = "stcp"
+serverName = "data-authority"
+secretKey = "{{ .Envs.FRP_AUTHORITY_SECRET }}"
+bindAddr = "{{ .Envs.CLOUD_PRIVATE_BIND_IP }}"
+bindPort = 6324

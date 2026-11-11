@@ -1,0 +1,100 @@
+# 通用诊断规则
+# 适用于所有问题包类型（packageTypes 为空时对所有类型生效）
+# 规则版本：1.0.0
+
+rules:
+
+  - id: DATA_COMPLETENESS_STEP_MISMATCH_SEVERE
+    name: 步数严重不匹配
+    description: 实际采集步数与声明步数差异超过 20%，数据严重不完整
+    enabled: true
+    priority: 1
+    packageTypes: []  # 适用所有类型
+    conditions:
+      - field: declaredSteps
+        op: NOT_NULL
+      - field: actualSteps
+        op: NOT_NULL
+      - field: stepDiffRatio
+        op: RATIO_GT
+        value: "0.20"
+    result:
+      causeTitle: 步数严重不匹配（差异>20%）
+      causeDescription: 实际采集步数与声明步数差异超过 20%，可能导致关键场景数据缺失，影响后续标注和审核流程。
+      confidence: 0.90
+      riskLevel: HIGH
+      recommendations:
+        - 确认采集过程中是否发生意外中断（如传感器断连、ROS节点崩溃）
+        - 检查 DAQ 客户端采集日志是否有异常停止记录
+        - 联系采集员确认采集步骤是否完整执行
+        - 考虑补充采集以满足步数要求
+      riskFlags:
+        - 数据不完整，影响标注覆盖率
+
+  - id: DATA_COMPLETENESS_STEP_MISMATCH_MILD
+    name: 步数轻微不匹配
+    description: 实际采集步数与声明步数差异在 5%-20% 之间
+    enabled: true
+    priority: 5
+    packageTypes: []
+    conditions:
+      - field: declaredSteps
+        op: NOT_NULL
+      - field: actualSteps
+        op: NOT_NULL
+      - field: stepDiffRatio
+        op: RATIO_GT
+        value: "0.05"
+    result:
+      causeTitle: 步数轻微不匹配（差异5-20%）
+      causeDescription: 实际步数与声明步数存在轻微差异，可能是边界帧丢失或采集任务提前结束导致。
+      confidence: 0.70
+      riskLevel: MEDIUM
+      recommendations:
+        - 检查最终几个步骤的采集质量
+        - 确认是否是正常完成还是提前中止
+      riskFlags: []
+
+  - id: SCHEMA_FINGERPRINT_MISSING
+    name: 模式指纹缺失
+    description: 数据包缺少 schema_fingerprint，无法进行数据模式验证
+    enabled: true
+    priority: 8
+    packageTypes: []
+    conditions:
+      - field: schemaVersion
+        op: IS_NULL
+    result:
+      causeTitle: 数据模式版本信息缺失
+      causeDescription: 数据包缺少 schema_version 字段，无法验证数据结构与标准模式的兼容性。
+      confidence: 0.60
+      riskLevel: LOW
+      recommendations:
+        - 确认采集客户端版本是否支持 schema 信息注入
+        - 升级至最新 DAQ 客户端版本
+      riskFlags: []
+
+  - id: LARGE_PACKAGE_RISK
+    name: 大包传输高风险
+    description: 数据包超过 50GB，传输失败风险高
+    enabled: true
+    priority: 6
+    packageTypes:
+      - UPLOAD_FAILED
+      - GENERAL
+    conditions:
+      - field: pkgSizeBytes
+        op: GT
+        value: "53687091200"   # 50 * 1024 * 1024 * 1024
+    result:
+      causeTitle: 超大数据包传输风险
+      causeDescription: 数据包大小超过 50GB，在网络不稳定情况下断点续传失败率较高，建议拆分传输。
+      confidence: 0.65
+      riskLevel: MEDIUM
+      recommendations:
+        - 确认网络带宽和稳定性
+        - 考虑使用专用传输通道（如内网直传）
+        - 联系平台运维确认存储空间充足
+      temporaryWorkaround: 在网络稳定的环境下重新发起上传，如条件允许使用内网传输
+      riskFlags:
+        - 数据包体积过大，传输成功率低于90%

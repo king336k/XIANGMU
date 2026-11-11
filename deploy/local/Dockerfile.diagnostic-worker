@@ -1,0 +1,8 @@
+ARG API_IMAGE=engramproject/api:local
+FROM ${API_IMAGE}
+RUN python -m venv /opt/diagnostic-agent
+COPY services/diagnostic-agent/requirements.txt /opt/diagnostic-agent/requirements.txt
+RUN /opt/diagnostic-agent/bin/pip install --no-cache-dir -r /opt/diagnostic-agent/requirements.txt
+COPY services/diagnostic-agent/runner.py /opt/diagnostic-agent/runner.py
+ENV DIAGNOSTIC_AGENT_PYTHON=/opt/diagnostic-agent/bin/python
+ENV DIAGNOSTIC_AGENT_SCRIPT=/opt/diagnostic-agent/runner.py

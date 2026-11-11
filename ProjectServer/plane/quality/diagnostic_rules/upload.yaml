@@ -1,0 +1,59 @@
+# 上传失败类规则
+# 适用于 packageType = UPLOAD_FAILED
+# 规则版本：1.0.0
+
+rules:
+
+  - id: UPLOAD_TRANSFER_FAILED_NETWORK
+    name: 上传网络传输失败
+    description: 数据包状态为 TransferFailed，判断为网络传输中断
+    enabled: true
+    priority: 1
+    packageTypes:
+      - UPLOAD_FAILED
+    conditions:
+      - field: dataPackageStatus
+        op: EQ
+        value: "TransferFailed"
+    result:
+      causeTitle: 网络传输中断导致上传失败
+      causeDescription: 数据包在传输阶段失败，最常见原因为网络连接不稳定、带宽不足或上传超时。
+      confidence: 0.85
+      riskLevel: MEDIUM
+      recommendations:
+        - 检查采集端与数据平台之间的网络连通性
+        - 确认 DAQ 客户端网络配置（代理、防火墙）
+        - 在网络稳定环境下重新发起上传
+        - 查看 DAQ 日志中的具体网络错误码
+      temporaryWorkaround: 切换至更稳定的网络连接后点击"重新上传"按钮
+      suggestedRouting: 数采运维组
+      riskFlags: []
+
+  - id: UPLOAD_TOKEN_EXPIRED
+    name: 上传 Token 过期
+    description: 数据包传输失败且包体积大，推测为 DAQ Token 在大文件传输中途过期（Token 有效期 24h）
+    enabled: true
+    priority: 2
+    packageTypes:
+      - UPLOAD_FAILED
+    conditions:
+      - field: dataPackageStatus
+        op: EQ
+        value: "TransferFailed"
+      - field: pkgSizeBytes
+        op: GT
+        value: "10737418240"   # 大于 10GB 才可能在24h内传输不完
+    result:
+      causeTitle: DAQ Token 过期（大包传输超时）
+      causeDescription: 数据包传输失败，且包体积超过 10GB。DAQ 上传 Token 有效期为 24 小时，在网络条件差时大包传输可能超时导致 Token 失效。
+      confidence: 0.75
+      riskLevel: HIGH
+      recommendations:
+        - 确认采集端与服务器的网络速度（至少需要 10GB/24h ≈ 1 Mbps 上行带宽）
+        - 重新获取 Token 后立即在网络良好时重新上传
+        - 考虑在网络环境良好时（如夜间低峰期）发起上传
+        - 联系平台运维确认是否支持 Token 续期
+      temporaryWorkaround: 在网络良好时（建议 >10 Mbps 上行带宽）获取新 Token 后立即上传
+      suggestedRouting: 数采运维组
+      riskFlags:
+        - Token 有效期与包体积不匹配，存在结构性风险
