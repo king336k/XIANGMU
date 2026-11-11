@@ -114,7 +114,10 @@ def run_diagnostic(job_id):
                 revisions = [] if report_only else list(search(job.project, diagnostic_search_query(text, sources))[:5])
                 references = assistant.reference_payload(revisions, diagnostic_search_query(text, sources))
                 try:
-                    answer = analyze_diagnostic(config, model_text, sources, references, materials)
+                    from .diagnostic_context import diagnostic_context
+                    context_references = diagnostic_context(job, report_only=report_only)
+                    answer = analyze_diagnostic(config, model_text, sources, [*references, *context_references], materials)
+                    result["context_references"] = context_references
                     result.update(answer, method="hybrid", notice="规则与模型分析", model_status="completed")
                 except (TimeoutError, APITimeoutError):
                     result["model_status"] = "timeout"

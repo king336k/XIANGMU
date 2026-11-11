@@ -280,5 +280,8 @@ class DiagnosticDetail(QualityView):
                 raise Conflict("仅已完成的报告可以反馈。")
             job.feedback = data["feedback"]
             job.feedback_note = data["note"]
+            job.result = {**job.result, "feedback_review": {
+                "actor_id": str(request.user.id), "at": timezone.now().isoformat(),
+            }}
         job.save()
         return Response(DiagnosticSerializer(job).data)

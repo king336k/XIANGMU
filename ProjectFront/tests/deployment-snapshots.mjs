@@ -228,3 +228,28 @@ test("error offers retry and loading is announced", async () => {
   assert.equal(retries, 1);
   assert.equal(walk(load({ isLoading: true }).render(false), (node) => node.props?.role === "status").length, 1);
 });
+
+test("固定提交不会把HEAD当版本，真实电脑用户名独立于采集员", () => {
+  const sample = row("identity", "2026-11-11");
+  sample.snapshot.components = [
+    {
+      ...component,
+      key: "project",
+      label: "合并主程序",
+      status: "available",
+      version: "HEAD",
+      branch: "HEAD",
+      hostUsername: "engram-test",
+    },
+  ];
+  const value = JSON.stringify(walk(load({ data: { count: 1, results: [sample] } }).render(false), () => true));
+  assert.doesNotMatch(value, /HEAD · HEAD/);
+  assert.match(value, /固定提交/);
+  assert.match(value, /未标注版本/);
+  assert.match(value, /采集电脑/);
+  assert.match(value, /engram-test/);
+  assert.match(value, /合并 DAQ 主程序/);
+  const compact = JSON.stringify(load({ data: { count: 1, results: [sample] } }).render(true, ["identity"]));
+  assert.doesNotMatch(compact, /HEAD/);
+  assert.match(compact, /aaaaaaaaaa/);
+});

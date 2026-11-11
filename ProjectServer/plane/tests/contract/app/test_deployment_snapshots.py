@@ -318,3 +318,13 @@ def test_source_snapshot_identity_is_preserved(session_client, snapshots_case):
     for key, expected in identity.items():
         assert row[key] == expected
         assert row["submodules"][0][key] == expected
+
+
+def test_system_username_is_kept_in_immutable_snapshot(session_client, snapshots_case):
+    project, defect, _, add = snapshots_case
+    original = document()
+    original['deploymentSnapshot']['components'][0]['hostUsername'] = 'engram-test'
+    add(original)
+    response = get(session_client, project, defect)
+    assert response.status_code == 200
+    assert response.data['results'][0]['snapshot']['components'][0]['hostUsername'] == 'engram-test'

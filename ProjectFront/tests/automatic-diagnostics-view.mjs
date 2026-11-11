@@ -128,3 +128,20 @@ test("模型自评明确不是正确概率，旧报告不伪造分数", () => {
   const old = render([{ ...row, result: { method: "hybrid", model_status: "completed" } }]);
   assert.ok(!old.includes("模型自评"));
 });
+
+test("已读取材料独立折叠默认展开，评价显示选择及改进说明", () => {
+  const html = render([
+    {
+      id: "review",
+      status: "completed",
+      feedback: "unhelpful",
+      feedback_note: "这是验收，不能认定缺少平台回执",
+      created_at: "now",
+      result: { version: 1, method: "hybrid", sources: [{ file_id: "f", name: "scene.json", read_bytes: 80 }] },
+    },
+  ]);
+  assert.match(html, /<details[^>]*open=""[^>]*>\s*<summary[^>]*>已读取材料/);
+  assert.match(html, /aria-pressed="true"/);
+  assert.match(html, /已反馈：需改进/);
+  assert.match(html, /这是验收/);
+});

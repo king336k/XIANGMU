@@ -120,7 +120,7 @@ def test_result_records_safe_model_and_instruction_provenance(mocker, monkeypatc
         [],
     )
     assert result["model_info"]["model"] == "actual-provider-model"
-    assert result["model_info"]["instruction_version"] == "diagnostic-confidence-v1"
+    assert result["model_info"]["instruction_version"] == "diagnostic-receipt-review-v2"
     assert len(result["model_info"]["boundary_code_sha256"]) == 64
     assert result["confidence_references"][0]["reference"] == "FILE-local"
     assert "fixture-private-key" not in json.dumps(result)

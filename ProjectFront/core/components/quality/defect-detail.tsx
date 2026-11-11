@@ -18,7 +18,7 @@ import { DeploymentSnapshots } from "./deployment-snapshots";
 import { DefectTeam } from "./defect-team";
 import { SolutionPanel } from "./solution-panel";
 import { DefectVerificationScope } from "./defect-verification-scope";
-import { can, severityNames, statusNames } from "./types";
+import { can, severityNames } from "./types";
 import type { Context, Defect } from "./types";
 
 import { RecordProgress } from "./record-progress";
@@ -167,7 +167,7 @@ export function DefectDetail({
               {value.source_kind === "daq" ? "DAQ 上报" : value.source_kind === "test" ? "测试提报" : "平台新建"}
             </span>
             <span className="whitespace-nowrap">
-              {value.source_kind === "daq" ? "上报人" : "创建人"}：{value.created_by_name || "未记录"}
+              {value.source_kind === "daq" ? "采集员" : "创建人"}：{value.created_by_name || "未记录"}
             </span>
             {value.created_at && (
               <time dateTime={value.created_at} className="whitespace-nowrap">
@@ -243,24 +243,16 @@ export function DefectDetail({
             </div>
             <div hidden={activeTab !== "regression"} className="platform-detail-panel">
               <p className="text-13 text-secondary">在当前项目安排测试、记录复现与验证结果，再更新缺陷状态。</p>
-              <DefectVerificationScope base={base} value={value} context={context} onChanged={onChanged} />
+              <DefectVerificationScope
+                projectUrl={projectUrl}
+                base={base}
+                value={value}
+                context={context}
+                onChanged={onChanged}
+              />
             </div>
             <div hidden={activeTab !== "history"} className="platform-detail-panel space-y-5">
               <CollaborationPanel base={base} value={value} context={context} onChanged={onChanged} />
-              <details className="space-y-3 border-t border-subtle pt-4 text-12">
-                <summary className="cursor-pointer text-secondary">完整处理记录（{value.events.length}）</summary>
-                <ol className="space-y-3 pt-3">
-                  {value.events.map((event) => (
-                    <li key={event.id}>
-                      <p className="text-secondary">
-                        {renderNumericDateTime(event.created_at)} · {event.actor || "成员"} ·{" "}
-                        {statusNames[event.previous_status] || "新建"} → {statusNames[event.status]}
-                      </p>
-                      <p className="mt-1 whitespace-pre-wrap">{event.note}</p>
-                    </li>
-                  ))}
-                </ol>
-              </details>
             </div>
           </div>
           <aside aria-label="缺陷属性" className="space-y-4 border-subtle">

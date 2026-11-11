@@ -16,7 +16,7 @@ def validate_scope_change(view, defect, data):
     scope = data.get("verification_scope", defect.verification_scope)
     if scope == "data":
         raise ValidationError({"verification_scope": "请在本平台记录功能或测试验证结果。"})
-    if scope == defect.verification_scope:
+    if scope == defect.verification_scope and not reason.strip():
         return ""
     if not manager(view.project_id, view.request.user):
         raise PermissionDenied("验证方式由项目经理确认。")
@@ -24,6 +24,8 @@ def validate_scope_change(view, defect, data):
         raise ValidationError({"verification_scope_reason": "请简要说明验证范围。"})
     if defect.status == "closed" or data.get("status") == "closed":
         raise ValidationError({"verification_scope": "请先单独保存验证方式，再修复验证；已关闭缺陷须先重开。"})
+    if scope == defect.verification_scope:
+        return f"验证安排：{reason.strip()}"
     if (
         DataRegression.objects.filter(defect=defect)
         .exclude(plan__status__in=["completed", "cancelled", "failed"])

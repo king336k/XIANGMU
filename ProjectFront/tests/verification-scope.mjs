@@ -6,7 +6,7 @@ const require = createRequire(new URL("../package.json", import.meta.url));
 const ts = require("typescript"),
   React = require("react");
 function harness(manager = true, dataRequired = true, manual = false) {
-  const state = [false, false];
+  const state = [false, false, "manual"];
   let index = 0;
   const writes = [],
     changed = [],
@@ -32,6 +32,9 @@ function harness(manager = true, dataRequired = true, manual = false) {
           ];
         },
       };
+    if (id === "swr") return { default: () => ({ data: [] }) };
+    if (id === "@/components/common/project-route-link") return { ProjectRouteLink: "a" };
+    if (id === "./paged-record-select") return { PagedRecordSelect: "case-picker" };
     if (id === "./api")
       return {
         qualityApi: {
@@ -45,6 +48,7 @@ function harness(manager = true, dataRequired = true, manual = false) {
     return require(id);
   }, exports);
   const props = {
+    projectUrl: "/projects/p/TEST",
     base: "/q/",
     value: {
       id: "d",
@@ -66,7 +70,7 @@ function harness(manager = true, dataRequired = true, manual = false) {
     node && typeof node === "object" ? [node, ...React.Children.toArray(node.props?.children).flatMap(nodes)] : [];
   return { render, nodes, writes, changed };
 }
-test("验证方式使用本平台功能验证；提交原版本和简短原因", async () => {
+test("验证方式提供人工与用例两条路径；保存原版本和原因", async () => {
   const h = harness();
   h.nodes(h.render())
     .find((n) => n.type === "button")
@@ -74,7 +78,7 @@ test("验证方式使用本平台功能验证；提交原版本和简短原因",
   const nodes = h.nodes(h.render());
   assert.deepEqual(
     nodes.filter((n) => n.type === "option").map((n) => n.props.children),
-    ["功能验证"]
+    ["人工功能验证", "测试用例回归"]
   );
   await nodes
     .find((n) => n.type === "modal")
@@ -87,7 +91,7 @@ test("验证方式使用本平台功能验证；提交原版本和简短原因",
   assert.deepEqual(h.writes, [
     [
       "/q/defects/d/",
-      { expected_version: 7, verification_scope: "functional", verification_scope_reason: "只调整提示" },
+      { expected_version: 7, verification_scope: "functional", verification_scope_reason: "只调整提示", case_id: null },
       "patch",
     ],
   ]);
@@ -105,19 +109,20 @@ test("技术员不显示调整验证方式入口", () => {
 test("普通缺陷验证关闭只填写验证结果，不要求Session或数据包", async () => {
   const h = harness(true, false, true);
   h.nodes(h.render())
-    .find((n) => n.type === "button" && n.props.children === "验证并关闭")
+    .find((n) => n.type === "button" && n.props.children === "记录验证并关闭")
     .props.onClick();
   const modal = h.nodes(h.render()).find((n) => n.type === "modal");
-  assert.equal(h.nodes(modal).filter((n) => n.type === "textarea").length, 1);
-  await modal.props.onSubmit(new Map([["result", "测试员确认新版本提示正确，经理复核"]]));
-  assert.deepEqual(h.writes[0], [
-    "/q/defects/d/",
-    {
-      expected_version: 7,
-      status: "closed",
-      verification_method: "manual",
-      verification_note: "测试员确认新版本提示正确，经理复核",
-    },
-    "patch",
-  ]);
+  assert.equal(h.nodes(modal).filter((n) => n.type === "textarea").length, 5);
+  await modal.props.onSubmit(
+    new Map([
+      ["environment", "195"],
+      ["steps", "只启用手臂"],
+      ["expected", "能录制"],
+      ["actual", "录制通过"],
+      ["evidence", "Session-A"],
+    ])
+  );
+  assert.equal(h.writes[0][1].verification_method, "manual");
+  assert.match(h.writes[0][1].verification_note, /只启用手臂/);
+  assert.match(h.writes[0][1].verification_note, /Session-A/);
 });

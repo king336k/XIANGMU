@@ -17,6 +17,8 @@ type Job = {
   mode: string;
   error_code: string;
   created_at: string;
+  feedback?: "helpful" | "unhelpful" | "";
+  feedback_note?: string;
   result: {
     method?: string;
     model_status?: string;
@@ -56,6 +58,7 @@ type Job = {
       truncated: boolean;
     }[];
     citations?: { reference: string; title: string }[];
+    context_references?: { reference: string; title: string; content: string }[];
   };
 };
 const names: Record<string, string> = {
@@ -89,6 +92,26 @@ export function DiagnosticsPanel({ base, defectId, context }: { base: string; de
   );
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
+  const [feedbackNotes, setFeedbackNotes] = useState<Record<string, string>>({});
+  const [feedbackChoices, setFeedbackChoices] = useState<Record<string, string>>({});
+  const saveFeedback = async (job: Job, choice: string) => {
+    setBusy(true);
+    setMessage("");
+    try {
+      await qualityApi.write(`${base}diagnostics/${job.id}/`, {
+        action: "feedback",
+        feedback: choice,
+        note: feedbackNotes[job.id] ?? job.feedback_note ?? "",
+      });
+      setFeedbackChoices((values) => ({ ...values, [job.id]: choice }));
+      setMessage("评价已保存，后续相关诊断会参考这条反馈；评价不会替代现场证据。");
+      await mutate();
+    } catch (cause) {
+      setMessage(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
   const start = async (mode: string) => {
     setBusy(true);
     setMessage("");
@@ -285,9 +308,9 @@ export function DiagnosticsPanel({ base, defectId, context }: { base: string; de
           </details>
         ) : null}
         {!!job.result.sources?.length && (
-          <div className="space-y-2">
+          <details open className="space-y-2 rounded-md border border-subtle p-3">
+            <summary className="cursor-pointer font-medium">已读取材料（{job.result.sources.length}）</summary>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h4 className="font-medium">已读取材料</h4>
               <Button
                 type="button"
                 variant="neutral-primary"
@@ -332,7 +355,7 @@ export function DiagnosticsPanel({ base, defectId, context }: { base: string; de
                 )}
               </div>
             ))}
-          </div>
+          </details>
         )}
         {job.result.input_scope?.model_text_truncated && (
           <p className="text-11 text-secondary">模型分析使用了材料摘要，未覆盖全部正文。</p>
@@ -345,31 +368,54 @@ export function DiagnosticsPanel({ base, defectId, context }: { base: string; de
             )?.archive_entry || row.title}
           </p>
         ))}
-        {job.status === "completed" && (
-          <div className="flex gap-3">
-            {[
-              { key: "helpful", text: "有帮助" },
-              { key: "unhelpful", text: "需改进" },
-            ].map((option) => (
-              <button
-                type="button"
-                key={option.key}
-                className="text-accent-primary"
-                onClick={async () => {
-                  try {
-                    await qualityApi.write(`${base}diagnostics/${job.id}/`, {
-                      action: "feedback",
-                      feedback: option.key,
-                    });
-                    setMessage("反馈已记录");
-                  } catch (e) {
-                    setMessage(errorMessage(e));
-                  }
-                }}
-              >
-                {option.text}
-              </button>
+        {!!job.result.context_references?.length && (
+          <details className="space-y-2 text-12">
+            <summary className="cursor-pointer text-secondary">
+              平台回执与历史评价参考（{job.result.context_references.length}）
+            </summary>
+            <p className="text-11 text-secondary">回执证明平台接收情况；历史评价是待复核建议，不替代本次现场证据。</p>
+            {job.result.context_references.map((row) => (
+              <div key={row.reference} className="rounded-md bg-layer-1 p-3">
+                <p className="font-medium">{row.title}</p>
+                <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>
+              </div>
             ))}
+          </details>
+        )}
+        {job.status === "completed" && (
+          <div className="space-y-2 border-t border-subtle pt-3">
+            <p className="text-12 text-secondary">评价这次诊断。补充误判位置和实际结果，可供后续相关诊断参考。</p>
+            <textarea
+              aria-label="诊断改进说明"
+              rows={2}
+              maxLength={2000}
+              className="w-full rounded-md border border-subtle bg-surface-1 px-3 py-2 text-12"
+              placeholder="例如：本次是正常验收；平台已收到附件，不应再提示缺少接收回执。"
+              value={feedbackNotes[job.id] ?? job.feedback_note ?? ""}
+              onChange={(event) => setFeedbackNotes((values) => ({ ...values, [job.id]: event.target.value }))}
+            />
+            <div className="flex items-center gap-3">
+              {[
+                { key: "helpful", text: "有帮助" },
+                { key: "unhelpful", text: "需改进" },
+              ].map((option) => (
+                <button
+                  type="button"
+                  key={option.key}
+                  disabled={busy}
+                  aria-pressed={(feedbackChoices[job.id] ?? job.feedback) === option.key}
+                  className={`rounded px-2 py-1 text-12 disabled:opacity-50 ${(feedbackChoices[job.id] ?? job.feedback) === option.key ? "bg-accent-subtle font-medium text-accent-primary" : "text-secondary hover:bg-layer-1"}`}
+                  onClick={() => void saveFeedback(job, option.key)}
+                >
+                  {option.text}
+                </button>
+              ))}
+              {(feedbackChoices[job.id] ?? job.feedback) && (
+                <span role="status" className="text-12 text-secondary">
+                  已反馈：{(feedbackChoices[job.id] ?? job.feedback) === "helpful" ? "有帮助" : "需改进"}
+                </span>
+              )}
+            </div>
           </div>
         )}
       </div>

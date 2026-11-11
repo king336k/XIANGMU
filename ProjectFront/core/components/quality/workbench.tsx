@@ -177,7 +177,7 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
         id: row.id,
         code: row.code,
         title: defectDisplayTitle(row.title),
-        subtitle: `${row.source_kind === "daq" ? "DAQ 上报" : row.source_kind === "test" ? "测试提报" : "平台新建"} · ${row.source_kind === "daq" ? "上报人" : "创建人"}：${row.created_by_name || "未记录"}${row.created_at ? " · " + renderNumericDateTime(row.created_at) : ""}`,
+        subtitle: `${row.source_kind === "daq" ? "DAQ 上报" : row.source_kind === "test" ? "测试提报" : "平台新建"} · ${row.source_kind === "daq" ? "采集员" : "创建人"}：${row.created_by_name || "未记录"}${row.created_at ? " · " + renderNumericDateTime(row.created_at) : ""}`,
         status: row.status,
         statusName: statusNames[row.status] || row.status,
         severity: row.severity,

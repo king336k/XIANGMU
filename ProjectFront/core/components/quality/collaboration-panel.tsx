@@ -1,6 +1,6 @@
 import { renderNumericDateTime } from "@plane/utils";
 // SPDX-License-Identifier: AGPL-3.0-only
-import { can } from "./types";
+import { can, statusNames } from "./types";
 import { useState } from "react";
 import useSWR from "swr";
 import { Button } from "@plane/ui";
@@ -36,7 +36,7 @@ export function SourceCard({ source }: { source: Source }) {
       {context ? (
         <>
           <p>DAQ · {source.source_instance}</p>
-          {context.reporter && <p className="text-secondary">DAQ 上报账号：{context.reporter.username}</p>}
+          {context.reporter && <p className="text-secondary">采集员：{context.reporter.username}</p>}
           {context.sourceReference && (
             <p className="text-secondary">数据包 / Session 上报引用：{context.sourceReference}</p>
           )}
@@ -120,13 +120,37 @@ export function CollaborationPanel({
     }
   };
   const failed = commentsError || sourcesError || packagesError;
+  const timeline = [
+    ...(value.events || []).map((event) => ({
+      id: `event-${event.id}`,
+      actor: event.actor || "成员",
+      at: event.created_at,
+      action:
+        event.previous_status === event.status
+          ? "更新记录"
+          : `${statusNames[event.previous_status] || "新建"} → ${statusNames[event.status] || event.status}`,
+      content: event.note,
+    })),
+    ...(comments || []).map((comment) => ({
+      id: `comment-${comment.id}`,
+      actor: comment.actor,
+      at: comment.created_at,
+      action: comment.visibility === "internal" ? "内部备注" : "采集员可见回复",
+      content: comment.content,
+    })),
+  ].toSorted((left, right) => new Date(right.at).getTime() - new Date(left.at).getTime());
   return (
-    <section className="space-y-4 border-t border-subtle pt-4">
-      <h3 className="text-13 font-medium">来源与协作</h3>
-      {sources?.map((source) => (
-        <SourceCard key={source.id} source={source} />
-      ))}
-      {sources?.length === 0 && <p className="text-12 text-secondary">尚未关联外部来源。</p>}
+    <section className="space-y-4">
+      <h3 className="text-13 font-medium">操作记录</h3>
+      <details className="text-12">
+        <summary className="cursor-pointer text-secondary">上报来源与 Session（{sources?.length || 0}）</summary>
+        <div className="mt-2 space-y-2">
+          {sources?.map((source) => (
+            <SourceCard key={source.id} source={source} />
+          ))}
+          {sources?.length === 0 && <p className="text-12 text-secondary">平台内创建，无 DAQ 来源。</p>}
+        </div>
+      </details>
       {can(context, "claim_defect") &&
         (!value.assignee_id || value.assignee_id === context.user_id) &&
         ["open", "in_progress"].includes(value.status) && (
@@ -146,22 +170,27 @@ export function CollaborationPanel({
           </Button>
         )}
       <div className="space-y-3">
-        <h4 className="text-13 font-medium">协作评论</h4>
+        <h4 className="text-13 font-medium">处理时间线</h4>
         {!comments && !commentsError && (
           <p role="status" className="text-12 text-secondary">
-            正在加载评论…
+            正在加载记录…
           </p>
         )}
-        {comments?.length === 0 && <p className="text-12 text-secondary">暂无评论，记录排查过程便于协作。</p>}
-        {comments?.map((comment) => (
-          <div key={comment.id} className="border-l-2 border-subtle pl-3 text-12">
-            <p className="text-secondary">
-              {comment.actor} · {renderNumericDateTime(comment.created_at)} ·{" "}
-              {comment.visibility === "internal" ? "内部备注" : "数采员可见回复"}
-            </p>
-            <p className="break-words whitespace-pre-wrap">{comment.content}</p>
-          </div>
-        ))}
+        {timeline.length === 0 && <p className="text-12 text-secondary">暂无处理记录。</p>}
+        <ol className="space-y-4">
+          {timeline.map((row) => (
+            <li key={row.id} className="border-l-2 border-subtle pl-3 text-12">
+              <p className="flex flex-wrap gap-x-3 gap-y-1">
+                <strong>{row.actor}</strong>
+                <span>{row.action}</span>
+                <time className="text-secondary" dateTime={row.at}>
+                  {renderNumericDateTime(row.at)}
+                </time>
+              </p>
+              {row.content && <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>}
+            </li>
+          ))}
+        </ol>
         {(access?.can_public_comment || access?.can_internal_comment) && (
           <>
             <Field label="回复范围">
@@ -170,11 +199,11 @@ export function CollaborationPanel({
                 value={visibility}
                 onChange={(event) => setVisibility(event.target.value as "public" | "internal")}
               >
-                {access.can_public_comment && <option value="public">数采员可见回复</option>}
+                {access.can_public_comment && <option value="public">采集员可见回复</option>}
                 {access.can_internal_comment && <option value="internal">内部备注</option>}
               </select>
             </Field>
-            <Field label={visibility === "internal" ? "添加内部备注" : "添加数采员可见回复"}>
+            <Field label={visibility === "internal" ? "添加内部备注" : "添加采集员可见回复"}>
               <textarea
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
@@ -202,8 +231,8 @@ export function CollaborationPanel({
         )}
       </div>
       {access?.can_remind && (
-        <div className="space-y-2 rounded-md border border-subtle p-3">
-          <h4 className="text-13 font-medium">站内催办</h4>
+        <details className="space-y-2 rounded-md border border-subtle p-3">
+          <summary className="cursor-pointer text-13 font-medium">提醒处理人</summary>
           <div className="flex flex-wrap gap-2">
             <select
               aria-label="催办职责"
@@ -235,7 +264,7 @@ export function CollaborationPanel({
           <p className="text-12 text-secondary">
             同一缺陷对同一接收人10分钟内只提醒一次。只发送站内事件，不含评论正文。
           </p>
-        </div>
+        </details>
       )}
       <details className="space-y-3 text-12">
         <summary className="cursor-pointer text-secondary">诊断材料清单与接入信息（高级）</summary>

@@ -113,6 +113,7 @@ def component(value):
         "key": key,
         "label": text(value.get("label"), 120),
         "location": value["location"],
+        "hostUsername": text(value.get("hostUsername", ""), 120),
         "status": value["status"],
         **{field: text(value.get(field, "")) for field in TEXT_FIELDS},
         **source_identity(value),

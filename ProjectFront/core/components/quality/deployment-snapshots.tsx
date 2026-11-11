@@ -25,6 +25,7 @@ type Component = ModuleInfo & {
   reason: string;
   submodules: ModuleInfo[];
   omittedSubmodules: number;
+  hostUsername?: string;
 };
 type SnapshotRow = {
   file: { id: string; name: string; sha256: string };
@@ -41,7 +42,12 @@ type SnapshotRow = {
 type SnapshotResponse = { count: number; results: SnapshotRow[] };
 
 const statusNames = { available: "可用", unavailable: "缺失", excluded: "未纳入" };
-const locationNames = { host: "主机", robot: "机器人", remote: "远端", web: "Web" };
+const locationNames = { host: "采集电脑", robot: "机器人", remote: "机器人端", web: "采集电脑" };
+const componentName = (row: Component) => (row.key === "project" ? "合并 DAQ 主程序" : row.label);
+function versionName(row: ModuleInfo) {
+  const values = [...new Set([row.version, row.branch].filter((value) => value && value !== "HEAD"))];
+  return values.join(" · ") || (row.commit ? "固定提交，未标注版本" : "版本未记录");
+}
 const shortCommit = (commit: string) => (commit ? commit.slice(0, 10) : "未记录");
 const displayTime = (value: string) => (value ? renderNumericDateTime(value) : "未记录");
 
@@ -59,9 +65,9 @@ function ComponentRow({ component }: { component: Component }) {
   return (
     <details className="min-w-0 border-b border-subtle last:border-b-0">
       <summary className="grid cursor-pointer list-none grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 py-2 text-12 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,.7fr)_auto]">
-        <span className="min-w-0 font-medium break-words">{component.label}</span>
+        <span className="min-w-0 font-medium break-words">{componentName(component)}</span>
         <span className="min-w-0 break-all text-secondary max-sm:col-start-1 max-sm:row-start-2">
-          {[component.version, component.branch].filter(Boolean).join(" · ") || "版本未记录"}
+          {versionName(component)}
         </span>
         <code className="min-w-0 text-11 break-all text-secondary max-sm:col-start-2 max-sm:row-start-2">
           {shortCommit(component.commit)}
@@ -69,7 +75,11 @@ function ComponentRow({ component }: { component: Component }) {
         <span className="text-11 whitespace-nowrap text-secondary">{statusNames[component.status]}</span>
       </summary>
       <div className="pb-3 pl-2 text-11 text-secondary">
-        <p>位置：{locationNames[component.location]}</p>
+        <p>
+          {["host", "web"].includes(component.location)
+            ? `采集电脑：${component.hostUsername || "用户名未记录"}`
+            : `位置：${locationNames[component.location]}`}
+        </p>
         <dl className="mt-2 grid min-w-0 gap-x-3 gap-y-1 sm:grid-cols-[max-content_minmax(0,1fr)]">
           {details
             .filter(([, value]) => value)
@@ -85,8 +95,7 @@ function ComponentRow({ component }: { component: Component }) {
             <p className="font-medium">子模块</p>
             {component.submodules.map((item) => (
               <div key={item.key} className="min-w-0 break-all">
-                {item.key} · {[item.version, item.branch].filter(Boolean).join(" · ") || "版本未记录"} ·{" "}
-                {item.commit || "提交未记录"}
+                {item.key} · {versionName(item)} · {item.commit || "提交未记录"}
                 {item.commitMessage && <> · {item.commitMessage}</>}
                 {item.commitDate && <> · {item.commitDate}</>}
                 {item.builtAt && <> · 构建于 {item.builtAt}</>}
@@ -184,7 +193,10 @@ export function DeploymentSnapshots({
                   {components
                     .filter((row) => row.status === "available")
                     .slice(0, 3)
-                    .map((row) => `${row.label} ${row.version || shortCommit(row.commit)}`)
+                    .map(
+                      (row) =>
+                        `${componentName(row)} ${row.version && row.version !== "HEAD" ? row.version : shortCommit(row.commit)}`
+                    )
                     .join(" · ") || "暂无可用组件版本"}
                   。版本差异需结合日志核实。
                 </p>

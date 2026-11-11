@@ -101,3 +101,58 @@ def test_cancellation_during_worker_does_not_get_overwritten_by_completed_result
 
     run_diagnostic(job["id"])
     assert DiagnosticJob.objects.get(pk=job["id"]).status == "cancelled"
+
+
+def test_feedback_is_persisted_with_reviewer_and_used_by_next_diagnostic(session_client, diagnostics, mocker):
+    base, project, defect = diagnostics
+    mocker.patch('plane.quality.diagnostics.enqueue')
+    first = session_client.post(base + f"defects/{defect['id']}/diagnostics/", {'request_id': str(uuid4()), 'mode': 'rules'}, format='json').data
+    from plane.quality.tasks import run_diagnostic
+    from plane.quality.models import DiagnosticJob
+    run_diagnostic(first['id'])
+    response = session_client.post(base + f"diagnostics/{first['id']}/", {'action': 'feedback', 'feedback': 'unhelpful', 'note': '请区分正常验收与故障，并检查平台接收回执。'}, format='json')
+    assert response.status_code == 200, response.data
+    assert response.data['feedback'] == 'unhelpful'
+    first_job = DiagnosticJob.objects.get(pk=first['id'])
+    assert first_job.result['feedback_review']['actor_id']
+    second = session_client.post(base + f"defects/{defect['id']}/diagnostics/", {'request_id': str(uuid4()), 'mode': 'rules'}, format='json').data
+    from plane.quality.diagnostic_context import diagnostic_context
+    references = diagnostic_context(DiagnosticJob.objects.get(pk=second['id']))
+    assert references[0]['reference'] == 'PLATFORM-RECEIPT'
+    assert references[1]['reference'] == f"REVIEW-{first['id']}"
+    assert '接收回执' in references[1]['content']
+
+
+def test_no_reference_to_review_from_another_project(session_client, diagnostics, mocker, create_user):
+    base, project, defect = diagnostics
+    from plane.quality.models import Defect, DiagnosticJob
+    from plane.quality.diagnostic_context import diagnostic_context
+    other = Project.objects.create(workspace=project.workspace, name='其他项目', identifier='OTHERDIAG')
+    other_defect = Defect.objects.create(project=other, created_by=create_user, title=defect['title'], description=defect['description'])
+    DiagnosticJob.objects.create(project=other, defect=other_defect, created_by=create_user, status='completed', mode='rules', request_id=uuid4(), feedback='helpful', feedback_note='不应泄露其他项目', result={'feedback_review': {'actor_id': str(create_user.id)}})
+    mocker.patch('plane.quality.diagnostics.enqueue')
+    current = session_client.post(base + f"defects/{defect['id']}/diagnostics/", {'request_id': str(uuid4()), 'mode': 'rules'}, format='json').data
+    references = diagnostic_context(DiagnosticJob.objects.get(pk=current['id']))
+    assert len(references) == 1
+
+
+def test_repeat_verification_arrangement_keeps_actual_note(session_client, diagnostics):
+    base, project, defect = diagnostics
+    detail = session_client.get(base + f"defects/{defect['id']}/").data
+    first = session_client.patch(base + f"defects/{defect['id']}/", {'verification_scope': 'functional', 'verification_scope_reason': '先检查启动按钮', 'expected_version': detail['edit_version']}, format='json')
+    assert first.status_code == 200, first.data
+    response = session_client.patch(base + f"defects/{defect['id']}/", {'verification_scope': 'functional', 'verification_scope_reason': '追加核对PICO与录制文件', 'expected_version': first.data['edit_version']}, format='json')
+    assert response.status_code == 200, response.data
+    assert '追加核对' in response.data['events'][0]['note']
+
+
+def test_report_only_review_context_never_uses_other_collector(session_client, diagnostics, mocker, create_user):
+    base, project, defect = diagnostics
+    from plane.quality.models import DiagnosticJob, Defect
+    from plane.quality.diagnostic_context import diagnostic_context
+    other_user = type(create_user).objects.create_user(email='other-reviewer@example.test', username='other-reviewer')
+    other_defect = Defect.objects.create(project=project, created_by=other_user, title=defect['title'], description=defect['description'])
+    DiagnosticJob.objects.create(project=project, defect=other_defect, created_by=other_user, status='completed', mode='rules', request_id=uuid4(), feedback='unhelpful', feedback_note='另一采集员私有材料', result={'feedback_review': {'actor_id': str(create_user.id)}})
+    mocker.patch('plane.quality.diagnostics.enqueue')
+    current = session_client.post(base + f"defects/{defect['id']}/diagnostics/", {'request_id': str(uuid4()), 'mode': 'rules'}, format='json').data
+    assert len(diagnostic_context(DiagnosticJob.objects.get(pk=current['id']), report_only=True)) == 1
