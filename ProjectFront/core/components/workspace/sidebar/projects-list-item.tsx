@@ -16,7 +16,7 @@ import { observer } from "mobx-react";
 import { useParams, useRouter } from "next/navigation";
 import { createRoot } from "react-dom/client";
 import scrollIntoView from "smooth-scroll-into-view-if-needed";
-import { Share2, LogOut, Settings2 } from "lucide-react";
+import { Share2, LogOut, Settings2, Pencil } from "lucide-react";
 import { Disclosure, Transition } from "@headlessui/react";
 // plane imports
 import { EUserPermissions, EUserPermissionsLevel, MEMBER_TRACKER_ELEMENTS } from "@plane/constants";
@@ -31,6 +31,7 @@ import { cn } from "@plane/utils";
 // components
 import { DEFAULT_TAB_KEY, getTabUrl } from "@/components/navigation/tab-navigation-utils";
 import { useTabPreferences } from "@/components/navigation/use-tab-preferences";
+import { RenameDialog } from "@/components/common/rename-dialog";
 import { ProjectMenuSettings } from "@/components/project/project-menu-settings";
 import { LeaveProjectModal } from "@/components/project/leave-project-modal";
 import { PublishProjectModal } from "@/components/project/publish-project/modal";
@@ -74,7 +75,7 @@ export const SidebarProjectsListItem = observer(function SidebarProjectsListItem
   } = props;
   // store hooks
   const { t } = useTranslation();
-  const { getPartialProjectById } = useProject();
+  const { getPartialProjectById, updateProject } = useProject();
   const { isMobile } = usePlatformOS();
   const { allowPermissions } = useUserPermissions();
   const { getIsProjectListOpen, toggleProjectListOpen } = useCommandPalette();
@@ -85,6 +86,7 @@ export const SidebarProjectsListItem = observer(function SidebarProjectsListItem
   const [leaveProjectModalOpen, setLeaveProjectModal] = useState(false);
   const [publishModalOpen, setPublishModal] = useState(false);
   const [menuSettingsOpen, setMenuSettingsOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const [isMenuActive, setIsMenuActive] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const isProjectListOpen = getIsProjectListOpen(projectId);
@@ -286,6 +288,16 @@ export const SidebarProjectsListItem = observer(function SidebarProjectsListItem
 
   return (
     <>
+      {renameOpen && project && (
+        <RenameDialog
+          title="重命名项目"
+          label="项目名称"
+          name={project.name}
+          maxLength={255}
+          onClose={() => setRenameOpen(false)}
+          onRename={(name) => updateProject(String(workspaceSlug), project.id, { name })}
+        />
+      )}
       {menuSettingsOpen && project && (
         <ProjectMenuSettings
           workspaceSlug={String(workspaceSlug)}
@@ -400,6 +412,14 @@ export const SidebarProjectsListItem = observer(function SidebarProjectsListItem
                     </CustomMenu.MenuItem>
                   )} */}
 
+                  {isAdmin && (
+                    <CustomMenu.MenuItem onClick={() => setRenameOpen(true)}>
+                      <span className="flex items-center gap-2">
+                        <Pencil className="size-3.5" />
+                        重命名项目
+                      </span>
+                    </CustomMenu.MenuItem>
+                  )}
                   {isAdmin && (
                     <CustomMenu.MenuItem onClick={() => setMenuSettingsOpen(true)}>
                       <span className="flex items-center gap-2">
