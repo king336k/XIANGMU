@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "network-connection-refused",
+      "provenance": "synthetic",
+      "required_terms": ["连接拒绝", "监听"],
+      "forbidden_terms": ["fixture-secret-value"],
+      "allowed_citations": ["FILE-fixture:system.log"],
+      "expect_abstain": false
+    },
+    {
+      "id": "unknown-hardware",
+      "provenance": "synthetic",
+      "required_terms": ["信息不足"],
+      "forbidden_terms": ["fixture-secret-value"],
+      "allowed_citations": [],
+      "expect_abstain": true
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "provenance": "synthetic",
+  "embedding_source": "hand-labelled fixture vectors; not a trained model or provider output",
+  "documents": [
+    {
+      "id": "KN-NET",
+      "project": "fixture",
+      "published": true,
+      "version": 1,
+      "active_version": 1,
+      "title": "网卡链路排查",
+      "text": "检查以太网接口和物理连接。",
+      "vector": [1, 0, 0]
+    },
+    {
+      "id": "KN-DISK",
+      "project": "fixture",
+      "published": true,
+      "version": 2,
+      "active_version": 2,
+      "title": "磁盘空间不足",
+      "text": "清理存储容量，核对目录配额。",
+      "vector": [0, 1, 0]
+    },
+    {
+      "id": "KN-QC",
+      "project": "fixture",
+      "published": true,
+      "version": 1,
+      "active_version": 1,
+      "title": "图像帧丢失",
+      "text": "检查相机帧率与输出清单。",
+      "vector": [0, 0, 1]
+    },
+    {
+      "id": "OTHER-PROJECT",
+      "project": "private",
+      "published": true,
+      "version": 1,
+      "active_version": 1,
+      "title": "设备无法联网",
+      "text": "隔离项目内容。",
+      "vector": [1, 0, 0]
+    },
+    {
+      "id": "DRAFT",
+      "project": "fixture",
+      "published": false,
+      "version": 1,
+      "active_version": 0,
+      "title": "设备无法联网",
+      "text": "未经发布的导入草稿。",
+      "vector": [1, 0, 0]
+    },
+    {
+      "id": "REVOKED",
+      "project": "fixture",
+      "published": true,
+      "version": 1,
+      "active_version": 2,
+      "title": "设备无法联网",
+      "text": "已换版旧知识。",
+      "vector": [1, 0, 0]
+    }
+  ],
+  "cases": [
+    {
+      "id": "synonym-network",
+      "provenance": "synthetic",
+      "project": "fixture",
+      "query": "设备无法联网",
+      "vector": [0.98, 0.01, 0.01],
+      "expected": ["KN-NET"]
+    },
+    {
+      "id": "synonym-storage",
+      "provenance": "synthetic",
+      "project": "fixture",
+      "query": "写入失败没有剩余容量",
+      "vector": [0, 1, 0],
+      "expected": ["KN-DISK"]
+    },
+    {
+      "id": "literal-qc",
+      "provenance": "synthetic",
+      "project": "fixture",
+      "query": "图像帧丢失",
+      "vector": [0, 0, 1],
+      "expected": ["KN-QC"]
+    },
+    {
+      "id": "literal-network",
+      "provenance": "synthetic",
+      "project": "fixture",
+      "query": "网卡",
+      "vector": [1, 0, 0],
+      "expected": ["KN-NET"]
+    },
+    {
+      "id": "abstain-unknown",
+      "provenance": "synthetic",
+      "project": "fixture",
+      "query": "财务审批流程",
+      "vector": [0, 0, 0],
+      "expected": []
+    }
+  ]
+}

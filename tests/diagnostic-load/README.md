@@ -3,9 +3,9 @@
 仅用于已授权的本机验收环境：`16335` authority、`18880` 项目平台，独立 `LOAD149` 项目、`1491109` 上游项目及每次新建的采集员、任务、Session、数据包、缺陷。不会使用 `native140` 或 demo 登录，不修改模型/worker配置。凭据只在内存派生，不输出或写文件。测试数据保留供复核。
 
 ```bash
-python services/diagnostic-load/verify_load.py --count 2 --output /home/engram/Documents/tmp/artifacts/diagnostic-pressure-2026-11-09/baseline-2
-python services/diagnostic-load/verify_load.py --count 4 --output /home/engram/Documents/tmp/artifacts/diagnostic-pressure-2026-11-09/load-4
-python services/diagnostic-load/verify_load.py --count 10 --output /home/engram/Documents/tmp/artifacts/diagnostic-pressure-2026-11-09/load-10
+python tests/diagnostic-load/verify_load.py --count 2 --output /home/engram/Documents/tmp/artifacts/diagnostic-pressure-2026-11-09/baseline-2
+python tests/diagnostic-load/verify_load.py --count 4 --output /home/engram/Documents/tmp/artifacts/diagnostic-pressure-2026-11-09/load-4
+python tests/diagnostic-load/verify_load.py --count 10 --output /home/engram/Documents/tmp/artifacts/diagnostic-pressure-2026-11-09/load-10
 ```
 
 每个客户端独立真实登录，完成上报和manifest后在屏障处等待，同时提交材料。记录每个模型任务的入队、启动、完成时间，区分排队、执行、HTTP可见终态；同时采样Docker内存/CPU。p50/p95采用线性插值，小样本仅描述本轮。
@@ -17,7 +17,7 @@ python services/diagnostic-load/verify_load.py --count 10 --output /home/engram/
 隔离回归检查：
 
 ```bash
-python services/diagnostic-load/run_checks.py --output /home/engram/Documents/tmp/artifacts/diagnostic-pressure-2026-11-09/diagnostic-final-verified.log
+python tests/diagnostic-load/run_checks.py --output /home/engram/Documents/tmp/artifacts/diagnostic-pressure-2026-11-09/diagnostic-final-verified.log
 ```
 
 复用测试容器的依赖但复制独立源码，显式改用 `test_diagnostic_pressure_149` 数据库和Redis DB14，禁止与另一压力回归进程同时运行此命令。不会访问共享默认测试数据库。

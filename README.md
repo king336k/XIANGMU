@@ -19,9 +19,11 @@ EngramProject/
 │   ├── space/                 # 共享内容访问界面
 │   └── proxy/                 # 网关
 ├── packages/                  # 共用组件、编辑器、状态、类型和国际化
-├── deploy/                    # 镜像构建、环境模板及开发/测试部署配置
+├── tests/                     # 跨平台验证、诊断评测与压力验收工具
+├── deploy/                    # 当前镜像构建、环境模板及开发/测试部署配置
 │   ├── release/               # 分层发布、安装、日志与中文部署说明
 │   └── network/frp-bridge/    # 按需使用的frp连接程序和配置
+├── deployments/               # 其他部署方式，部分仍被 CI 引用
 ├── scripts/                   # 配置初始化与回归检查工具
 ├── docs/                      # 开发说明、设计记录和许可说明
 ├── start.sh                   # 启动已构建的本机平台
@@ -32,23 +34,23 @@ EngramProject/
 └── README.md                  # 项目入口说明
 ```
 
-根目录中的依赖锁文件、工作空间配置和构建配置用于安装与编译；开发说明、历史设计和辅助部署文件统一放在对应子目录。
+根目录中的依赖锁文件、工作空间配置和构建配置用于安装与编译；开发说明、历史设计和辅助部署文件统一放在对应子目录。 验证工具入口见 [tests/README.md](tests/README.md)，部署目录职责见 [deploy/README.md](deploy/README.md)，文档导航见 [docs/README.md](docs/README.md)。
 
 ## 技术栈
 
-| 部分       | 技术                                           |
-| ---------- | ---------------------------------------------- |
-| 主前端     | React 18、TypeScript、React Router 7、Vite 8   |
-| 页面与状态 | Tailwind CSS 4、MobX、共用组件和富文本编辑器   |
-| 后端       | Python 3.12、Django 5.2、Django REST Framework |
-| 数据与任务 | PostgreSQL、Valkey、RabbitMQ、Celery           |
-| 文件存储   | S3 兼容对象存储与项目附件                      |
-| 实时协作   | Node.js、WebSocket、Yjs / Hocuspocus           |
-| 诊断 Agent | Pydantic AI；项目平台运行，结合规则、日志与知识分析异常 |
-| 知识向量   | BGE-small-zh-v1.5；独立 CPU 服务，用于相似知识检索 |
-| 可选文字识别 | Tesseract、Poppler；本地候选转写，人工核对后导入草稿 |
-| 可选通道   | frp；公网服务器与一台可联网采集电脑部署，连接内网数据平台 |
-| 构建与部署 | pnpm 11.10、Turborepo、Docker Compose v2       |
+| 部分         | 技术                                                      |
+| ------------ | --------------------------------------------------------- |
+| 主前端       | React 18、TypeScript、React Router 7、Vite 8              |
+| 页面与状态   | Tailwind CSS 4、MobX、共用组件和富文本编辑器              |
+| 后端         | Python 3.12、Django 5.2、Django REST Framework            |
+| 数据与任务   | PostgreSQL、Valkey、RabbitMQ、Celery                      |
+| 文件存储     | S3 兼容对象存储与项目附件                                 |
+| 实时协作     | Node.js、WebSocket、Yjs / Hocuspocus                      |
+| 诊断 Agent   | Pydantic AI；项目平台运行，结合规则、日志与知识分析异常   |
+| 知识向量     | BGE-small-zh-v1.5；独立 CPU 服务，用于相似知识检索        |
+| 可选文字识别 | Tesseract、Poppler；本地候选转写，人工核对后导入草稿      |
+| 可选通道     | frp；公网服务器与一台可联网采集电脑部署，连接内网数据平台 |
+| 构建与部署   | pnpm 11.10、Turborepo、Docker Compose v2                  |
 
 具体依赖版本以锁文件和 `ProjectServer/requirements/` 为准。可选OCR的部署与核对流程见[图片文字识别](services/document-ocr/README.md)。独立向量服务的模型准备与部署见[Embedding部署说明](services/embedding-service/README.md)。
 
