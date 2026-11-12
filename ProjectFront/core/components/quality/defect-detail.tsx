@@ -90,6 +90,10 @@ export function DefectDetail({
     !value.archived_at &&
     (context.is_manager || value.assignee_id === context.user_id);
   const canEditProperties = canEdit && value.status !== "closed";
+  const updateStatus = () => {
+    if (value.has_verification && ["resolved", "closed"].includes(value.status)) setActiveTab("regression");
+    else onEdit("workflow");
+  };
   const assignee = context.members.find((member) => member.id === value.assignee_id)?.name;
   const sourceCategories: Record<string, string> = {
     DataAnomaly: "数据异常",
@@ -126,7 +130,7 @@ export function DefectDetail({
                 </button>
               )}
               {canEdit ? (
-                <button type="button" aria-label="更新处理状态" onClick={() => onEdit("workflow")}>
+                <button type="button" aria-label="更新处理状态" onClick={updateStatus}>
                   <Badge value={value.status} />
                 </button>
               ) : (
@@ -147,7 +151,7 @@ export function DefectDetail({
               {canEdit && (
                 <button
                   type="button"
-                  onClick={() => onEdit("workflow")}
+                  onClick={updateStatus}
                   className="rounded-md border border-subtle px-3 py-1.5 text-12 font-medium text-accent-primary hover:bg-accent-subtle"
                 >
                   {value.status === "closed"
@@ -242,7 +246,6 @@ export function DefectDetail({
               <SolutionPanel base={base} defectId={value.id} context={context} />
             </div>
             <div hidden={activeTab !== "regression"} className="platform-detail-panel">
-              <p className="text-13 text-secondary">在当前项目安排测试、记录复现与验证结果，再更新缺陷状态。</p>
               <DefectVerificationScope
                 projectUrl={projectUrl}
                 base={base}

@@ -262,8 +262,13 @@ class ExecutionList(QualityView):
     @transaction.atomic
     def post(self, request, pk, **kwargs):
         data = self.input(ExecutionInput)
+        from .defect_verification import lock_execution, validate_actual
+
+        verification = lock_execution(pk, self.project_id)
         item = get_object_or_404(PlanItem.objects.select_for_update(), pk=pk, project_id=self.project_id)
         plan = TestPlan.objects.select_for_update().get(pk=item.plan_id)
+        if verification:
+            validate_actual(data, item.revision.snapshot["steps"])
         results = data["step_results"]
         if results and len(results) != len(item.revision.snapshot["steps"]):
             raise ValidationError({"step_results": "逐步结果数量必须与固定版本的步骤数一致。"})
@@ -271,7 +276,11 @@ class ExecutionList(QualityView):
             raise ValidationError({"result": "存在未通过步骤，不能将整条用例标记通过。"})
         existing = TestExecution.objects.filter(item=item, request_id=data["request_id"]).first()
         if existing:
-            if any(getattr(existing, key) != value for key, value in data.items()):
+            if (
+                any(getattr(existing, key) != value for key, value in data.items())
+                or verification
+                and existing.created_by_id != request.user.id
+            ):
                 raise Conflict("同一提交编号不能用于不同的执行结果。")
             return Response(ExecutionSerializer(existing).data)
         if plan.archived_at:
@@ -397,6 +406,9 @@ class DefectDetail(QualityView):
     def patch(self, request, pk, **kwargs):
         data = self.input(DefectInput, partial=True)
         defect = get_object_or_404(Defect.objects.select_for_update(), pk=pk, project_id=self.project_id)
+        from .defect_verification import guard_legacy
+
+        guard_legacy(defect, data)
         if defect.archived_at:
             raise Conflict("缺陷已归档，请先恢复后再处理。")
         expected = data.pop("expected_version", None)
@@ -593,7 +605,6 @@ class DefectReportEdit(QualityView):
 
 class QualityContext(QualityView):
     def get(self, request, **kwargs):
-
         project = self.project()
         members = ProjectMember.objects.filter(
             project=project,

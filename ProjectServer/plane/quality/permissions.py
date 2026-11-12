@@ -10,7 +10,6 @@ ROLE_NAMES = {
     "PROJECT_MANAGER": "项目经理",
     "TECHNICIAN": "技术员",
     "REGRESSION_TESTER": "测试员",
-    "REPORTER": "数采员",
 }
 ROLE_CAPABILITIES = {
     "PLATFORM_ADMIN": {"manage_roles"},
@@ -48,8 +47,8 @@ ROLE_CAPABILITIES = {
         "package",
         "knowledge_write",
     },
-    "REPORTER": {"report", "chat", "package"},
 }
+MEMBER_CAPABILITIES = {"report", "chat", "package"}
 # Administrators include every business duty; assigned roles remain unchanged for source identity checks.
 ROLE_CAPABILITIES["PLATFORM_ADMIN"] |= set().union(*ROLE_CAPABILITIES.values())
 ALL_CAPABILITIES = set().union(*ROLE_CAPABILITIES.values()) | {"knowledge_edit", "knowledge_review"}
@@ -118,12 +117,12 @@ def roles_for(project_id, user_id):
     if not membership or not writable_member(project_id, user_id, membership):
         return set()
     row = BusinessRole.objects.filter(project_id=project_id, user_id=user_id).first()
-    roles = {row.role, *(row.additional_roles or [])} if row else set()
+    roles = {row.role, *(row.additional_roles or [])} & set(ROLE_NAMES) if row else set()
     workspace_member = WorkspaceMember.objects.filter(
         workspace__slug=membership, member_id=user_id, is_active=True, role__gte=15
     ).first()
     if workspace_member:
-        roles.update(workspace_member.business_roles or [])
+        roles.update(set(workspace_member.business_roles or []) & set(ROLE_NAMES))
     legacy_admin = "PLATFORM_ADMIN" in roles
     roles.discard("PLATFORM_ADMIN")
     if is_administrator(user_id):
@@ -175,6 +174,13 @@ def knowledge_reviewer(project_id, user_id):
 
 
 def capable(project_id, user_id, capability):
+    if capability in MEMBER_CAPABILITIES:
+        slug = (
+            ProjectMember.objects.filter(project_id=project_id, member_id=user_id)
+            .values_list("project__workspace__slug", flat=True)
+            .first()
+        )
+        return bool(slug and writable_member(project_id, user_id, slug))
     if capability == "knowledge_review":
         return knowledge_reviewer(project_id, user_id)
     if capability == "knowledge_edit":
@@ -190,6 +196,10 @@ def capabilities_for(project_id, user_id, roles=None):
     allowed = (
         set().union(*(ROLE_CAPABILITIES.get(role, set()) for role in roles)) if strict(project_id) else ALL_CAPABILITIES
     )
+    if capable(project_id, user_id, "report"):
+        allowed |= MEMBER_CAPABILITIES
+    else:
+        allowed -= MEMBER_CAPABILITIES
     reviewer = knowledge_reviewer(project_id, user_id)
     return {
         cap: (
@@ -233,6 +243,12 @@ def require_assignee(view, user_id, role):
 def permission_for(view, request):
     name = type(view).__name__
     action = request.data.get("action") if hasattr(request.data, "get") else None
+    if name == "DefectVerification":
+        return "manage_test_plan" if capable(view.project_id, request.user.id, "manage_test_plan") else "manage_defect"
+    if name == "DefectVerificationResult":
+        return "execute"
+    if name == "DefectVerificationWorkflow":
+        return "execute" if action == "submit" else "manage_test"
     if name in {"RoleList", "RolePolicy"}:
         return "manage_roles"
     if name == "PlanWorkflow":

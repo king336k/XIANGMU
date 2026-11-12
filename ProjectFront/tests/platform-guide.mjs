@@ -39,3 +39,12 @@ test("每个帮助主题都有本地配图、明确图注和真实图片资源",
     }
   }
 });
+
+test("成员说明明确基础反馈能力，无独立数采员业务岗位", () => {
+  const roles = platformGuide.find((topic) => topic.id === "roles");
+  const text = [roles.summary, ...roles.paragraphs, ...roles.steps, ...roles.screenshots.map((s) => s.caption)].join(
+    " "
+  );
+  assert.match(text, /可写项目成员.*反馈/);
+  assert.doesNotMatch(text, /数采员|五类|仅可查看/);
+});

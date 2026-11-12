@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { renderNumericDateTime } from "@plane/utils";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ListFilters } from "./list-filters";
@@ -66,7 +67,7 @@ export function ReportsPanel({ base, context }: { base: string; context: Context
         {can(context, "manage_test_plan") && (
           <Button
             onClick={() => {
-              setRequestId(crypto.randomUUID());
+              setRequestId(uuidv4());
               setCreating(true);
             }}
           >

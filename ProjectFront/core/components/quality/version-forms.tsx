@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { useCollectionPagination } from "./use-collection-pagination";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useState } from "react";
@@ -225,7 +226,7 @@ export function VersionNodeForm({
       onSubmit={async (form) => {
         if (kind !== "milestone" && !record.id) throw new Error("请先选择关联记录。");
         const value: FlowNode = {
-          id: node?.id || `node-${crypto.randomUUID().slice(0, 8)}`,
+          id: node?.id || `node-${uuidv4().slice(0, 8)}`,
           name: String(form.get("name")),
           kind,
           ...(kind !== "milestone" ? { object_id: record.id } : {}),

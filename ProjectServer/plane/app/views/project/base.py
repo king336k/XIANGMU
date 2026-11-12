@@ -264,19 +264,19 @@ class ProjectViewSet(BaseViewSet):
             serializer.save()
 
             # Add the user as Administrator to the project
-            _ = ProjectMember.objects.create(
+            ProjectMember.objects.update_or_create(
                 project_id=serializer.data["id"],
                 member=request.user,
-                role=ROLE.ADMIN.value,
+                defaults={"role": ROLE.ADMIN.value, "is_active": True},
             )
 
             if serializer.data["project_lead"] is not None and str(serializer.data["project_lead"]) != str(
                 request.user.id
             ):
-                ProjectMember.objects.create(
+                ProjectMember.objects.update_or_create(
                     project_id=serializer.data["id"],
                     member_id=serializer.data["project_lead"],
-                    role=ROLE.ADMIN.value,
+                    defaults={"role": ROLE.ADMIN.value, "is_active": True},
                 )
 
             State.objects.bulk_create(

@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useState } from "react";
 import { Button } from "@plane/ui";
@@ -56,7 +57,7 @@ export function ImportForm({
       }
       if (!Array.isArray(rows)) throw new Error("用例文件必须是 JSON 数组，请参考模板。");
       const result = await qualityApi.write<Preview>(`${base}case-imports/`, { name, cases: rows });
-      setPreview({ ...result, rows: result.rows.map((row) => Object.assign(row, { previewId: crypto.randomUUID() })) });
+      setPreview({ ...result, rows: result.rows.map((row) => Object.assign(row, { previewId: uuidv4() })) });
     } catch (e) {
       setError(errorMessage(e));
     } finally {

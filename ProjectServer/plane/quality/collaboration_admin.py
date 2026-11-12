@@ -27,7 +27,7 @@ def internal_access(project_id, user, workspace_slug):
         return False
     roles = roles_for(project_id, user.id)
     internal_roles = {"PLATFORM_ADMIN", "PROJECT_MANAGER", "TECHNICIAN", "REGRESSION_TESTER"}
-    if roles and not roles & internal_roles:
+    if not roles & internal_roles:
         return False
     if not roles & internal_roles and (
         PlatformAccount.objects.filter(user=user, source_role="Collector").exists()

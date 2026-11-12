@@ -52,6 +52,8 @@ class PlanDetail(ReadPlanDetail):
         plan = get_object_or_404(TestPlan.objects.select_for_update(), pk=pk, project_id=self.project_id)
         if plan.archived_at:
             raise Conflict("计划已归档，请先恢复后编辑。")
+        if hasattr(plan, "defect_verification"):
+            raise Conflict("缺陷验证范围已固定，请从缺陷详情创建新轮次。")
         if hasattr(plan, "data_regression"):
             raise Conflict("数据回归的修复版本与验证场景已固定，请从缺陷详情发起新的数据回归。")
         if data.pop("expected_version") != plan.workflow_version:

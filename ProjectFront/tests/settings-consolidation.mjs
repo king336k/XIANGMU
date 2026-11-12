@@ -174,7 +174,8 @@ test("编辑入口多岗完整提交roles数组，普通项目经理没有全局
   const h = componentHarness("member-permissions-modal"),
     tree = h.render();
   const inputs = h.nodes(tree).filter((n) => n.type === "input" && n.props.name === "roles");
-  assert.equal(inputs.length, 4);
+  assert.equal(inputs.length, 3);
+  assert.ok(!inputs.some((input) => input.props.value === "REPORTER"));
   assert.equal(inputs.filter((n) => n.props.defaultChecked).length, 2);
   assert.ok(!h.nodes(tree).some((n) => n.props?.children === "管理员身份"));
   const save = h.nodes(tree).find((n) => n.type === h.stub("Button") && n.props.children === "保存业务岗位");

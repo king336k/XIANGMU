@@ -94,7 +94,7 @@ export async function joinMemberWithRoles({
   progress: { userId?: string; personKey?: string; savedRoles?: string[] };
   write: <T>(url: string, data: object) => Promise<T>;
 }) {
-  if (!roles.length) throw Error("请至少选择一个业务岗位。");
+  if (!projectId) throw Error("请选择项目。");
   const personKey = JSON.stringify([
     workspace,
     projectId,
@@ -110,11 +110,11 @@ export async function joinMemberWithRoles({
   if (!progress.userId) {
     const joined = await write<{ user_id: string }>(
       `/api/quality-auth/accounts/${workspace}/projects/${projectId}/members/`,
-      { ...person, role: roles[0] }
+      { ...person, ...(roles[0] ? { role: roles[0] } : {}) }
     );
     if (!joined.user_id) throw Error("加入结果缺少人员编号，请刷新成员列表核对后重试。");
     progress.userId = joined.user_id;
-    progress.savedRoles = [roles[0]];
+    progress.savedRoles = roles[0] ? [roles[0]] : [];
   }
   if (JSON.stringify(progress.savedRoles) !== JSON.stringify(roles))
     try {
@@ -131,7 +131,6 @@ export const DUTY_LABELS: Record<string, string> = {
   PROJECT_MANAGER: "项目经理",
   TECHNICIAN: "技术员",
   REGRESSION_TESTER: "测试员",
-  REPORTER: "数采员",
 };
 export const ACCESS_LABELS: Record<number, string> = { 5: "只读访问", 15: "可参与项目", 20: "访问管理" };
 

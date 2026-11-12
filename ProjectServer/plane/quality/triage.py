@@ -26,6 +26,8 @@ class DefectDisposition(QualityView):
         manager(self)
         data = self.input(DispositionInput)
         row = get_object_or_404(Defect.objects.select_for_update(), pk=pk, project_id=self.project_id)
+        if row.verification_rounds.exists() and data["kind"] != "deferred":
+            raise Conflict("此缺陷已配置验证流程，请从验证面板验收或退回。")
         if row.edit_version != data["expected_version"]:
             raise Conflict()
         if row.archived_at or row.status == "closed":

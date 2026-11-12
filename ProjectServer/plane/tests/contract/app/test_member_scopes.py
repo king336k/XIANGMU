@@ -70,12 +70,18 @@ def save(client, target, changes):
     return client.post(url(target), {"changes": changes}, format="json")
 
 
-def test_workspace_only_does_not_grant_projects(scopes):
+def test_explicit_workspace_membership_grants_all_current_projects_without_extra_duties(scopes):
     client, target, spaces, projects, actor = scopes
     response = save(client, target, [change(rows(client, target)[0], 15)])
     assert response.status_code == 200, response.content
     assert WorkspaceMember.objects.filter(member=target, is_active=True).count() == 1
-    assert not ProjectMember.objects.filter(member=target).exists()
+    granted = WorkspaceMember.objects.get(member=target)
+    assert granted.has_workspace_access
+    assert (
+        ProjectMember.objects.filter(member=target, workspace=granted.workspace, is_active=True).count()
+        == Project.objects.filter(workspace=granted.workspace).count()
+    )
+    assert not BusinessRole.objects.filter(user=target).exists()
     assert not InstanceAdmin.objects.filter(user=target).exists()
 
 
@@ -102,7 +108,6 @@ def test_grant_multiple_spaces_and_projects_with_independent_duties(scopes):
 
 def test_remove_one_project_leaves_other_scope_unchanged(scopes):
     client, target, spaces, projects, actor = scopes
-    save(client, target, [change(row, 15) for row in rows(client, target)])
     choices = rows(client, target, "project", spaces[0])
     save(client, target, [change(row, 15, ["TECHNICIAN"]) for row in choices])
     arow = next(row for row in rows(client, target, "project", spaces[0]) if row["id"] == str(projects[0].id))
@@ -129,14 +134,14 @@ def test_nonadmin_cannot_list_or_modify_any_scope(scopes):
     assert save(client, target, []).status_code == 403
 
 
-def test_project_requires_explicit_workspace_and_no_admin_duty(scopes):
+def test_project_creates_minimal_workspace_and_rejects_admin_duty(scopes):
     client, target, spaces, projects, actor = scopes
     row = rows(client, target, "project", spaces[0])[0]
-    assert save(client, target, [change(row, 15, ["TECHNICIAN"])]).status_code == 400
-    save(client, target, [change(rows(client, target)[0], 15)])
+    assert save(client, target, [change(row, 15, ["TECHNICIAN"])]).status_code == 200
+    assert not WorkspaceMember.objects.get(member=target).has_workspace_access
     row = rows(client, target, "project", spaces[0])[0]
     assert save(client, target, [change(row, 15, ["PLATFORM_ADMIN"])]).status_code == 400
-    assert not ProjectMember.objects.filter(member=target).exists()
+    assert ProjectMember.objects.filter(member=target).count() == 1
 
 
 def test_source_account_revocation_cannot_be_overridden(scopes, mocker):
@@ -168,7 +173,7 @@ def test_remove_workspace_does_not_revive_projects_when_readded(scopes):
     assert not ProjectMember.objects.filter(member=target, workspace=spaces[0], is_active=True).exists()
     wsrow = next(row for row in rows(client, target) if row["id"] == str(spaces[0].id))
     assert save(client, target, [change(wsrow, 15)]).status_code == 200
-    assert not ProjectMember.objects.filter(member=target, workspace=spaces[0], is_active=True).exists()
+    assert ProjectMember.objects.filter(member=target, workspace=spaces[0], is_active=True).count() == 2
 
 
 def test_search_and_pagination_do_not_include_archived_or_other_workspace_projects(scopes):
@@ -180,7 +185,8 @@ def test_search_and_pagination_do_not_include_archived_or_other_workspace_projec
     )
     assert response.status_code == 200, response.content
     assert response.data["count"] == 1 and response.data["results"][0]["id"] == str(projects[0].id)
-    assert client.get(url(target), {"kind": "project"}).status_code == 400
+    all_projects = client.get(url(target), {"kind": "project"})
+    assert all_projects.status_code == 200 and all_projects.data["count"] == 2
     assert client.get(url(target), {"page": 0}).status_code == 400
     assert client.get(url(target), {"per_page": 500}).status_code == 400
 
@@ -200,7 +206,6 @@ def test_global_admin_project_assignment_projects_all_scopes_automatically(scope
 
 def test_global_admin_remains_responsible_when_project_manager_is_removed(scopes):
     client, target, spaces, projects, actor = scopes
-    save(client, target, [change(row, 15) for row in rows(client, target)])
     arow = next(row for row in rows(client, target, "project", spaces[0]) if row["id"] == str(projects[0].id))
     assert save(client, target, [change(arow, 15, ["PROJECT_MANAGER"])]).status_code == 200
     ProjectMember.objects.filter(project=projects[0], member=actor).update(is_active=False)
@@ -216,7 +221,7 @@ def test_other_invalid_batch_changes_roll_back_prior_valid_grant(scopes):
     client, target, spaces, projects, actor = scopes
     workspace_rows = rows(client, target)
     prow = rows(client, target, "project", spaces[0])[0]
-    response = save(client, target, [change(workspace_rows[0], 15), change(prow, 15, [])])
+    response = save(client, target, [change(workspace_rows[0], 15), change(prow, 5, ["TECHNICIAN"])])
     assert response.status_code == 400, response.content
     assert not WorkspaceMember.objects.filter(member=target).exists()
     assert not ProjectMember.objects.filter(member=target).exists()
@@ -243,7 +248,6 @@ def test_source_account_and_project_must_both_be_live_when_granting(scopes, mock
 
 def test_revoked_project_membership_and_duties_are_restored_without_duplicates(scopes):
     client, target, spaces, projects, actor = scopes
-    save(client, target, [change(row, 15) for row in rows(client, target)])
     prow = rows(client, target, "project", spaces[0])[0]
     assert save(client, target, [change(prow, 15, ["TECHNICIAN"])]).status_code == 200
     original = ProjectMember.objects.get(project_id=prow["id"], member=target).id

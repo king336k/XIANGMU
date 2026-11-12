@@ -36,7 +36,7 @@ function harness(file, data, context = {}, extraProps = {}) {
           ];
         },
       };
-    if (id === "react/jsx-runtime") return require(id);
+    if (id === "react/jsx-runtime" || id === "uuid") return require(id);
     if (id === "swr") return { default: () => ({ data, mutate: async () => {} }) };
     if (id === "./connection-form-data") {
       const helper = {};
@@ -238,4 +238,23 @@ test("项目角色面板可不重复嵌套全局账号管理，默认调用兼�
     ),
     true
   );
+});
+
+test("项目岗位移除独立REPORTER，普通成员加入时不自动授予专职岗位", async () => {
+  const roles = harness("business-role-panel", roledata, { members: [] });
+  button(roles.render(), "设置成员角色").props.onClick();
+  assert.ok(!nodes(roles.render()).some((n) => n.type === "input" && n.props.value === "REPORTER"));
+  const accounts = harness("account-manager", {
+    can_manage: true,
+    count: 1,
+    results: [{ id: "u", username: "user", source: "本平台" }],
+  });
+  button(accounts.render(), "加入本项目").props.onClick();
+  const tree = accounts.render();
+  const select = nodes(tree).find((n) => n.type === "select" && n.props.name === "role");
+  assert.equal(nodes(select).find((n) => n.type === "option").props.value, "");
+  assert.ok(!nodes(select).some((n) => n.props?.value === "REPORTER"));
+  const modal = nodes(tree).find((n) => n.type === stub("Modal") && n.props.title === "加入项目并分配岗位");
+  await modal.props.onSubmit(new Map([["role", ""]]));
+  assert.deepEqual(accounts.writes[0][1], { user_id: "u" });
 });

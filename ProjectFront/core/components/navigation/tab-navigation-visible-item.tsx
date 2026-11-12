@@ -47,7 +47,12 @@ export function TabNavigationVisibleItem({
       <div key={`${item.key}-measure`} ref={itemRef}>
         <ContextMenu>
           <ContextMenu.Trigger>
-            <Link key={`${item.key}-${isActive ? "active" : "inactive"}`} to={item.href}>
+            <Link
+              key={`${item.key}-${isActive ? "active" : "inactive"}`}
+              to={item.href}
+              aria-current={isActive ? "page" : undefined}
+              className="platform-selection-item block rounded-md"
+            >
               <TabNavigationItem isActive={isActive}>
                 <span>{t(item.i18n_key)}</span>
               </TabNavigationItem>

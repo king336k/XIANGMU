@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from .models import FieldAgent, TelemetrySnapshot
 from .views import QualityView, Conflict
 from .daq import DaqView
-from .permissions import require_assignee, writable_member, capable
+from .permissions import writable_member, capable
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 from .identity import PlatformBridgeAuthentication
@@ -106,7 +106,6 @@ class FieldAgents(QualityView):
         data = self.input(AgentInput)
         data.pop("expected_version", None)
         self.validate_assignee(data["owner_id"])
-        require_assignee(self, data["owner_id"], "REPORTER")
         row = FieldAgent.objects.create(project=self.project(), created_by=request.user, **data)
         return Response(AgentSerializer(row).data, status=201)
 
@@ -125,7 +124,6 @@ class FieldAgentDetail(QualityView):
             raise Conflict()
         if "owner_id" in data:
             self.validate_assignee(data["owner_id"])
-            require_assignee(self, data["owner_id"], "REPORTER")
         if data.get("enabled") is False or data.get("owner_id", row.owner_id) != row.owner_id:
             row.credential_hash = ""
             row.credential_expires_at = None

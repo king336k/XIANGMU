@@ -190,7 +190,7 @@ export function AccountManager({
               ...(person.external_user_id !== undefined && person.source_instance
                 ? { source_instance: person.source_instance, external_user_id: person.external_user_id }
                 : { user_id: adding }),
-              role: form.get("role"),
+              ...(form.get("role") ? { role: form.get("role") } : {}),
             });
             await onSaved?.();
             await mutate();
@@ -199,11 +199,11 @@ export function AccountManager({
           <p className="text-13">{people.find((row) => row.id === adding)?.username}</p>
           <Field label="首次岗位">
             <select name="role" className={fieldClass}>
+              <option value="">普通成员（无专职岗位）</option>
               {Object.entries({
                 PROJECT_MANAGER: "项目经理",
                 TECHNICIAN: "技术员",
                 REGRESSION_TESTER: "测试员",
-                REPORTER: "数采员",
               }).map(([value, text]) => (
                 <option key={value} value={value}>
                   {text}

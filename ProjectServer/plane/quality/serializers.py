@@ -283,6 +283,7 @@ class DefectSerializer(AuthoredRecordSerializer):
         from .defect_content import defect_content
 
         data["title"], data["description"] = defect_content(data["title"], data["description"])
+        data["has_verification"] = instance.verification_rounds.exists()
         data["source_kind"] = (
             "daq"
             if hasattr(instance, "daq_report")

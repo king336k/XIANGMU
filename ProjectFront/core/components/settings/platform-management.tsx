@@ -29,6 +29,10 @@ export const PlatformManagement = observer(function PlatformManagement({
     base && !["connections", "models"].includes(section) ? `${base}context/` : null,
     (url: string) => qualityApi.read<Context>(url)
   );
+  const memberAccess = useSWR(
+    section === "members" || section === "accounts" ? "/api/quality-auth/accounts/?per_page=1" : null,
+    (url: string) => qualityApi.read<{ can_manage_administrators: boolean }>(url)
+  );
   const allowed =
     section === "connections"
       ? context?.is_administrator === true
@@ -63,26 +67,29 @@ export const PlatformManagement = observer(function PlatformManagement({
   return (
     <SettingsContentWrapper hugging>
       <h1 className="platform-page-title mb-5">{title}</h1>
-      <label className="mb-5 flex max-w-lg flex-col gap-2 text-13">
-        {section === "members" || section === "accounts" ? "权限范围" : "选择项目"}
-        <select
-          aria-label="选择项目"
-          className={fieldClass}
-          value={projectId}
-          onChange={(event) => {
-            const next = new URLSearchParams(params);
-            next.set("project", event.target.value);
-            setParams(next);
-          }}
-        >
-          <option value="">当前工作区 · 全部项目</option>
-          {joinedProjectIds.map((id) => (
-            <option key={id} value={id}>
-              {getPartialProjectById(id)?.name || id}
-            </option>
-          ))}
-        </select>
-      </label>
+      {((section !== "members" && section !== "accounts") ||
+        memberAccess.data?.can_manage_administrators === false) && (
+        <label className="mb-5 flex max-w-lg flex-col gap-2 text-13">
+          {section === "members" || section === "accounts" ? "权限范围" : "选择项目"}
+          <select
+            aria-label="选择项目"
+            className={fieldClass}
+            value={projectId}
+            onChange={(event) => {
+              const next = new URLSearchParams(params);
+              next.set("project", event.target.value);
+              setParams(next);
+            }}
+          >
+            <option value="">当前工作区 · 全部项目</option>
+            {joinedProjectIds.map((id) => (
+              <option key={id} value={id}>
+                {getPartialProjectById(id)?.name || id}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {section === "members" || section === "accounts" ? (
         projectId && (error || !context) ? (
           <p role={error ? "alert" : "status"} className="text-13 text-secondary">
@@ -94,7 +101,7 @@ export const PlatformManagement = observer(function PlatformManagement({
             workspace={String(workspaceSlug)}
             projectId={projectId}
             context={error ? undefined : context}
-            view={params.get("view") || "project"}
+            view={params.get("view") || "accounts"}
             onViewChange={(view) => {
               const next = new URLSearchParams(params);
               next.set("view", view);

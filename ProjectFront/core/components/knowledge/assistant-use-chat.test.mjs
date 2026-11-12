@@ -61,6 +61,7 @@ function fixture() {
     errorMessage: () => "调用失败",
   };
   const { useAssistantChat } = compile("./assistant-use-chat.ts", (name) => {
+    if (name === "uuid") return require(name);
     if (name === "react") return react;
     if (name === "swr") return { default: swr, useSWRConfig: swr.useSWRConfig };
     if (name === "axios") return { isAxiosError: (error) => error?.isAxiosError === true };

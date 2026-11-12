@@ -84,9 +84,9 @@ test("服务器保存成功而列表刷新失败时明确显示已保存，不�
       useState(initial) {
         const i = index++;
         return [
-          i === 2 ? pending : initial,
+          i === 1 ? pending : initial,
           (value) => {
-            if (i === 4) messages.push(value);
+            if (i === 3) messages.push(value);
           },
         ];
       },

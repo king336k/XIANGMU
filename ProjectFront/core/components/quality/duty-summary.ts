@@ -1,18 +1,17 @@
 export function projectDutySummary(roles: string[]): { label: string; description: string } {
   const admin = roles.some((role) => ["管理员", "平台管理员", "实例管理员"].includes(role)),
     manager = roles.includes("项目经理");
-  const remaining = admin ? [] : roles.filter((role) => role !== "项目经理");
+  const remaining = admin ? [] : roles.filter((role) => role !== "项目经理" && role !== "数采员");
   const labels = [...(admin ? ["管理员"] : manager ? ["项目经理"] : []), ...remaining];
   const summaries: Record<string, string> = {
     技术员: "开发任务、修复缺陷",
     测试员: "执行测试、提交结果",
-    数采员: "上报问题、补充材料",
   };
   const descriptions = [
     ...(admin ? ["管理权限，处理全部岗位业务"] : manager ? ["排期分工、跟进验收"] : []),
     ...remaining.map((role) => summaries[role]).filter(Boolean),
   ];
-  return { label: labels.join("、") || "项目成员", description: descriptions.join("；") };
+  return { label: labels.join("、") || "项目成员", description: descriptions.join("；") || "反馈问题、补充材料" };
 }
 
 export function recordDutyLabels({

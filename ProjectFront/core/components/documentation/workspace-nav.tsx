@@ -19,7 +19,7 @@ export function DocumentWorkspaceNav({ workspaceSlug, projectId, active }: Props
   return (
     <nav
       aria-label="文档与知识"
-      className="flex shrink-0 flex-wrap items-center gap-2 border-b border-subtle px-5 py-3"
+      className="platform-selection-group flex shrink-0 flex-wrap items-center gap-2 border-b border-subtle px-5 py-3"
     >
       {items.map((item) => (
         <Link

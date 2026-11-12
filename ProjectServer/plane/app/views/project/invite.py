@@ -28,7 +28,6 @@ from plane.db.models import (
     ProjectMember,
     Workspace,
     ProjectMemberInvite,
-    User,
     WorkspaceMember,
     Project,
     ProjectUserProperty,
@@ -134,6 +133,10 @@ class UserProjectInvitationsViewset(BaseViewSet):
 
         # Get the workspace user role
         workspace_member = WorkspaceMember.objects.get(member=request.user, workspace__slug=slug, is_active=True)
+        from plane.quality.permissions import is_administrator
+
+        if not workspace_member.has_workspace_access and not is_administrator(request.user):
+            return Response({"error": "项目专属成员请联系管理员分配其他项目。"}, status=status.HTTP_403_FORBIDDEN)
 
         # Get all the projects
         projects = Project.objects.filter(id__in=project_ids, workspace__slug=slug).only("id", "network")

@@ -123,29 +123,60 @@ export function CollaborationPanel({
   const failed = commentsError || sourcesError || packagesError;
   const timeline = sortBy(
     [
-      ...(value.events || []).map((event) => ({
-        id: `event-${event.id}`,
-        actor: event.actor || "成员",
-        at: event.created_at,
-        action:
-          event.previous_status === event.status
-            ? "更新记录"
-            : `${statusNames[event.previous_status] || "新建"} → ${statusNames[event.status] || event.status}`,
-        content: event.note,
-      })),
+      ...(value.events || []).map((event) => {
+        const note = event.note?.trim() || "";
+        const specific = note.match(
+          /^(验证安排|验证方式|人工验证关闭|人工验证安排|记录人工实测|接收交接|拒绝交接|取消待确认交接|补充上报信息|提交验证结果|提交验证|经理验收通过|验收关闭|退回复测|退回补测|退回修复|重新打开|重开)([：，；（]|$)/
+        )?.[1];
+        const changed = event.previous_status !== event.status;
+        const unsuccessful =
+          /^(退回|拒绝|重开)/.test(note) ||
+          /^记录人工实测.*[：:]\s*failed\b/.test(note) ||
+          (event.status === "open" && ["resolved", "closed"].includes(event.previous_status));
+        const passed = !unsuccessful && (event.status === "closed" || /验证通过|验收通过/.test(note));
+        return {
+          id: `event-${event.id}`,
+          actor: event.actor || "成员",
+          at: event.created_at,
+          action: changed
+            ? event.previous_status
+              ? `${statusNames[event.previous_status] || event.previous_status} → ${statusNames[event.status] || event.status}`
+              : "提交缺陷"
+            : specific || "更新缺陷",
+          content:
+            !changed && specific && note.startsWith(`${specific}：`)
+              ? note.slice(specific.length + 1).trim()
+              : note === "更新缺陷"
+                ? ""
+                : note,
+          tone: unsuccessful
+            ? "text-danger-primary"
+            : passed
+              ? "text-success-primary"
+              : changed && event.status === "open"
+                ? "text-secondary"
+                : "text-accent-primary",
+        };
+      }),
       ...(comments || []).map((comment) => ({
         id: `comment-${comment.id}`,
         actor: comment.actor,
         at: comment.created_at,
         action: comment.visibility === "internal" ? "内部备注" : "采集员可见回复",
+        tone: "text-secondary",
         content: comment.content,
       })),
     ],
-    (entry) => -new Date(entry.at).getTime()
+    (entry) => new Date(entry.at).getTime()
   );
+  const days = new Map<string, typeof timeline>();
+  for (const row of timeline) {
+    const date = renderNumericDateTime(row.at).slice(0, 10);
+    days.set(date, [...(days.get(date) || []), row]);
+  }
+  const latestDay = [...days.keys()].at(-1);
   return (
     <section className="space-y-4">
-      <h3 className="text-13 font-medium">操作记录</h3>
       <details className="text-12">
         <summary className="cursor-pointer text-secondary">上报来源与 Session（{sources?.length || 0}）</summary>
         <div className="mt-2 space-y-2">
@@ -181,20 +212,37 @@ export function CollaborationPanel({
           </p>
         )}
         {timeline.length === 0 && <p className="text-12 text-secondary">暂无处理记录。</p>}
-        <ol className="space-y-4">
-          {timeline.map((row) => (
-            <li key={row.id} className="border-l-2 border-subtle pl-3 text-12">
-              <p className="flex flex-wrap gap-x-3 gap-y-1">
-                <strong>{row.actor}</strong>
-                <span>{row.action}</span>
-                <time className="text-secondary" dateTime={row.at}>
-                  {renderNumericDateTime(row.at)}
-                </time>
-              </p>
-              {row.content && <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>}
-            </li>
+        <div aria-label="按日期查看操作记录" className="space-y-2">
+          {[...days].map(([date, rows]) => (
+            <details key={date} open={date === latestDay} className="rounded-md border border-subtle">
+              <summary className="cursor-pointer px-3 py-2 text-12 text-secondary">
+                {date} · {rows.length} 条记录
+              </summary>
+              <ul aria-label="处理时间线" className="m-0 list-none space-y-3 px-3 pb-3">
+                {rows.map((row) => (
+                  <li key={row.id} className="m-0 list-none border-l-2 border-subtle pl-3 text-12">
+                    <p className="m-0 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <strong className="font-medium">{row.actor}</strong>
+                      <span className={`font-medium ${row.tone}`}>{row.action}</span>
+                      <time className="text-11 text-tertiary" dateTime={row.at}>
+                        {renderNumericDateTime(row.at)}
+                      </time>
+                    </p>
+                    {row.content &&
+                      (row.content.length > 180 || row.content.split("\n").length > 3 ? (
+                        <details className="mt-1">
+                          <summary className="cursor-pointer text-secondary">查看详细内容</summary>
+                          <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>
+                        </details>
+                      ) : (
+                        <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>
+                      ))}
+                  </li>
+                ))}
+              </ul>
+            </details>
           ))}
-        </ol>
+        </div>
         {(access?.can_public_comment || access?.can_internal_comment) && (
           <>
             <Field label="回复范围">

@@ -68,7 +68,7 @@ def test_add_member_cannot_replace_existing_project_duties(session_client, owner
     )
     response = session_client.post(
         f"/api/quality-auth/accounts/{workspace.slug}/projects/{project.id}/members/",
-        {"user_id": str(user.id), "role": "REPORTER"},
+        {"user_id": str(user.id), "role": "REGRESSION_TESTER"},
         format="json",
     )
     assert response.status_code == 409, response.content

@@ -36,6 +36,7 @@ import { RecordPresentation } from "./record-presentation";
 import { TaskPackageForm } from "./task-package-form";
 import { ImportForm } from "./import-form";
 import { ReportsPanel } from "./reports-panel";
+import { DefectVerificationResults } from "./defect-verification-results";
 import { PlanForm } from "./plan-form";
 import { PlanDetail } from "./plan-detail";
 import { ListFilters } from "./list-filters";
@@ -53,6 +54,7 @@ const tabs = [
   { key: "suites", name: "用例集", group: "assets" },
   { key: "plans", name: "测试计划", group: "execution" },
   { key: "executions", name: "执行记录", group: "execution" },
+  { key: "verification-results", name: "缺陷验证", group: "results" },
   { key: "report", name: "测试报告", group: "results" },
   { key: "overview", name: "测试概览", group: "results" },
   { key: "resources", name: "测试资源", group: "settings" },
@@ -60,7 +62,7 @@ const tabs = [
 const groups = [
   { key: "execution", name: "测试任务", tab: "plans", icon: Beaker },
   { key: "assets", name: "用例库", tab: "cases", icon: ClipboardList },
-  { key: "results", name: "测试结果", tab: "report", icon: FileCheck },
+  { key: "results", name: "测试结果", tab: "verification-results", icon: FileCheck },
 ];
 
 export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolean }) {
@@ -93,7 +95,16 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
     isLoading,
     mutate,
   } = useSWR(
-    tabAllowed && !["report", "roles", "resources", "integrations", "overview", "defect-statistics"].includes(tab)
+    tabAllowed &&
+      ![
+        "verification-results",
+        "report",
+        "roles",
+        "resources",
+        "integrations",
+        "overview",
+        "defect-statistics",
+      ].includes(tab)
       ? `${base}${tab}/?${normalizedPageParams(params).toString()}`
       : null,
     (url: string) => qualityApi.read<Page<TestCase | Plan | Execution | Defect | Suite | Release>>(url)
@@ -292,7 +303,15 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
           <h1 className="platform-page-title">{defectsOnly ? "缺陷" : "测试"}</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {!["roles", "resources", "integrations", "overview", "report", "defect-statistics"].includes(tab) && (
+          {![
+            "verification-results",
+            "roles",
+            "resources",
+            "integrations",
+            "overview",
+            "report",
+            "defect-statistics",
+          ].includes(tab) && (
             <>
               {context && <ListFilters compact kind={tab} context={context} params={params} onApply={setParams} />}
               <SavedViewControls kind={tab} params={params} onApply={setParams} />
@@ -544,13 +563,22 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
                     />
                   )}
                   {isLoading &&
-                  !["report", "roles", "resources", "integrations", "overview", "defect-statistics"].includes(tab) ? (
+                  ![
+                    "verification-results",
+                    "report",
+                    "roles",
+                    "resources",
+                    "integrations",
+                    "overview",
+                    "defect-statistics",
+                  ].includes(tab) ? (
                     <div role="status" className="space-y-3 py-6">
                       <p className="text-13 text-secondary">正在加载…</p>
                       <div className="h-12 animate-pulse rounded bg-layer-1" />
                       <div className="h-12 animate-pulse rounded bg-layer-1" />
                     </div>
                   ) : ![
+                      "verification-results",
                       "report",
                       "suites",
                       "releases",
@@ -748,8 +776,17 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
                       }}
                     />
                   )}
+                  {tab === "verification-results" && <DefectVerificationResults base={base} projectUrl={projectUrl} />}
                   {tab === "report" && <ReportsPanel base={base} context={context} />}
-                  {!["report", "roles", "resources", "integrations", "overview", "defect-statistics"].includes(tab) &&
+                  {![
+                    "verification-results",
+                    "report",
+                    "roles",
+                    "resources",
+                    "integrations",
+                    "overview",
+                    "defect-statistics",
+                  ].includes(tab) &&
                     collection && (
                       <Paging
                         perPage={pageSize(params)}

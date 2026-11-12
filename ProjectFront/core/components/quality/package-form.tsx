@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useState } from "react";
 import { Button } from "@plane/ui";
@@ -5,7 +6,7 @@ import { qualityApi, errorMessage } from "./api";
 import { Field, fieldClass, Modal } from "./shared";
 
 type FileEntry = { id: string; path: string; size: string; sha256: string };
-const emptyFile = (): FileEntry => ({ id: crypto.randomUUID(), path: "", size: "", sha256: "" });
+const emptyFile = (): FileEntry => ({ id: uuidv4(), path: "", size: "", sha256: "" });
 
 export function PackageForm({
   base,

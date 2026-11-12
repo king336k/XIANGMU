@@ -6,6 +6,8 @@ export type ScopeRow = {
   slug?: string;
   identifier?: string;
   workspace_id?: string;
+  workspace_name?: string;
+  inherited_access?: boolean;
   project_count?: number;
   access_role: number;
   roles: string[];
@@ -30,6 +32,7 @@ export function updateScopeChanges(
   accessRole: number,
   roles = row.roles
 ): ScopeChanges {
+  if (accessRole < 15) roles = [];
   const next = { ...pending };
   const key = scopeKey(row);
   if (accessRole === row.access_role && sameRoles(roles, row.roles)) delete next[key];

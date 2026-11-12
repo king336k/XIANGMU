@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useMemo, useState } from "react";
 import { qualityApi } from "./api";
@@ -11,19 +12,26 @@ export function ExecutionForm({
   item,
   onClose,
   onSaved,
+  requireEvidence = false,
 }: {
+  requireEvidence?: boolean;
   base: string;
-  plan: Plan;
-  item: PlanItem;
+  plan: Pick<Plan, "name" | "build" | "environment">;
+  item: Pick<PlanItem, "id"> & {
+    revision: Pick<PlanItem["revision"], "title" | "version"> & {
+      snapshot: Pick<PlanItem["revision"]["snapshot"], "steps"> &
+        Partial<Pick<PlanItem["revision"]["snapshot"], "preconditions">>;
+    };
+  };
   onClose: () => void;
   onSaved: () => Promise<unknown>;
 }) {
   const stepRows = useMemo(
-    () => item.revision.snapshot.steps.map((step) => ({ step, key: crypto.randomUUID() })),
+    () => item.revision.snapshot.steps.map((step) => ({ step, key: uuidv4() })),
     [item.revision.snapshot.steps]
   );
   const [result, setResult] = useState<Result>("passed");
-  const [requestId] = useState(() => crypto.randomUUID());
+  const [requestId] = useState(() => uuidv4());
   const [steps, setSteps] = useState(
     item.revision.snapshot.steps.map(() => ({ result: "passed" as Result, actual: "" }))
   );
@@ -81,6 +89,7 @@ export function ExecutionForm({
                 <Field label={`步骤 ${index + 1} 实际表现`}>
                   <input
                     className={fieldClass}
+                    required={requireEvidence}
                     value={steps[index].actual}
                     onChange={(e) =>
                       setSteps(steps.map((s, i) => (i === index ? { result: s.result, actual: e.target.value } : s)))
@@ -139,14 +148,20 @@ export function ExecutionForm({
       <Field label={needsReason ? "实际结果 / 无法判定说明 *" : "实际结果 / 问题说明"}>
         <textarea
           name="actual_result"
-          required={needsReason}
+          required={needsReason || requireEvidence}
           rows={3}
           className={fieldClass}
           placeholder="失败时请写清实际表现，提交缺陷时会自动带入"
         />
       </Field>
       <Field label="证据备注 / 链接">
-        <textarea name="evidence" rows={2} className={fieldClass} placeholder="日志摘要、截图或报告链接" />
+        <textarea
+          name="evidence"
+          required={requireEvidence}
+          rows={2}
+          className={fieldClass}
+          placeholder="日志摘要、截图或报告链接"
+        />
       </Field>
       <p className="text-12 text-secondary">本次执行会独立保存。重新执行会追加记录，不会覆盖此前结果。</p>
     </Modal>

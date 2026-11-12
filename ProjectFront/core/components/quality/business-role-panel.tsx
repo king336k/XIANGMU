@@ -14,11 +14,10 @@ type RoleData = {
   results: { user_id: string; name: string; role: string; roles?: string[]; is_administrator?: boolean }[];
 };
 const duties: Record<string, string> = {
-  PLATFORM_ADMIN: "最高权限，包含项目经理、技术员、测试员和数采员的全部业务操作，无需额外兼任。",
+  PLATFORM_ADMIN: "管理全部岗位业务。",
   PROJECT_MANAGER: "项目分派、方案审核、测试验收与知识治理。",
   TECHNICIAN: "接收分派、根因分析、方案提交、修复与发起验证。",
   REGRESSION_TESTER: "维护用例与套件、安排和执行测试计划、提交结果与回归返修。",
-  REPORTER: "采集数据、从真实 Session 上报异常并跟踪处理进度。",
 };
 
 export function BusinessRolePanel({
@@ -69,7 +68,7 @@ export function BusinessRolePanel({
             <div>
               <h3 className="text-13 font-medium">{data.enabled ? "业务角色权限已启用" : "当前沿用平台成员权限"}</h3>
               <p className="mt-1 text-12 text-secondary">
-                管理员拥有全部业务权限；项目经理、技术员、测试员和数采员按职责操作。未分配业务角色的成员只能查看。
+                可写项目成员均可反馈问题；项目经理、技术员和测试员按岗位处理。
               </p>
             </div>
             {context.is_administrator && (
@@ -96,7 +95,7 @@ export function BusinessRolePanel({
                       {row.is_administrator
                         ? "管理员"
                         : (row.roles || [row.role])
-                            .filter((role) => role !== "PLATFORM_ADMIN")
+                            .filter((role) => role in duties && role !== "PLATFORM_ADMIN")
                             .map((role) => data.roles[role])
                             .join("、") || "项目成员"}
                     </td>
@@ -104,7 +103,7 @@ export function BusinessRolePanel({
                       {row.is_administrator
                         ? duties.PLATFORM_ADMIN
                         : (row.roles || [row.role])
-                            .filter((role) => role !== "PLATFORM_ADMIN")
+                            .filter((role) => role in duties && role !== "PLATFORM_ADMIN")
                             .map((role) => duties[role])
                             .join("；")}
                     </td>
@@ -154,14 +153,14 @@ export function BusinessRolePanel({
           <fieldset className="space-y-2">
             <legend className="mb-2 text-13 font-medium">业务岗位（可多选）</legend>
             {Object.entries(data.roles)
-              .filter(([key]) => key !== "PLATFORM_ADMIN")
+              .filter(([key]) => key in duties && key !== "PLATFORM_ADMIN")
               .map(([key, label]) => (
                 <label key={key} className="flex items-center gap-2 text-13">
                   <input
                     type="checkbox"
                     name="roles"
                     value={key}
-                    defaultChecked={(binding?.roles || [binding?.role || "REPORTER"]).includes(key)}
+                    defaultChecked={(binding?.roles || [binding?.role || ""]).includes(key)}
                   />
                   {label}
                 </label>
@@ -184,7 +183,7 @@ export function BusinessRolePanel({
         >
           <Field label="权限策略">
             <select name="enabled" defaultValue={String(data.enabled || !data.results.length)} className={fieldClass}>
-              <option value="true">启用五类业务角色校验</option>
+              <option value="true">启用业务岗位权限校验</option>
               {!data.enabled && <option value="false">沿用平台成员权限</option>}
             </select>
           </Field>

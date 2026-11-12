@@ -1,128 +1,224 @@
 import assert from "node:assert/strict";
+import test from "node:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import test from "node:test";
-const require = createRequire(new URL("../package.json", import.meta.url));
-const ts = require("typescript"),
+const require = createRequire(new URL("../package.json", import.meta.url)),
+  ts = require("typescript"),
   React = require("react");
-function harness(manager = true, dataRequired = true, manual = false) {
-  const state = [false, false, "manual"];
-  let index = 0;
-  const writes = [],
-    changed = [],
-    exports = {};
+const nodes = (t) =>
+  !t || typeof t !== "object" ? [] : Array.isArray(t) ? t.flatMap(nodes) : [t, ...nodes(t.props?.children)];
+function harness(file, name, props) {
+  const api = {},
+    states = [],
+    writes = [],
+    saved = [];
+  let at = 0;
+  const stubs = new Map(),
+    stub = (n) => {
+      if (!stubs.has(n)) stubs.set(n, () => null);
+      return stubs.get(n);
+    };
   new Function(
     "require",
     "exports",
-    ts.transpileModule(
-      readFileSync(new URL("../core/components/quality/defect-verification-scope.tsx", import.meta.url), "utf8"),
-      { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }
-    ).outputText
+    ts.transpileModule(readFileSync(new URL(`../core/components/quality/${file}.tsx`, import.meta.url), "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText
   )((id) => {
     if (id === "react")
       return {
         ...React,
-        useState: () => {
-          const key = index++;
-          return [
-            state[key],
-            (value) => {
-              state[key] = value;
-            },
-          ];
+        useMemo: (fn) => fn(),
+        useState: (initial) => {
+          const index = at++;
+          if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial;
+          return [states[index], (v) => (states[index] = typeof v === "function" ? v(states[index]) : v)];
         },
       };
-    if (id === "swr") return { default: () => ({ data: [] }) };
-    if (id === "@/components/common/project-route-link") return { ProjectRouteLink: "a" };
-    if (id === "./paged-record-select") return { PagedRecordSelect: "case-picker" };
+    if (id === "react/jsx-runtime" || id === "uuid") return require(id);
     if (id === "./api")
       return {
         qualityApi: {
           write: async (...args) => {
             writes.push(args);
-            return { id: "d", requires_data_regression: false };
+            return { current: { id: "new" } };
           },
         },
+        errorMessage: String,
       };
-    if (id === "./shared") return { Field: "field", Modal: "modal", fieldClass: "field" };
-    return require(id);
-  }, exports);
-  const props = {
-    projectUrl: "/projects/p/TEST",
-    base: "/q/",
-    value: {
-      id: "d",
-      status: "resolved",
-      edit_version: 7,
-      requires_data_regression: dataRequired,
-      manual_verification_allowed: manual,
-    },
-    context: { is_manager: manager },
-    onChanged: async (value) => {
-      changed.push(value);
+    if (id === "./types")
+      return {
+        resultNames: {
+          passed: "通过",
+          failed: "失败",
+          blocked: "受阻",
+          inconclusive: "无法判定",
+          skipped: "跳过",
+          pending: "未执行",
+        },
+        reasonNames: { environment: "环境", other: "其他" },
+      };
+    return new Proxy({}, { get: (_, key) => (key === "fieldClass" ? "field" : stub(key)) });
+  }, api);
+  return {
+    states,
+    writes,
+    saved,
+    stub,
+    render(overrides = {}) {
+      at = 0;
+      return api[name]({
+        ...props,
+        ...overrides,
+        onSaved: async (data) => saved.push(data),
+        onCancel() {},
+        onClose() {},
+      });
     },
   };
-  const render = () => {
-    index = 0;
-    return exports.DefectVerificationScope(props);
-  };
-  const nodes = (node) =>
-    node && typeof node === "object" ? [node, ...React.Children.toArray(node.props?.children).flatMap(nodes)] : [];
-  return { render, nodes, writes, changed };
 }
-test("验证方式提供人工与用例两条路径；保存原版本和原因", async () => {
-  const h = harness();
-  h.nodes(h.render())
-    .find((n) => n.type === "button")
-    .props.onClick();
-  const nodes = h.nodes(h.render());
-  assert.deepEqual(
-    nodes.filter((n) => n.type === "option").map((n) => n.props.children),
-    ["人工功能验证", "测试用例回归"]
-  );
-  await nodes
-    .find((n) => n.type === "modal")
-    .props.onSubmit(
-      new Map([
-        ["verification_scope", "functional"],
-        ["reason", "只调整提示"],
-      ])
-    );
-  assert.deepEqual(h.writes, [
-    [
-      "/q/defects/d/",
-      { expected_version: 7, verification_scope: "functional", verification_scope_reason: "只调整提示", case_id: null },
-      "patch",
-    ],
-  ]);
-  assert.equal(h.changed[0].requires_data_regression, false);
-  assert.equal(
-    h.nodes(h.render()).some((n) => n.type === "modal"),
-    false
-  );
+test("人工验证直接保存步骤预期和版本，不再写入旧缺陷case_id接口", async () => {
+  const h = harness("verification-configure", "VerificationConfigure", {
+    base: "/q/",
+    defectId: "d",
+    version: 7,
+    fixedBuild: "v2",
+    initialMode: "manual",
+  });
+  let tree = h.render();
+  nodes(tree)
+    .find((n) => n.props?.label === "验证环境")
+    .props.children.props.onChange({ target: { value: "195" } });
+  tree = h.render();
+  nodes(tree)
+    .find((n) => n.props?.label === "步骤 1")
+    .props.children.props.onChange({ target: { value: "打开控制页" } });
+  tree = h.render();
+  nodes(tree)
+    .find((n) => n.props?.label === "预期结果")
+    .props.children.props.onChange({ target: { value: "显示连接状态" } });
+  tree = h.render();
+  const save = nodes(tree).find((n) => n.props?.children === "保存安排");
+  assert.equal(save.props.disabled, false);
+  save.props.onClick();
+  await new Promise(setImmediate);
+  assert.equal(h.writes[0][0], "/q/defects/d/verification/");
+  assert.equal(h.writes[0][1].expected_version, 7);
+  assert.deepEqual(h.writes[0][1].steps, [{ action: "打开控制页", expected: "显示连接状态" }]);
+  assert.equal("case_id" in h.writes[0][1], false);
 });
-test("技术员不显示调整验证方式入口", () => {
-  const h = harness(false, false);
-  assert.equal(h.nodes(h.render()).filter((n) => n.type === "button").length, 0);
-});
-
-test("普通缺陷验证关闭只填写验证结果，不要求Session或数据包", async () => {
-  const h = harness(true, false, true);
-  h.nodes(h.render())
-    .find((n) => n.type === "button" && n.props.children === "记录验证并关闭")
+test("用例回归一次多选，发送本缺陷安排且当前方式明确选中", async () => {
+  const h = harness("verification-configure", "VerificationConfigure", {
+    base: "/q/",
+    defectId: "d",
+    version: 3,
+    fixedBuild: "v3",
+    initialMode: "cases",
+  });
+  let tree = h.render();
+  assert.equal(nodes(tree).find((n) => n.type === "button" && n.props["aria-pressed"]).props.children[1], "用例回归");
+  nodes(tree)
+    .find((n) => n.type === h.stub("CasePicker"))
+    .props.onChange([
+      { id: "c1", title: "用例1" },
+      { id: "c2", title: "用例2" },
+    ]);
+  tree = h.render();
+  nodes(tree)
+    .find((n) => n.props?.label === "验证环境")
+    .props.children.props.onChange({ target: { value: "现场" } });
+  tree = h.render();
+  nodes(tree)
+    .find((n) => n.props?.children === "保存安排")
     .props.onClick();
-  const modal = h.nodes(h.render()).find((n) => n.type === "modal");
-  assert.equal(h.nodes(modal).filter((n) => n.type === "textarea").length, 5);
-  await modal.props.onSubmit(
+  await new Promise(setImmediate);
+  assert.deepEqual(h.writes[0][1].case_ids, ["c1", "c2"]);
+  assert.equal(h.writes[0][1].mode, "cases");
+});
+test("人工实际验证独立提交本轮结果，不直接关闭或要求采集Session", async () => {
+  const h = harness("verification-manual-result", "VerificationManualResult", {
+    base: "/q/",
+    defectId: "d",
+    round: { version: 5, fixed_build: "v2", environment: "现场", steps: [{ action: "启动", expected: "成功" }] },
+  });
+  const tree = h.render();
+  await tree.props.onSubmit(
     new Map([
-      ["environment", "195"],
-      ["steps", "只启用手臂"],
-      ["expected", "能录制"],
-      ["actual", "录制通过"],
-      ["evidence", "Session-A"],
+      ["result", "passed"],
+      ["actual_result", "启动成功"],
+      ["evidence", "现场记录"],
+      ["actual_0", "显示成功"],
+      ["result_0", "passed"],
     ])
   );
-  assert.equal(h.writes[0][1].verification_method, "manual");
-  assert.match(h.writes[0][1].verification_note, /只启用手臂/);
-  assert.match(h.writes[0][1].verification_note, /Session-A/);
+  assert.equal(h.writes[0][0], "/q/defects/d/verification/result/");
+  assert.equal(h.writes[0][1].expected_version, 5);
+  assert.equal("status" in h.writes[0][1], false);
+  assert.deepEqual(h.writes[0][1].step_results, [{ result: "passed", actual: "显示成功" }]);
 });
+
+test("人工实测同轮次收到等值新步骤数组时保持表单行，避免刷新丢失草稿", () => {
+  const round = {
+    id: "round-1",
+    version: 5,
+    fixed_build: "v2",
+    environment: "现场",
+    steps: [{ action: "启动", expected: "成功" }],
+  };
+  const h = harness("verification-manual-result", "VerificationManualResult", { base: "/q/", defectId: "d", round });
+  const first = h.render();
+  const firstRows = nodes(first).filter((node) => node.type === "section");
+  const refreshed = h.render({ round: structuredClone(round) });
+  const refreshedRows = nodes(refreshed).filter((node) => node.type === "section");
+  assert.equal(firstRows.length, 1);
+  assert.deepEqual(
+    refreshedRows.map((row) => row.key),
+    firstRows.map((row) => row.key)
+  );
+  assert.equal(nodes(refreshedRows[0]).find((node) => node.type === "textarea").props.name, "actual_0");
+  assert.equal(nodes(refreshedRows[0]).find((node) => node.type === "textarea").props.value, undefined);
+});
+
+for (const inconclusiveAt of ["result", "result_0"]) {
+  test(`人工实测${inconclusiveAt === "result" ? "整体" : "任一步骤"}无法判定提供原因和下一步并提交完整payload`, async () => {
+    const h = harness("verification-manual-result", "VerificationManualResult", {
+      base: "/q/",
+      defectId: "d",
+      round: {
+        id: "round-1",
+        version: 5,
+        fixed_build: "v2",
+        environment: "现场",
+        steps: [{ action: "启动", expected: "成功" }],
+      },
+    });
+    let tree = h.render();
+    for (const select of nodes(tree).filter((node) => node.type === "select"))
+      assert.ok(!nodes(select).some((node) => node.type === "option" && node.props.value === "pending"));
+    assert.equal(
+      nodes(tree).some((node) => node.props?.name === "reason_category"),
+      false
+    );
+    nodes(tree)
+      .find((node) => node.type === "select" && node.props.name === inconclusiveAt)
+      .props.onChange({ target: { value: "inconclusive" } });
+    tree = h.render();
+    assert.equal(nodes(tree).find((node) => node.props?.name === "reason_category").props.required, true);
+    assert.equal(nodes(tree).find((node) => node.props?.name === "next_action").props.required, true);
+    const payload = new Map([
+      ["result", inconclusiveAt === "result" ? "inconclusive" : "blocked"],
+      ["result_0", inconclusiveAt === "result_0" ? "inconclusive" : "passed"],
+      ["actual_result", "环境待处理，当前无法判定"],
+      ["evidence", "现场日志"],
+      ["actual_0", "网络不通"],
+      ["reason_category", "environment"],
+      ["next_action", "恢复环境后复测"],
+    ]);
+    await tree.props.onSubmit(payload);
+    assert.equal(h.writes[0][0], "/q/defects/d/verification/result/");
+    assert.equal(h.writes[0][1].reason_category, "environment");
+    assert.equal(h.writes[0][1].next_action, "恢复环境后复测");
+    assert.equal(h.writes[0][1].step_results[0].result, payload.get("result_0"));
+    assert.equal(h.writes[0][1].expected_version, 5);
+  });
+}

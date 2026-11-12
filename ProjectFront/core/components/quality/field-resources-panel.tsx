@@ -149,22 +149,14 @@ export function FieldResourcesPanel({ base, context }: { base: string; context: 
           <Field label="名称 *">
             <input required name="name" maxLength={200} className={fieldClass} />
           </Field>
-          <Field label="负责数采员 *">
+          <Field label="资源负责人 *">
             <select required name="owner_id" className={fieldClass}>
               <option value="">请选择</option>
-              {context.members
-                .filter(
-                  (row) =>
-                    !context.business_roles_enabled ||
-                    (row.business_roles || [row.business_role]).some(
-                      (role) => typeof role === "string" && ["PLATFORM_ADMIN", "REPORTER"].includes(role)
-                    )
-                )
-                .map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.name}
-                  </option>
-                ))}
+              {context.members.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
             </select>
           </Field>
           <Field label="可信来源实例">

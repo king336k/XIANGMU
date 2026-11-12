@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { useCollectionPagination } from "./use-collection-pagination";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useState } from "react";
@@ -175,7 +176,7 @@ export function ReportDeliveryPanel({
           onSubmit={async (form) => {
             const row = await qualityApi.write<Delivery>(`${base}reports/${reportId}/deliveries/`, {
               target_id: form.get("target_id"),
-              request_id: crypto.randomUUID(),
+              request_id: uuidv4(),
               expected_version: reportVersion,
             });
             await mutate();

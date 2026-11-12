@@ -101,7 +101,11 @@ class DataRegressionList(QualityView):
     def post(self, request, pk, **kwargs):
         data = self.input(RegressionInput)
         defect = get_object_or_404(Defect.objects.select_for_update(), pk=pk, project_id=self.project_id)
-        if not manager(self.project_id, request.user) and not (strict(self.project_id) and capable(self.project_id, request.user.id, "manage_test_plan")) and defect.assignee_id != request.user.id:
+        if (
+            not manager(self.project_id, request.user)
+            and not (strict(self.project_id) and capable(self.project_id, request.user.id, "manage_test_plan"))
+            and defect.assignee_id != request.user.id
+        ):
             raise PermissionDenied("仅当前技术负责人或有测试管理权限的成员可发起数据回归。")
         from .verification_scope import requires_data_regression
 
@@ -133,17 +137,21 @@ class DataRegressionList(QualityView):
             raise Conflict("原采集任务映射已停用，请核对来源。")
         started = timezone.now()
         approved_verification = revision.snapshot.get("verification") or "原异常不再出现，数据与日志符合验收要求"
-        steps = data.get("verification_steps") or [{
-            "action": "在修复版本重新采集，关联本轮新Session与数据包后检查",
-            "expected": approved_verification,
-        }]
-        request_snapshot = deepcopy({
-            "test_target": data["test_target"],
-            "verification_steps": steps,
-            "environment": data["environment"],
-            "environment_details": data["environment_details"],
-            "approved_verification": approved_verification,
-        })
+        steps = data.get("verification_steps") or [
+            {
+                "action": "在修复版本重新采集，关联本轮新Session与数据包后检查",
+                "expected": approved_verification,
+            }
+        ]
+        request_snapshot = deepcopy(
+            {
+                "test_target": data["test_target"],
+                "verification_steps": steps,
+                "environment": data["environment"],
+                "environment_details": data["environment_details"],
+                "approved_verification": approved_verification,
+            }
+        )
         case = TestCase.objects.create(
             project=defect.project,
             created_by=request.user,
@@ -194,8 +202,7 @@ class DataEvidenceList(QualityView):
         from .permissions import has_role
 
         if plan.status != "running" or (
-            plan.assignee_id != request.user.id
-            and not has_role(self.project_id, request.user.id, "PLATFORM_ADMIN")
+            plan.assignee_id != request.user.id and not has_role(self.project_id, request.user.id, "PLATFORM_ADMIN")
         ):
             raise PermissionDenied("请由当前测试负责人认领后关联新数据。")
         check_current(row, plan)
@@ -342,6 +349,8 @@ def transition(plan, action, actor, comment):
     if action == "cancel":
         return
     row.defect = Defect.objects.select_for_update().get(pk=row.defect_id)
+    if row.defect.verification_rounds.exists():
+        raise Conflict("此缺陷已配置验证流程，请从缺陷详情验收或退回。")
     check_current(row, plan)
     if action == "submit":
         from .serializers import plan_summary
@@ -430,11 +439,18 @@ def return_failed_functional_fixes(plan, actor):
             continue
         execution = item.latest_results[0]
         candidates = [
-            defect for defect in Defect.objects.select_for_update().filter(
-                project_id=plan.project_id, case_id=item.case_id, fixed_build=plan.build,
-                status="resolved", archived_at__isnull=True, resolved_at__lt=execution.created_at,
-            ).order_by("id")
-            if not requires_data_regression(defect)
+            defect
+            for defect in Defect.objects.select_for_update()
+            .filter(
+                project_id=plan.project_id,
+                case_id=item.case_id,
+                fixed_build=plan.build,
+                status="resolved",
+                archived_at__isnull=True,
+                resolved_at__lt=execution.created_at,
+            )
+            .order_by("id")
+            if not requires_data_regression(defect) and not defect.verification_rounds.exists()
         ]
         # A general test plan has no explicit defect link. Never choose between ambiguous fixes.
         if len(candidates) != 1:
@@ -444,8 +460,11 @@ def return_failed_functional_fixes(plan, actor):
         defect.edit_version += 1
         defect.save()
         DefectEvent.objects.create(
-            project=plan.project, created_by=actor, defect=defect,
-            previous_status="resolved", status="open",
+            project=plan.project,
+            created_by=actor,
+            defect=defect,
+            previous_status="resolved",
+            status="open",
             note=f"功能回归失败，返回技术负责人继续修复：{plan.name}；验证记录：{execution.id}",
         )
         invalidate_knowledge(defect, actor)
@@ -467,17 +486,27 @@ def create_functional_knowledge(defect, actor, verification_note):
     )
     lines = [f"现象：{defect.description}", f"修复版本：{defect.fixed_build}", f"处理结果：{defect.resolution}"]
     if revision:
-        for key, label in [("title", "方案"), ("root_cause", "根因"), ("steps", "修复步骤"),
-                           ("verification", "验证方法"), ("risk", "风险"), ("rollback", "回滚")]:
+        for key, label in [
+            ("title", "方案"),
+            ("root_cause", "根因"),
+            ("steps", "修复步骤"),
+            ("verification", "验证方法"),
+            ("risk", "风险"),
+            ("rollback", "回滚"),
+        ]:
             value = revision.snapshot.get(key, "")
             if value:
                 lines.append(f"{label}：{value}")
     if defect.regression_execution_id:
         execution = defect.regression_execution
-        lines.extend([
-            f"验证计划：{execution.item.plan_id}", f"验证记录：{execution.id}",
-            f"验证结果：{execution.actual_result}", f"验证依据：{execution.evidence}",
-        ])
+        lines.extend(
+            [
+                f"验证计划：{execution.item.plan_id}",
+                f"验证记录：{execution.id}",
+                f"验证结果：{execution.actual_result}",
+                f"验证依据：{execution.evidence}",
+            ]
+        )
     else:
         lines.append(f"功能验证结果：{verification_note}")
     return Article.objects.create(

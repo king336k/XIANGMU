@@ -44,8 +44,18 @@ from .work_item_options import WorkItemOptions
 from . import solutions
 from . import assets
 from . import sources, reports, imports
+from .defect_verification import (
+    DefectVerification,
+    DefectVerificationResult,
+    DefectVerificationWorkflow,
+    DefectVerificationResults,
+)
 
 urlpatterns = [
+    path("verification-results/", DefectVerificationResults.as_view()),
+    path("defects/<uuid:pk>/verification/", DefectVerification.as_view()),
+    path("defects/<uuid:pk>/verification/result/", DefectVerificationResult.as_view()),
+    path("defects/<uuid:pk>/verification/workflow/", DefectVerificationWorkflow.as_view()),
     path("collaboration-settings/", ProjectCollaborationSettings.as_view()),
     path("defects/<uuid:pk>/routing/", DefectRouting.as_view()),
     path("defects/<uuid:pk>/reminders/", DefectReminders.as_view()),

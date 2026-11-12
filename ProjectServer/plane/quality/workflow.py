@@ -29,6 +29,8 @@ class PlanWorkflow(QualityView):
     def post(self, request, pk, **kwargs):
         data = self.input(WorkflowInput)
         plan = get_object_or_404(TestPlan.objects.select_for_update(), pk=pk, project_id=self.project_id)
+        if hasattr(plan, "defect_verification"):
+            raise Conflict("请从缺陷详情提交、验收或退回本轮验证。")
         if plan.archived_at:
             raise Conflict("计划已归档，请先恢复。")
         if not plan.managed:

@@ -33,7 +33,9 @@ def business(session_client, workspace, create_user):
             assert response.status_code == 200, response.content
             people[role] = person
             continue
-        response = session_client.post(base + "roles/", {"user_id": str(person.pk), "role": role}, format="json")
+        response = session_client.post(
+            base + "roles/", {"user_id": str(person.pk), "roles": [] if role == "REPORTER" else [role]}, format="json"
+        )
         assert response.status_code == 200, response.content
         people[role] = person
     enabled = session_client.post(base + "role-policy/", {"enabled": True}, format="json")
@@ -46,7 +48,7 @@ def test_collector_is_reporter_and_cannot_execute_or_assign(session_client, busi
     session_client.force_authenticate(user=people["REPORTER"])
     context = session_client.get(base + "context/")
     assert context.status_code == 200
-    assert context.data["business_role"] == "REPORTER"
+    assert context.data["business_role"] is None
     assert context.data["capabilities"]["report"] and not context.data["capabilities"]["execute"]
     defect = session_client.post(base + "defects/", {"title": "采集异常"}, format="json")
     assert defect.status_code == 201
@@ -348,13 +350,13 @@ def test_policy_cannot_lock_out_managers_or_be_downgraded(session_client, busine
     session_client.force_authenticate(user=people["PLATFORM_ADMIN"])
     assert (
         session_client.post(
-            base + "roles/", {"user_id": str(people["PLATFORM_ADMIN"].id), "role": "REPORTER"}, format="json"
+            base + "roles/", {"user_id": str(people["PLATFORM_ADMIN"].id), "roles": []}, format="json"
         ).status_code
         == 403
     )
     assert (
         session_client.post(
-            base + "roles/", {"user_id": str(people["PROJECT_MANAGER"].id), "role": "REPORTER"}, format="json"
+            base + "roles/", {"user_id": str(people["PROJECT_MANAGER"].id), "roles": []}, format="json"
         ).status_code
         == 200
     )

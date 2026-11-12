@@ -33,8 +33,13 @@ test("页面职责只保留一个短标签，权限解释不铺成长句", () =>
 
 test("项目职责说明简短且对应实际岗位", () => {
   assert.deepEqual(api.projectDutySummary(["项目经理"]), { label: "项目经理", description: "排期分工、跟进验收" });
-  for (const role of ["技术员", "测试员", "数采员"]) {
+  for (const role of ["技术员", "测试员"]) {
     const value = api.projectDutySummary([role]);
     assert.ok(value.description.length > 0 && value.description.length <= 12);
   }
+});
+
+test("没有专职岗位的普通项目成员保留基础反馈能力", () => {
+  assert.deepEqual(api.projectDutySummary([]), { label: "项目成员", description: "反馈问题、补充材料" });
+  assert.deepEqual(api.projectDutySummary(["数采员"]), { label: "项目成员", description: "反馈问题、补充材料" });
 });

@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useRef, useState } from "react";
 import { isAxiosError } from "axios";
@@ -50,7 +51,7 @@ export function useAssistantChat(base: string, canWrite: boolean) {
     const origin = selectedRef.current;
     const query = drafts[origin]?.trim();
     if (inFlight.current || !query || !canWrite || !status?.configured) return;
-    const attempt = prepareAttempt(attempts.current[origin], origin, query, () => crypto.randomUUID());
+    const attempt = prepareAttempt(attempts.current[origin], origin, query, () => uuidv4());
     attempts.current[origin] = attempt;
     inFlight.current = true;
     setPending(attempt);

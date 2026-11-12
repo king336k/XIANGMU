@@ -22,9 +22,10 @@ def test_admin_inherits_manager_native_and_quality_operations(session_client, ad
     from plane.quality.permissions import ROLE_CAPABILITIES, capable, has_role
 
     assert has_role(project.id, create_user.id, "PROJECT_MANAGER")
-    for role in ["PROJECT_MANAGER", "TECHNICIAN", "REGRESSION_TESTER", "REPORTER"]:
+    for role in ["PROJECT_MANAGER", "TECHNICIAN", "REGRESSION_TESTER"]:
         assert ROLE_CAPABILITIES[role] <= ROLE_CAPABILITIES["PLATFORM_ADMIN"]
         assert has_role(project.id, create_user.id, role)
+    assert capable(project.id, create_user.id, "report")
     assert capable(project.id, create_user.id, "manage_test")
     created = session_client.post(base + "issues/", {"name": "管理员安排研发任务"}, format="json")
     assert created.status_code == 201, created.content

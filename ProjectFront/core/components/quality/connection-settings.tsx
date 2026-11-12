@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useState } from "react";
 import useSWR from "swr";
@@ -29,7 +30,7 @@ export function ConnectionSettings({ base = "", endpoint }: { base?: string; end
             onClick={() => {
               setEditing(null);
               setKind("feishu");
-              setNewSource(`source-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`);
+              setNewSource(`source-${uuidv4().replaceAll("-", "").slice(0, 16)}`);
             }}
           >
             添加连接

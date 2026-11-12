@@ -174,6 +174,66 @@ class DefectEvent(QualityRecord):
     note = models.TextField(blank=True)
 
 
+class DefectVerification(QualityRecord):
+    """Frozen validation scope: one defect, build, repair timestamp and round."""
+
+    defect = models.ForeignKey(Defect, on_delete=models.PROTECT, related_name="verification_rounds")
+    round_no = models.PositiveIntegerField()
+    version = models.PositiveIntegerField(default=1)
+    request_id = models.UUIDField()
+    request_hash = models.CharField(max_length=64)
+    mode = models.CharField(max_length=16)
+    status = models.CharField(max_length=24, default="testing")
+    fixed_build = models.CharField(max_length=120)
+    environment = models.CharField(max_length=255)
+    steps = models.JSONField(default=list)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    plan = models.OneToOneField(
+        TestPlan, on_delete=models.PROTECT, null=True, blank=True, related_name="defect_verification"
+    )
+
+    class Meta(QualityRecord.Meta):
+        constraints = [
+            models.UniqueConstraint(fields=["defect", "round_no"], name="quality_defect_verification_round_unique"),
+            models.UniqueConstraint(fields=["defect", "request_id"], name="quality_defect_verification_request_unique"),
+        ]
+
+
+class DefectVerificationResult(QualityRecord):
+    verification = models.ForeignKey(DefectVerification, on_delete=models.PROTECT, related_name="manual_results")
+    request_id = models.UUIDField()
+    request_hash = models.CharField(max_length=64)
+    result = models.CharField(max_length=16)
+    actual_result = models.TextField()
+    evidence = models.TextField()
+    step_results = models.JSONField(default=list)
+    reason_category = models.CharField(max_length=24, blank=True)
+    next_action = models.TextField(blank=True)
+
+    class Meta(QualityRecord.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["verification", "request_id"], name="quality_verification_result_request_unique"
+            )
+        ]
+
+
+class DefectVerificationEvent(QualityRecord):
+    verification = models.ForeignKey(DefectVerification, on_delete=models.PROTECT, related_name="workflow_events")
+    request_id = models.UUIDField()
+    request_hash = models.CharField(max_length=64)
+    action = models.CharField(max_length=24)
+    note = models.TextField(blank=True)
+    snapshot = models.JSONField(default=dict)
+
+    class Meta(QualityRecord.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["verification", "request_id"], name="quality_verification_event_request_unique"
+            )
+        ]
+
+
 class Solution(QualityRecord):
     contributor_ids = models.JSONField(default=list, null=True)
     defect = models.ForeignKey(Defect, on_delete=models.PROTECT, related_name="solutions")

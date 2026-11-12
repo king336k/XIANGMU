@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { Paging } from "./shared";
 import { useCollectionPagination } from "./use-collection-pagination";
 import { renderNumericDateTime } from "@plane/utils";
@@ -116,7 +117,7 @@ export function DiagnosticsPanel({ base, defectId, context }: { base: string; de
     setBusy(true);
     setMessage("");
     try {
-      await qualityApi.write(`${base}defects/${defectId}/diagnostics/`, { request_id: crypto.randomUUID(), mode });
+      await qualityApi.write(`${base}defects/${defectId}/diagnostics/`, { request_id: uuidv4(), mode });
       await mutate();
     } catch (e) {
       setMessage(errorMessage(e));

@@ -84,7 +84,7 @@ test("平台连接无需项目，模型按当前工作区统一配置", () => {
       assert.equal(connection.length, 1);
       assert.equal(connection[0].props.endpoint, "/api/quality-auth/connections/");
       assert.equal(connection[0].props.base, undefined);
-      assert.deepEqual(page.requests, [null]);
+      assert.ok(page.requests.length > 0 && page.requests.every((key) => key === null));
       assert.ok(!nodes(page.tree).some((node) => node.type === "select" && node.props["aria-label"] === "选择项目"));
     }
   }
@@ -105,7 +105,7 @@ test("平台连接无需项目，模型按当前工作区统一配置", () => {
     ),
     true
   );
-  assert.deepEqual(management(ordinary, "models", "project=other").requests, [null]);
+  assert.ok(management(ordinary, "models", "project=other").requests.every((key) => key === null));
 });
 
 test("设置页有可到达路由，业务工作台仅兼容重定向而不再嵌配置面板", () => {

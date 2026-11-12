@@ -102,7 +102,7 @@ class WorkSpaceMemberSerializer(DynamicBaseSerializer):
     class Meta:
         model = WorkspaceMember
         fields = "__all__"
-        read_only_fields = ["business_roles"]
+        read_only_fields = ["business_roles", "has_workspace_access"]
 
 
 class WorkspaceMemberMeSerializer(BaseSerializer):
@@ -111,7 +111,7 @@ class WorkspaceMemberMeSerializer(BaseSerializer):
     class Meta:
         model = WorkspaceMember
         fields = "__all__"
-        read_only_fields = ["business_roles"]
+        read_only_fields = ["business_roles", "has_workspace_access"]
 
 
 class WorkspaceMemberAdminSerializer(DynamicBaseSerializer):
@@ -127,7 +127,7 @@ class WorkspaceMemberAdminSerializer(DynamicBaseSerializer):
     class Meta:
         model = WorkspaceMember
         fields = "__all__"
-        read_only_fields = ["business_roles"]
+        read_only_fields = ["business_roles", "has_workspace_access"]
 
 
 class WorkSpaceMemberInviteSerializer(BaseSerializer):

@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { orderBy } from "lodash-es";
 import { useMemo, useState } from "react";
@@ -25,10 +26,7 @@ export function CaseHistory({
   const sorted = orderBy(revisions, ["version"], ["desc"]);
   const revision = sorted.find((row) => row.version === selected) || sorted[0];
   const snapshot = revision?.snapshot || data || value;
-  const steps = useMemo(
-    () => snapshot.steps.map((step) => ({ ...step, localId: crypto.randomUUID() })),
-    [snapshot.steps]
-  );
+  const steps = useMemo(() => snapshot.steps.map((step) => ({ ...step, localId: uuidv4() })), [snapshot.steps]);
   return (
     <Modal title={currentOnly ? value.title : `用例历史 · ${value.title}`} width="wide" onClose={onClose}>
       <p className="text-11 text-secondary">
@@ -50,7 +48,8 @@ export function CaseHistory({
                 type="button"
                 key={row.id}
                 onClick={() => setSelected(row.version)}
-                className={`rounded px-3 py-2 text-left ${revision?.version === row.version ? "bg-accent-subtle text-accent-primary" : "hover:bg-layer-1"}`}
+                aria-current={revision?.version === row.version ? "true" : undefined}
+                className={`platform-selection-item rounded px-3 py-2 text-left ${revision?.version === row.version ? "bg-accent-subtle text-accent-primary" : "hover:bg-layer-1"}`}
               >
                 <span className="text-12 font-medium">
                   v{row.version}

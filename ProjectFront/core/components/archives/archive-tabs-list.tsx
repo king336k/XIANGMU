@@ -45,17 +45,23 @@ export const ArchiveTabsList = observer(function ArchiveTabsList() {
   if (!projectId) return null;
   const projectDetails = getProjectById(projectId?.toString());
   if (!projectDetails) return null;
+  const activeArchive = pathname.slice(`/${workspaceSlug}/projects/${projectId}/archives/`.length).split("/")[0];
 
   return (
     <>
       {ARCHIVES_TAB_LIST.map(
         (tab) =>
           tab.shouldRender(projectDetails) && (
-            <Link key={tab.key} href={`/${workspaceSlug}/projects/${projectId}/archives/${tab.key}`}>
+            <Link
+              key={tab.key}
+              href={`/${workspaceSlug}/projects/${projectId}/archives/${tab.key}`}
+              aria-current={activeArchive === tab.key ? "page" : undefined}
+              className="platform-selection-item"
+            >
               <span
                 className={`flex min-w-min flex-shrink-0 border-b-2 px-4 py-4 text-13 font-medium whitespace-nowrap outline-none ${
-                  pathname.includes(tab.key)
-                    ? "border-accent-strong text-accent-primary"
+                  activeArchive === tab.key
+                    ? "border-accent-strong bg-accent-subtle text-accent-primary"
                     : "border-transparent text-tertiary hover:border-subtle hover:text-placeholder"
                 }`}
               >

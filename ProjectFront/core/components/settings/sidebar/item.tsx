@@ -26,9 +26,9 @@ export function SettingsSidebarItem(props: Props) {
   const { as, isActive, label } = props;
   // common class
   const className = cn(
-    "flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-body-sm-medium text-secondary transition-colors",
+    "platform-selection-item flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-body-sm-medium text-secondary transition-colors",
     {
-      "bg-layer-transparent-selected text-primary": isActive,
+      "border-accent-subtle bg-accent-subtle font-semibold text-accent-primary": isActive,
       "hover:bg-layer-transparent-hover": !isActive,
     }
   );
@@ -46,14 +46,14 @@ export function SettingsSidebarItem(props: Props) {
 
   if (as === "button") {
     return (
-      <button type="button" className={className} onClick={props.onClick}>
+      <button type="button" aria-current={isActive ? "page" : undefined} className={className} onClick={props.onClick}>
         {content}
       </button>
     );
   }
 
   return (
-    <Link className={className} href={props.href}>
+    <Link aria-current={isActive ? "page" : undefined} className={className} href={props.href}>
       {content}
     </Link>
   );

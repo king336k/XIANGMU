@@ -17,7 +17,9 @@ export function MemberPermissionsModal({
   canProjectAccess,
   onSaved,
   onClose,
+  identityOnly = false,
 }: {
+  identityOnly?: boolean;
   person: ManagedMember;
   workspace: string;
   projectId: string;
@@ -29,7 +31,7 @@ export function MemberPermissionsModal({
   onSaved: () => Promise<unknown>;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState(canAdmin ? "access" : "roles"),
+  const [tab, setTab] = useState(identityOnly ? "administrator" : canAdmin ? "access" : "roles"),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
   const admin = person.is_administrator === true,
@@ -49,10 +51,10 @@ export function MemberPermissionsModal({
   };
   return (
     <Modal title={`编辑权限 · ${person.display_name || person.username}`} onClose={onClose}>
-      <nav aria-label="权限内容" className="mb-4 flex gap-2">
+      <nav aria-label="权限内容" className="platform-selection-group mb-4 flex gap-2">
         {[
           ...(!canAdmin ? [{ key: "roles", label: "业务岗位" }] : []),
-          { key: "access", label: canAdmin ? "工作空间与项目" : "访问范围" },
+          ...(!identityOnly ? [{ key: "access", label: canAdmin ? "工作空间与项目" : "访问范围" }] : []),
           ...(canAdmin ? [{ key: "administrator", label: "管理员身份" }] : []),
         ].map((item) => (
           <button

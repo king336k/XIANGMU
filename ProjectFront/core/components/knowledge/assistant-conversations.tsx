@@ -43,7 +43,8 @@ export function AssistantConversations({
         <button
           type="button"
           onClick={() => choose("new")}
-          className="focus-visible:outline-accent-primary flex flex-1 items-center justify-center gap-2 rounded-md border border-subtle px-3 py-2 text-13 font-medium hover:bg-layer-1 focus-visible:outline focus-visible:outline-2"
+          aria-current={selected === "new" ? "true" : undefined}
+          className="platform-selection-item focus-visible:outline-accent-primary flex flex-1 items-center justify-center gap-2 rounded-md border border-subtle px-3 py-2 text-13 font-medium hover:bg-layer-1 focus-visible:outline focus-visible:outline-2"
         >
           <Plus className="size-4" />
           新会话
@@ -92,7 +93,7 @@ export function AssistantConversations({
               key={row.id}
               onClick={() => choose(row.id)}
               aria-current={selected === row.id ? "true" : undefined}
-              className={`focus-visible:outline-accent-primary mb-1 block w-full rounded-md px-3 py-3 text-left focus-visible:outline focus-visible:outline-2 ${selected === row.id ? "bg-layer-1 text-primary" : "text-secondary hover:bg-layer-1"}`}
+              className={`platform-selection-item focus-visible:outline-accent-primary mb-1 block w-full rounded-md px-3 py-3 text-left focus-visible:outline focus-visible:outline-2 ${selected === row.id ? "bg-accent-subtle font-semibold text-accent-primary" : "text-secondary hover:bg-layer-1"}`}
             >
               <span className="flex items-center gap-2">
                 <MessageSquare className="size-3.5 shrink-0" />
@@ -115,6 +116,7 @@ export function AssistantConversations({
         <button
           type="button"
           onClick={() => choose("new")}
+          aria-current={selected === "new" ? "true" : undefined}
           className="border-t border-subtle px-4 py-3 text-left text-12 text-accent-primary"
         >
           返回新会话草稿

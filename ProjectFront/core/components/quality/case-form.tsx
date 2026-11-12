@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { PagedRecordSelect } from "./paged-record-select";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useMemo, useState } from "react";
@@ -26,10 +27,10 @@ export function CaseForm({
   onSaved: () => Promise<unknown>;
 }) {
   const [steps, setSteps] = useState(
-    (value?.steps ?? [{ action: "", expected: "", localId: crypto.randomUUID() }]).map((step) => ({
+    (value?.steps ?? [{ action: "", expected: "", localId: uuidv4() }]).map((step) => ({
       action: step.action,
       expected: step.expected,
-      localId: crypto.randomUUID(),
+      localId: uuidv4(),
     }))
   );
   const [selectedRevision, setSelectedRevision] = useState("");
@@ -38,7 +39,7 @@ export function CaseForm({
   );
   const historical = detail?.revisions.find((r) => r.id === selectedRevision);
   const historicalSteps = useMemo(
-    () => historical?.snapshot.steps.map((step) => ({ step, key: crypto.randomUUID() })) ?? [],
+    () => historical?.snapshot.steps.map((step) => ({ step, key: uuidv4() })) ?? [],
     [historical?.snapshot.steps]
   );
   return (
@@ -147,7 +148,7 @@ export function CaseForm({
         <Button
           variant="neutral-primary"
           disabled={steps.length >= 100}
-          onClick={() => setSteps([...steps, { action: "", expected: "", localId: crypto.randomUUID() }])}
+          onClick={() => setSteps([...steps, { action: "", expected: "", localId: uuidv4() }])}
         >
           添加步骤
         </Button>

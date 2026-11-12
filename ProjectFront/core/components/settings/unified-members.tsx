@@ -12,6 +12,7 @@ import { useMember } from "@/hooks/store/use-member";
 import { ProjectSettingsMemberDefaults } from "@/components/project/project-settings-member-defaults";
 import { SendWorkspaceInvitationModal } from "@/components/workspace/members";
 import { MemberPermissionsModal } from "./member-permissions-modal";
+import { ManagedAccounts } from "./managed-accounts";
 import { AddManagedMember } from "./add-managed-member";
 import type { AccountDirectory } from "./add-managed-member";
 import { mergeMemberRows, DUTY_LABELS, accessUserId, memberAccessLabel } from "./member-management-data";
@@ -98,6 +99,16 @@ export const UnifiedMembers = observer(function UnifiedMembers({
       ),
     ]);
   };
+  if (canAdmin)
+    return (
+      <ManagedAccounts
+        workspace={workspace}
+        projectId={projectId}
+        currentUserId={user?.id || ""}
+        view={view}
+        onViewChange={onViewChange}
+      />
+    );
   return (
     <section className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -129,7 +140,7 @@ export const UnifiedMembers = observer(function UnifiedMembers({
             </select>
           </Field>
         )}
-        {(canAdmin || canRoles) && <Button onClick={() => setAdding(true)}>添加成员</Button>}
+        {projectId && (canAdmin || canRoles) && <Button onClick={() => setAdding(true)}>添加成员</Button>}
       </div>
       {(projectMembers.error || roles.error || (!projectId && workspaceMembers.error)) && (
         <p role="alert" className="text-13 text-danger-primary">

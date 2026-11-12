@@ -24,7 +24,7 @@ class RoleInput(serializers.Serializer):
     user_id = serializers.UUIDField()
     role = serializers.ChoiceField(choices=list(ROLE_NAMES), required=False)
     roles = serializers.ListField(
-        child=serializers.ChoiceField(choices=list(ROLE_NAMES)), required=False, allow_empty=False, max_length=5
+        child=serializers.ChoiceField(choices=list(ROLE_NAMES)), required=False, allow_empty=True, max_length=4
     )
 
 
@@ -167,8 +167,6 @@ def apply_project_roles(view, data):
     project = view.project()
     type(project).objects.select_for_update().get(pk=project.pk)
     wanted = list(dict.fromkeys(data.get("roles") or ([data["role"]] if data.get("role") else [])))
-    if not wanted:
-        raise ValidationError({"roles": "请至少选择一个业务岗位。"})
     if "PLATFORM_ADMIN" in wanted:
         raise PermissionDenied("管理员身份请在账号管理中统一授权，项目岗位不能授予管理员。")
     previous = roles_for(project.pk, data["user_id"])
@@ -189,6 +187,18 @@ def apply_project_roles(view, data):
         or []
     )
     validate_project_role_retention(project, data["user_id"], set(wanted) | set(inherited))
+    if not wanted:
+        BusinessRole.objects.filter(project=project, user_id=data["user_id"]).delete()
+        if previous:
+            BusinessRoleEvent.objects.create(
+                project=project,
+                user_id=data["user_id"],
+                created_by=view.request.user,
+                previous_role="+".join(sorted(previous))[:32],
+                role="",
+                action="set_roles",
+            )
+        return Response({"user_id": str(data["user_id"]), "role": None, "roles": []})
     primary = wanted[0]
     binding, _ = BusinessRole.objects.update_or_create(
         project=project,

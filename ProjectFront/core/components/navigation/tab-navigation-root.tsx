@@ -231,7 +231,7 @@ export const TabNavigationRoot = observer(function TabNavigationRoot(props: TTab
           </TabNavigationList>
 
           {hasOverflow && (
-            <div className="pointer-events-none absolute -z-10 opacity-0">
+            <div aria-hidden="true" className="pointer-events-none absolute -z-10 opacity-0">
               {visibleNavigationItems.map((item: TNavigationItem) => {
                 const itemIsActive = isActive(item);
                 const originalIndex = allNavigationItems.indexOf(item);
@@ -243,7 +243,7 @@ export const TabNavigationRoot = observer(function TabNavigationRoot(props: TTab
                     }}
                     className="inline-block"
                   >
-                    <Link to={item.href}>
+                    <Link to={item.href} tabIndex={-1}>
                       <TabNavigationItem isActive={itemIsActive}>
                         <span>{t(item.i18n_key)}</span>
                       </TabNavigationItem>
