@@ -417,6 +417,8 @@ class WorkspaceUserActivityEndpoint(BaseAPIView):
 
 
 class WorkspaceUserProfileStatsEndpoint(BaseAPIView):
+    permission_classes = [WorkspaceViewerPermission]
+
     def get(self, request, slug, user_id):
         filters = issue_filters(request.query_params, "GET")
 

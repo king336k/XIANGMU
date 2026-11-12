@@ -245,7 +245,7 @@ def blockers(row):
         return []
     requirements, tasks, plans, defects = linked(row)
     result = []
-    pending = requirements.exclude(status__in=["completed", "cancelled"]).count()
+    pending = requirements.exclude(status__in=["completed", "cancelled", "archived"]).count()
     if pending:
         result.append(f"仍有 {pending} 条需求尚未验收。")
     pending = tasks.exclude(state__group="completed").count()
@@ -457,7 +457,8 @@ def dispatch_ready(row):
         expected = "REGRESSION_TESTER" if node["kind"] == "plan" else "TECHNICIAN"
         if strict(row.project_id) and not assigned_roles.intersection(
             {expected, "PLATFORM_ADMIN", "PROJECT_MANAGER"}
-            if node["kind"] in {"issue", "requirement"} else {expected, "PLATFORM_ADMIN"}
+            if node["kind"] in {"issue", "requirement"}
+            else {expected, "PLATFORM_ADMIN"}
         ):
             state["notice"] = "负责人业务角色与当前节点不匹配。"
             continue

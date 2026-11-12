@@ -211,6 +211,7 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
             series={[
               { key: "work_created", label: "新增工作项", color: "#4b86c6" },
               { key: "test_executions", label: "测试执行", color: "#8d78b6" },
+              { key: "manual_executions", label: "人工验证", color: "#4b9b96" },
               { key: "defects_created", label: "新增缺陷", color: "#db8650" },
               { key: "defects_closed", label: "关闭缺陷", color: "#379b76" },
             ]}
@@ -228,6 +229,22 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
                 }))}
               onSelect={(result) => show(`测试执行 · ${resultNames[result]}`, { detail: "test_executions", result })}
             />
+            {data.manual_results && (
+              <Distribution
+                title="区间人工验证结果"
+                rows={Object.keys(resultNames)
+                  .filter((key) => key !== "pending")
+                  .map((key, i) => ({
+                    key,
+                    name: resultNames[key],
+                    count: data.manual_results?.[key] || 0,
+                    color: ["#379b76", "#c94c5c", "#db8650", "#b6a05c", "#8b9ba8"][i],
+                  }))}
+                onSelect={(result) =>
+                  show(`人工验证 · ${resultNames[result]}`, { detail: "manual_executions", result })
+                }
+              />
+            )}
             <section className="space-y-4 rounded-md border border-subtle p-4">
               <h2 className="text-14 font-medium">当前待办</h2>
               <p className="text-12 text-secondary">当前未完成记录，不受日期范围限制。</p>

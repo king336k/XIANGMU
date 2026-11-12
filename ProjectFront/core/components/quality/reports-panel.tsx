@@ -25,6 +25,8 @@ type SavedReport = {
   snapshot?: {
     project_name: string;
     summary: Summary;
+    manual_verification?: Summary;
+    manual_execution_count?: number;
     plans: Plan[];
     definitions: string;
   };
@@ -264,6 +266,17 @@ export function ReportsPanel({ base, context }: { base: string; context: Context
                   label={`无法判定 ${detail.snapshot.summary.inconclusive || 0} 条`}
                 />
               </div>
+              {detail.snapshot.manual_verification && (
+                <div className="space-y-2 rounded border border-subtle p-3">
+                  <h3 className="text-13 font-medium">人工验证快照</h3>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge value="neutral" label={`共 ${detail.snapshot.manual_verification.total} 轮`} />
+                    <Badge value="passed" label={`通过 ${detail.snapshot.manual_verification.passed}`} />
+                    <Badge value="failed" label={`失败 ${detail.snapshot.manual_verification.failed}`} />
+                    <Badge value="pending" label={`未执行 ${detail.snapshot.manual_verification.pending}`} />
+                  </div>
+                </div>
+              )}
               {detail.snapshot.plans.map((plan) => (
                 <div key={plan.id} className="space-y-2 rounded-md border border-subtle p-3 text-13">
                   <h3 className="font-medium">

@@ -12,7 +12,7 @@ import { Row } from "@plane/ui";
 import type { TQuickAddIssueButton } from "../root";
 
 export const GanttQuickAddIssueButton = observer(function GanttQuickAddIssueButton(props: TQuickAddIssueButton) {
-  const { onClick, isEpic = false } = props;
+  const { onClick, isEpic = false, label } = props;
   const { t } = useTranslation();
   return (
     <button
@@ -22,7 +22,7 @@ export const GanttQuickAddIssueButton = observer(function GanttQuickAddIssueButt
     >
       <Row className="flex gap-2 py-2">
         <PlusIcon className="my-auto h-3.5 w-3.5 stroke-2" />
-        <span className="text-13 font-medium">{t(`${isEpic ? "epic.new" : "issue.new"}`)}</span>
+        <span className="text-13 font-medium">{isEpic ? t("epic.new") : label || t("issue.new")}</span>
       </Row>
     </button>
   );

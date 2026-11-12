@@ -172,7 +172,7 @@ test("项目任务和需求页面明确分开，工作总览保留跨项目综�
   assert.equal(nav.sidebar.work_items, "任务");
   assert.equal(common.workspace_work_overview, "工作总览");
   assert.match(source("components/issues/header.tsx"), /label="任务"/);
-  assert.match(source("components/issues/header.tsx"), /新增任务/);
+  assert.match(source("components/issues/header.tsx"), /新建任务/);
   const requirements = source("components/quality/requirements-workbench.tsx");
   assert.match(requirements, /platform-page-title">需求</);
   assert.match(requirements, /查看任务/);

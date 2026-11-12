@@ -8,9 +8,18 @@ from rest_framework import serializers
 from .authorship import AuthoredRecordSerializer
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
+from django.db.models import Q
 from .models import Defect, SavedReport, TestPlan, ReportConclusion
 from .serializers import DefectSerializer, PlanSerializer, plan_summary
-from .views import Conflict, QualityView, defect_queryset, plan_queryset, quality_report
+from .views import (
+    Conflict,
+    QualityView,
+    defect_queryset,
+    plan_queryset,
+    quality_report,
+    current_plans,
+    current_verifications,
+)
 
 
 class ReportInput(serializers.Serializer):
@@ -63,22 +72,61 @@ class ReportList(QualityView):
         plans = plan_queryset().filter(project=project)
         if plan_id:
             plans = plans.filter(pk=plan_id)
+        else:
+            plans = plans.filter(pk__in=current_plans(project).values("pk"))
         snapshots = PlanSerializer(plans, many=True).data
-        related = Defect.objects.filter(project=project)
+        related = Defect.objects.filter(project=project, archived_at__isnull=True)
         if plan_id:
             plan = plans.get()
             summary = plan_summary(plan)
-            related = related.filter(source_execution__item__plan=plan)
+            related = (
+                Defect.objects.filter(project=project)
+                .filter(Q(source_execution__item__plan=plan) | Q(verification_rounds__plan=plan))
+                .distinct()
+            )
         else:
-            summary = quality_report(project)["summary"]
+            overview = quality_report(project)
+            summary = overview["summary"]
+        manual_rows = []
+        if not plan_id:
+            for row in current_verifications(project).filter(mode="manual").prefetch_related("manual_results"):
+                actual = next(iter(row.manual_results.all()), None)
+                manual_rows.append(
+                    {
+                        "id": str(row.id),
+                        "defect_id": str(row.defect_id),
+                        "round_no": row.round_no,
+                        "fixed_build": row.fixed_build,
+                        "environment": row.environment,
+                        "steps": row.steps,
+                        "status": row.status,
+                        "latest_result": (
+                            {
+                                "id": str(actual.id),
+                                "result": actual.result,
+                                "actual_result": actual.actual_result,
+                                "evidence": actual.evidence,
+                                "step_results": actual.step_results,
+                                "created_at": actual.created_at,
+                                "created_by_id": str(actual.created_by_id) if actual.created_by_id else None,
+                            }
+                            if actual
+                            else None
+                        ),
+                    }
+                )
         snapshot = {
-            "schema_version": 1,
+            "schema_version": 2,
+            "scope": "historical_plan" if plan_id else "current_project",
             "project_name": project.name,
             "summary": summary,
+            "manual_verification": overview["manual_verification"] if not plan_id else None,
+            "manual_validations": manual_rows,
+            "manual_execution_count": overview["manual_execution_count"] if not plan_id else 0,
             "plans": snapshots,
             "defects": DefectSerializer(defect_queryset().filter(pk__in=related.values("id")), many=True).data,
             "definitions": (
-                "每条目取报告生成时当前测试轮次最新结果；快照保留用例版本、执行和缺陷状态。报告不代表发布准入。"
+                "指定计划报告保留该计划当前轮次历史结果；项目报告仅计当前有效计划，人工验证独立计轮。快照保留生成时的用例版本、执行和缺陷状态，不随后续变更改写，不代表发布准入。"
             ),
         }
         report = SavedReport.objects.create(
@@ -133,7 +181,17 @@ class ReportDownload(QualityView):
             "| --- | --- | --- | --- | --- | --- | --- | --- |",
             "| "
             + " | ".join(
-                str(summary.get(key, 0)) for key in ["total", "executed", "passed", "failed", "blocked", "inconclusive", "skipped", "pending"]
+                str(summary.get(key, 0))
+                for key in [
+                    "total",
+                    "executed",
+                    "passed",
+                    "failed",
+                    "blocked",
+                    "inconclusive",
+                    "skipped",
+                    "pending",
+                ]
             )
             + " |",
             "",
@@ -157,7 +215,26 @@ class ReportDownload(QualityView):
                 "此结论不代替发布准入检查。",
                 "",
             ]
-        results = {"passed": "通过", "failed": "失败", "blocked": "阻塞", "inconclusive": "无法判定", "skipped": "跳过"}
+        results = {
+            "passed": "通过",
+            "failed": "失败",
+            "blocked": "阻塞",
+            "inconclusive": "无法判定",
+            "skipped": "跳过",
+        }
+        manual = snapshot.get("manual_verification")
+        if manual is not None:
+            lines.extend(
+                [
+                    "## 人工验证（独立验证轮次）",
+                    "",
+                    f"当前轮次：{manual['total']} · 已实测：{manual['executed']} · "
+                    f"通过：{manual['passed']} · 未实测：{manual['pending']}",
+                    "",
+                    "人工验证不计入测试用例条目或用例通过率。",
+                    "",
+                ]
+            )
         for plan in snapshot["plans"]:
             lines.extend(
                 [
@@ -179,7 +256,9 @@ class ReportDownload(QualityView):
                             str(item["revision"]["version"]),
                             results.get(execution.get("result"), "未执行"),
                             cell(execution.get("actual_result")),
-                            {"recollection": "需要补采", "environment": "环境待处理", "other": "其他"}.get(execution.get("reason_category"), "—"),
+                            {"recollection": "需要补采", "environment": "环境待处理", "other": "其他"}.get(
+                                execution.get("reason_category"), "—"
+                            ),
                             cell(execution.get("next_action")),
                         ]
                     )
@@ -254,9 +333,12 @@ class ReportConclude(QualityView):
             raise Conflict()
         if data["result"] == "passed":
             summary = report.snapshot.get("summary", {})
+            manual = report.snapshot.get("manual_verification") or {}
             if (
-                not summary.get("total")
+                not (summary.get("total") or manual.get("total"))
                 or summary.get("passed") != summary.get("total")
+                or manual.get("passed", 0) != manual.get("total", 0)
+                or manual.get("accepted", 0) != manual.get("total", 0)
                 or any(summary.get(key) for key in ["pending", "failed", "blocked", "inconclusive", "skipped"])
                 or any(
                     plan.get("managed") and (plan.get("status") != "completed" or not plan.get("reviewed_at"))

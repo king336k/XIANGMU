@@ -31,9 +31,10 @@ class SemanticIndexView(QualityView):
         config = semantic_provider.configuration(project.workspace_id)
         info = semantic_provider.public_status(config)
         job = SemanticProjectIndex.objects.filter(project=project, fingerprint=config["fingerprint"]).first()
-        count = SemanticRevisionIndex.objects.filter(
+        cached = SemanticRevisionIndex.objects.filter(
             revision__in=published(project), fingerprint=config["fingerprint"]
-        ).count()
+        ).select_related("revision")
+        count = sum(bool(row.vectors) and row.content_hash == semantic.content_hash(row.revision) for row in cached)
         return Response(
             {
                 **info,

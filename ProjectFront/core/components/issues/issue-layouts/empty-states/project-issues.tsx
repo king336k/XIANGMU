@@ -30,10 +30,9 @@ export const ProjectEmptyState = observer(function ProjectEmptyState() {
   // derived values
   const projectWorkItemFilter = useWorkItemFilterInstance(EIssuesStoreType.PROJECT, projectId);
 
-  const canPerformEmptyStateActions = canArrangeWork(projectId) && allowPermissions(
-    [EUserProjectRoles.ADMIN, EUserProjectRoles.MEMBER],
-    EUserPermissionsLevel.PROJECT
-  );
+  const canPerformEmptyStateActions =
+    canArrangeWork(projectId) &&
+    allowPermissions([EUserProjectRoles.ADMIN, EUserProjectRoles.MEMBER], EUserPermissionsLevel.PROJECT);
 
   return (
     <div className="relative h-full w-full overflow-y-auto">
@@ -54,10 +53,10 @@ export const ProjectEmptyState = observer(function ProjectEmptyState() {
       ) : (
         <EmptyStateDetailed
           assetKey="work-item"
-          title={t("project_empty_state.work_items.title")}
+          title="还没有任务"
           actions={[
             {
-              label: t("project_empty_state.work_items.cta_primary"),
+              label: "新建任务",
               onClick: () => {
                 toggleCreateIssueModal(true, EIssuesStoreType.PROJECT);
               },

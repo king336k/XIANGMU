@@ -193,9 +193,9 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
 
         resources = resource_queries(self)
         total_modules = resources["total_modules"].filter(**date_filter).count()
-        total_intake = Issue.objects.filter(
-            issue_intake__isnull=False, **self.filters["base_filters"], **date_filter
-        ).count()
+        from .drilldown import overview_queries
+
+        total_intake = overview_queries(self)["total_intake"].filter(**date_filter).count()
         total_members = self.member_queryset().filter(**date_filter).count()
         total_pages = resources["total_pages"].filter(**date_filter).count()
         total_views = resources["total_views"].filter(**date_filter).count()

@@ -162,6 +162,9 @@ export type Context = {
 };
 export type Page<T> = { results: T[]; count: number; next: string | null; previous: string | null };
 export type Report = {
+  manual_verification?: Summary;
+  manual_execution_count?: number;
+  historical_plan_count?: number;
   summary: Summary;
   case_count: number;
   plan_count: number;

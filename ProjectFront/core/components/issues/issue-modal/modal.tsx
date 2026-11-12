@@ -6,7 +6,7 @@
 
 import React from "react";
 import { observer } from "mobx-react";
-import { useParams } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 // plane imports
 import type { EIssuesStoreType, TIssue } from "@plane/types";
 // local imports
@@ -38,6 +38,12 @@ export interface IssuesModalProps {
 export const CreateUpdateIssueModal = observer(function CreateUpdateIssueModal(props: IssuesModalProps) {
   // router params
   const { cycleId, moduleId } = useParams();
+  const pathname = usePathname();
+  const creatingTask =
+    !props.data?.id &&
+    !props.data?.is_epic &&
+    !props.isDraft &&
+    /^\/[^/]+\/(?:p|projects)\/[^/]+\/issues\/?$/.test(pathname);
   // derived values
   const dataForPreload = {
     ...props.data,
@@ -52,7 +58,13 @@ export const CreateUpdateIssueModal = observer(function CreateUpdateIssueModal(p
       dataForPreload={dataForPreload}
       allowedProjectIds={props.allowedProjectIds}
     >
-      <CreateUpdateIssueModalBase {...props} />
+      <CreateUpdateIssueModalBase
+        {...props}
+        modalTitle={props.modalTitle ?? (creatingTask ? "新建任务" : undefined)}
+        primaryButtonText={
+          props.primaryButtonText ?? (creatingTask ? { default: "新建任务", loading: "正在创建…" } : undefined)
+        }
+      />
     </IssueModalProvider>
   );
 });

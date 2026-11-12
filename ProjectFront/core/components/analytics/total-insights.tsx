@@ -98,6 +98,7 @@ const TotalInsights = observer(function TotalInsights({
           {errorMessage(error)}
         </p>
       )}
+      <p className="text-12 text-secondary">累计数量 · 全部时间</p>
       <div
         className={cn(
           "grid grid-cols-2 gap-3",

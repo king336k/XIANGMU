@@ -7,7 +7,7 @@
 import type { FC } from "react";
 import { useEffect, useState } from "react";
 import { observer } from "mobx-react";
-import { useParams } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 import type { UseFormRegister } from "react-hook-form";
 import { useForm } from "react-hook-form";
 // plane imports
@@ -31,6 +31,7 @@ export type TQuickAddIssueForm = {
 };
 
 export type TQuickAddIssueButton = {
+  label?: string;
   isEpic?: boolean;
   onClick: () => void;
 };
@@ -67,6 +68,8 @@ export const QuickAddIssueRoot = observer(function QuickAddIssueRoot(props: TQui
   const { t } = useTranslation();
   // router
   const { workspaceSlug, projectId } = useParams();
+  const pathname = usePathname();
+  const taskLabel = !isEpic && /^\/[^/]+\/(?:p|projects)\/[^/]+\/issues\/?$/.test(pathname) ? "新建任务" : undefined;
   // states
   const [isOpen, setIsOpen] = useState(isQuickAddOpen ?? false);
   // form info
@@ -159,7 +162,7 @@ export const QuickAddIssueRoot = observer(function QuickAddIssueRoot(props: TQui
         />
       ) : (
         <>
-          {QuickAddButton && <QuickAddButton isEpic={isEpic} onClick={() => handleIsOpen(true)} />}
+          {QuickAddButton && <QuickAddButton isEpic={isEpic} label={taskLabel} onClick={() => handleIsOpen(true)} />}
           {customQuickAddButton && <>{customQuickAddButton}</>}
           {!QuickAddButton && !customQuickAddButton && (
             <button
@@ -167,7 +170,7 @@ export const QuickAddIssueRoot = observer(function QuickAddIssueRoot(props: TQui
               onClick={() => handleIsOpen(true)}
             >
               <PlusIcon className="h-3.5 w-3.5 stroke-2" />
-              <span className="text-13 font-medium">{t(`${isEpic ? "epic.new" : "issue.new"}`)}</span>
+              <span className="text-13 font-medium">{taskLabel || t(`${isEpic ? "epic.new" : "issue.new"}`)}</span>
             </button>
           )}
         </>

@@ -40,8 +40,10 @@ export function DefectStatistics({
 }) {
   const query = new URLSearchParams(params);
   for (const key of ["page", "per_page", "tab", "panel", "layout", "saved_view"]) query.delete(key);
-  const { data, error } = useSWR(`${base}defect-statistics/?${query}`, (url: string) =>
-    qualityApi.read<DefectStatisticsData>(url)
+  const { data, error } = useSWR(
+    `${base}defect-statistics/?${query}`,
+    (url: string) => qualityApi.read<DefectStatisticsData>(url),
+    { refreshInterval: 15000, revalidateOnMount: true }
   );
   if (error)
     return (

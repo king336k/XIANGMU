@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from django.db import transaction
-from django.db.models import F, Prefetch, Q
+from django.db.models import F, Prefetch, Q, Exists, OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.exceptions import APIException, ValidationError
@@ -186,7 +186,10 @@ class CaseDetail(QualityView):
 def plan_queryset():
     executions = (
         TestExecution.objects.select_related("created_by", "item__revision", "item__plan")
-        .filter(Q(item__plan__managed=False) | Q(round_no=F("item__plan__round_no")))
+        .filter(
+            Q(item__plan__managed=False, item__plan__defect_verification__isnull=True)
+            | Q(round_no=F("item__plan__round_no"))
+        )
         .order_by("item_id", "-created_at", "-id")
         .distinct("item_id")
     )
@@ -200,7 +203,11 @@ def plan_queryset():
 
 class PlanList(QualityView):
     def get(self, request, **kwargs):
-        return self.listing(plan_queryset().filter(project=self.project()), PlanSerializer)
+        project = self.project()
+        qs = plan_queryset().filter(project=project)
+        if request.query_params.get("current_only") == "true":
+            qs = qs.filter(pk__in=current_plans(project).values("pk"))
+        return self.listing(qs, PlanSerializer)
 
     @transaction.atomic
     def post(self, request, **kwargs):
@@ -251,9 +258,20 @@ class PlanDetail(QualityView):
 
 class ExecutionList(QualityView):
     def get(self, request, pk=None, **kwargs):
-        qs = TestExecution.objects.filter(project=self.project()).select_related(
-            "created_by", "item__revision", "item__plan"
-        )
+        project = self.project()
+        qs = TestExecution.objects.filter(project=project).select_related("created_by", "item__revision", "item__plan")
+        if request.query_params.get("current_only") == "true":
+            latest = (
+                TestExecution.objects.filter(project=project, item__plan__in=current_plans(project))
+                .filter(
+                    Q(item__plan__managed=False, item__plan__defect_verification__isnull=True)
+                    | Q(round_no=F("item__plan__round_no"))
+                )
+                .order_by("item_id", "-created_at", "-id")
+                .distinct("item_id")
+                .values("pk")
+            )
+            qs = qs.filter(pk__in=Subquery(latest))
         if pk:
             self.obj(PlanItem, pk)
             qs = qs.filter(item_id=pk)
@@ -678,7 +696,7 @@ class QualityReport(QualityView):
 
 
 def quality_report(project):
-    plans = list(plan_queryset().filter(project=project))
+    plans = list(plan_queryset().filter(pk__in=current_plans(project).values("pk")))
     totals = {
         key: 0 for key in ["passed", "failed", "blocked", "inconclusive", "skipped", "pending", "total", "executed"]
     }
@@ -688,17 +706,83 @@ def quality_report(project):
             totals[key] += summary[key]
     totals["execution_rate"] = round(totals["executed"] * 100 / totals["total"], 1) if totals["total"] else 0
     totals["pass_rate"] = round(totals["passed"] * 100 / totals["executed"], 1) if totals["executed"] else 0
-    cases = TestCase.objects.filter(project=project)
+    cases = TestCase.objects.filter(project=project, archived_at__isnull=True, trashed_at__isnull=True)
+    from .models import DefectVerificationResult
+
     return {
         "summary": totals,
+        "manual_verification": manual_verification_summary(project),
+        "manual_execution_count": DefectVerificationResult.objects.filter(project=project).count(),
         "case_count": cases.count(),
         "plan_count": len(plans),
+        "historical_plan_count": TestPlan.objects.filter(project=project).count(),
         "execution_count": TestExecution.objects.filter(project=project).count(),
-        "open_defects": Defect.objects.filter(project=project).exclude(status="closed").count(),
+        "open_defects": Defect.objects.filter(project=project, archived_at__isnull=True)
+        .exclude(status="closed")
+        .count(),
         "requirement_linked_cases": cases.filter(requirement__isnull=False).count(),
         "definitions": {
-            "scope": "所有测试计划条目，每条取最新一次执行；同一用例在不同计划分别计数",
+            "scope": (
+                "当前有效、未归档且未取消的计划条目，每条只取本轮最新执行；"
+                "缺陷验证仅计最新且修复版本、修复时间、用例版本仍有效的轮次。人工验证独立计轮，不计入用例条目。"
+            ),
+            "history": (
+                "execution_count保留全部历史用例执行，manual_execution_count保留全部人工实测记录，"
+                "historical_plan_count保留全部历史计划；归档与退回不会删除历史。"
+            ),
+            "manual_verification": "当前有效人工验证轮次，每轮取最新实际结果；total单位为验证轮次，不是用例数。",
             "execution_rate": "已执行条目 / 全部条目（阻塞、无法判定、跳过计为已执行）",
             "pass_rate": "通过条目 / 已执行条目（阻塞、无法判定、跳过计入分母）",
         },
+    }
+
+
+def current_verifications(project):
+    from .models import DefectVerification
+
+    latest_round = (
+        DefectVerification.objects.filter(defect_id=OuterRef("defect_id")).order_by("-round_no").values("round_no")[:1]
+    )
+    stale_cases = PlanItem.objects.filter(plan_id=OuterRef("plan_id")).exclude(revision__version=F("case__version"))
+    return (
+        DefectVerification.objects.filter(project=project)
+        .annotate(latest_round=Subquery(latest_round), stale_cases=Exists(stale_cases))
+        .filter(
+            round_no=F("latest_round"),
+            status__in=["testing", "review", "accepted"],
+            defect__archived_at__isnull=True,
+            defect__status__in=["resolved", "closed"],
+            fixed_build=F("defect__fixed_build"),
+            defect__resolved_at__isnull=False,
+            stale_cases=False,
+        )
+        .filter(Q(resolved_at=F("defect__resolved_at")) | Q(resolved_at__isnull=True))
+        .filter(Q(mode="manual") | Q(plan__build=F("fixed_build"), plan__round_no=F("round_no")))
+    )
+
+
+def current_plans(project):
+    return (
+        TestPlan.objects.filter(project=project, archived_at__isnull=True)
+        .exclude(status="cancelled")
+        .filter(Q(defect_verification__isnull=True) | Q(defect_verification__in=current_verifications(project)))
+    )
+
+
+def manual_verification_summary(project):
+    counts = {key: 0 for key in ["passed", "failed", "blocked", "inconclusive", "skipped", "pending"]}
+    accepted = 0
+    for row in current_verifications(project).filter(mode="manual").prefetch_related("manual_results"):
+        execution = next(iter(row.manual_results.all()), None)
+        counts[execution.result if execution else "pending"] += 1
+        accepted += int(row.status == "accepted")
+    total = sum(counts.values())
+    executed = total - counts["pending"]
+    return {
+        **counts,
+        "total": total,
+        "executed": executed,
+        "accepted": accepted,
+        "execution_rate": round(executed * 100 / total, 1) if total else 0,
+        "pass_rate": round(counts["passed"] * 100 / executed, 1) if executed else 0,
     }

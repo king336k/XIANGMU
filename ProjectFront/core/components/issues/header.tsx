@@ -136,8 +136,7 @@ export const IssuesHeader = observer(function IssuesHeader() {
             }}
             data-ph-element={WORK_ITEM_TRACKER_ELEMENTS.HEADER_ADD_BUTTON.WORK_ITEMS}
           >
-            <div className="block sm:hidden">任务</div>
-            <div className="hidden sm:block">新增任务</div>
+            新建任务
           </Button>
         )}
       </Header.RightItem>

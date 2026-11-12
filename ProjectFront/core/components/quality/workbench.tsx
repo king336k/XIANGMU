@@ -113,7 +113,10 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
     data: report,
     error: reportError,
     mutate: refreshReport,
-  } = useSWR(tabAllowed ? `${base}report/` : null, (url: string) => qualityApi.read<Report>(url));
+  } = useSWR(tabAllowed ? `${base}report/` : null, (url: string) => qualityApi.read<Report>(url), {
+    refreshInterval: 15000,
+    revalidateOnMount: true,
+  });
   const [form, setForm] = useState<"case" | "plan" | "defect" | "source" | "import" | "task-package" | null>(null);
   const [caseRead, setCaseRead] = useState<{ value: TestCase; history: boolean }>();
   const [selectedCases, setSelectedCases] = useState<TestCase[]>([]);
@@ -159,8 +162,8 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
     await mutateCache(
       (key) =>
         typeof key === "string" &&
-        ["defects/", "defect-statistics/", "verification-results/", "record-progress/"].some((path) =>
-          key.startsWith(`${base}${path}`)
+        ["defects/", "defect-statistics/", "verification-results/", "record-progress/", "project-report/"].some(
+          (path) => key.startsWith(`${base}${path}`)
         )
     );
     await mutate();
@@ -773,10 +776,14 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
                   {tab === "overview" && report && (
                     <QualitySummary
                       report={report}
-                      onNavigate={(nextTab, result) => {
+                      onNavigate={(nextTab, result, currentOnly) => {
                         if (nextTab === "defects") window.location.assign(`${projectUrl}/defects/?view=unclosed`);
                         else {
-                          setParams({ tab: nextTab, ...(result ? { result } : {}) });
+                          setParams({
+                            tab: nextTab,
+                            ...(result ? { result } : {}),
+                            ...(currentOnly ? { current_only: "true" } : {}),
+                          });
                           setPlan(null);
                         }
                       }}

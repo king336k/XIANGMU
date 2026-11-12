@@ -9,8 +9,18 @@ from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from plane.db.models import Issue, IssueActivity, IssueAssignee, ProjectMember, WorkspaceMember, State
-from .models import BusinessRole, Defect, DefectEvent, TestPlan, TestExecution, PlanEvent, PlanItem, Requirement
-from .views import QualityView
+from .models import (
+    BusinessRole,
+    Defect,
+    DefectEvent,
+    TestPlan,
+    TestExecution,
+    PlanEvent,
+    PlanItem,
+    Requirement,
+    DefectVerificationResult,
+)
+from .views import QualityView, current_plans
 from .permissions import ROLE_NAMES
 
 
@@ -30,6 +40,7 @@ class PeriodInput(serializers.Serializer):
             "defects_closed",
             "defects_reopened",
             "test_executions",
+            "manual_executions",
             "plans_confirmed",
             "workload",
             "current_work",
@@ -83,8 +94,9 @@ class ProjectPeriodReport(QualityView):
         window = {"created_at__gte": start, "created_at__lt": end}
         project = self.project()
         work = Issue.issue_objects.filter(project=project)
-        defects = Defect.objects.filter(project=project, archived_at__isnull=True)
-        plans = TestPlan.objects.filter(project=project, archived_at__isnull=True)
+        all_defects = Defect.objects.filter(project=project)
+        defects = all_defects.filter(archived_at__isnull=True)
+        plans = TestPlan.objects.filter(project=project)
         terminal_requirements = Requirement.objects.filter(
             project=project, status__in=["completed", "cancelled", "archived"]
         ).values("issue_id")
@@ -102,17 +114,24 @@ class ProjectPeriodReport(QualityView):
             .annotate(
                 has_execution=Exists(
                     TestExecution.objects.filter(item_id=OuterRef("pk")).filter(
-                        Q(item__plan__managed=False) | Q(round_no=OuterRef("plan__round_no"))
+                        Q(item__plan__managed=False, item__plan__defect_verification__isnull=True)
+                        | Q(round_no=OuterRef("plan__round_no"))
                     )
                 )
             )
             .filter(has_execution=False)
         )
-        unfinished_plans = plans.filter(
-            Q(managed=True) & ~Q(status__in=["completed", "cancelled", "failed"])
-            | Q(managed=False) & (Q(pk__in=pending_items.values("plan_id")) | Q(items__isnull=True))
-        ).distinct()
-        executions = TestExecution.objects.filter(project=project, item__plan__archived_at__isnull=True)
+        unfinished_plans = (
+            current_plans(project)
+            .exclude(status__in=["completed", "cancelled", "failed"])
+            .filter(
+                Q(managed=True) & ~Q(status__in=["completed", "cancelled", "failed"])
+                | Q(defect_verification__status__in=["testing", "review"])
+                | Q(managed=False) & (Q(pk__in=pending_items.values("plan_id")) | Q(items__isnull=True))
+            )
+            .distinct()
+        )
+        executions = TestExecution.objects.filter(project=project)
         # Activities are append-only. Fallback completion timestamps cover direct native writes without activities.
         completed_states = State.objects.filter(project=project, group="completed").values("id")
         completed_activity = IssueActivity.objects.filter(
@@ -126,23 +145,33 @@ class ProjectPeriodReport(QualityView):
             Q(pk__in=completed_activity.values("issue_id")) | Q(completed_at__gte=start, completed_at__lt=end)
         )
         closure = DefectEvent.objects.filter(
-            project=project, defect_id__in=defects.values("id"), status="closed", **window
+            project=project, defect_id__in=all_defects.values("id"), status="closed", **window
         ).exclude(previous_status="closed")
         reopened = DefectEvent.objects.filter(
-            project=project, defect_id__in=defects.values("id"), previous_status="closed", **window
+            project=project, defect_id__in=all_defects.values("id"), previous_status="closed", **window
         ).exclude(status="closed")
         confirmed = PlanEvent.objects.filter(
             project=project, plan_id__in=plans.values("id"), action="approve", status="completed", **window
         )
         period_executions = executions.filter(**window)
+        manual_executions = DefectVerificationResult.objects.filter(project=project, **window)
+        confirmed_plans = plans.filter(
+            Q(pk__in=confirmed.values("plan_id"))
+            | Q(
+                defect_verification__workflow_events__action="accept",
+                defect_verification__workflow_events__created_at__gte=start,
+                defect_verification__workflow_events__created_at__lt=end,
+            )
+        ).distinct()
         detail_queries = {
             "work_created": work.filter(**window),
             "work_completed": completed_work,
-            "defects_created": defects.filter(**window),
-            "defects_closed": defects.filter(pk__in=closure.values("defect_id")),
-            "defects_reopened": defects.filter(pk__in=reopened.values("defect_id")),
+            "defects_created": all_defects.filter(**window),
+            "defects_closed": all_defects.filter(pk__in=closure.values("defect_id")),
+            "defects_reopened": all_defects.filter(pk__in=reopened.values("defect_id")),
             "test_executions": period_executions,
-            "plans_confirmed": plans.filter(pk__in=confirmed.values("plan_id")),
+            "manual_executions": manual_executions,
+            "plans_confirmed": confirmed_plans,
         }
         current_queries = {
             "current_work": current_work,
@@ -165,11 +194,15 @@ class ProjectPeriodReport(QualityView):
                 qs = (
                     qs.filter(Q(state__group="backlog") | Q(state__isnull=True))
                     if resource == "work" and status == "backlog"
-                    else qs.filter(managed=False)
-                    if resource == "plans" and status == "unexecuted"
-                    else qs.filter(managed=True, status=status)
-                    if resource == "plans"
-                    else qs.filter(**{"state__group" if resource == "work" else "status": status})
+                    else (
+                        qs.filter(managed=False, defect_verification__isnull=True)
+                        if resource == "plans" and status == "unexecuted"
+                        else (
+                            qs.filter(Q(managed=True) | Q(defect_verification__isnull=False), status=status)
+                            if resource == "plans"
+                            else qs.filter(**{"state__group" if resource == "work" else "status": status})
+                        )
+                    )
                 )
                 assignee = data["assignee_id"]
                 field = "assignees" if resource == "work" else "assignee"
@@ -192,7 +225,7 @@ class ProjectPeriodReport(QualityView):
                 qs = qs.distinct()
             else:
                 qs = {**detail_queries, **current_queries}[kind]
-                if kind == "test_executions" and data.get("result"):
+                if kind in {"test_executions", "manual_executions"} and data.get("result"):
                     qs = qs.filter(result=data["result"])
                 kind = {
                     "current_work": "work_current",
@@ -217,6 +250,17 @@ class ProjectPeriodReport(QualityView):
                     }
                     for row in qs.select_related("item__revision")[offset : offset + data["per_page"]]
                 ]
+            elif kind == "manual_executions":
+                records = [
+                    {
+                        "id": str(row.id),
+                        "title": row.verification.defect.title,
+                        "result": row.result,
+                        "path": f"defects?defect={row.verification.defect_id}",
+                        "kind": "人工实测",
+                    }
+                    for row in qs.select_related("verification__defect")[offset : offset + data["per_page"]]
+                ]
             elif kind == "plans_confirmed":
                 records = [
                     {
@@ -229,7 +273,12 @@ class ProjectPeriodReport(QualityView):
                 ]
             else:
                 records = [
-                    {"id": str(row.id), "title": row.title, "path": f"defects?defect={row.id}", "kind": "缺陷"}
+                    {
+                        "id": str(row.id),
+                        "title": row.title,
+                        "path": f"defects?defect={row.id}",
+                        "kind": "缺陷",
+                    }
                     for row in qs[offset : offset + data["per_page"]]
                 ]
             return Response(
@@ -292,10 +341,14 @@ class ProjectPeriodReport(QualityView):
         ]:
             for row in (
                 qs.order_by()
-                .values("assignee_id", "status", *(["managed"] if key == "plans" else []))
+                .values("assignee_id", "status", *(["managed", "defect_verification"] if key == "plans" else []))
                 .annotate(count=Count("pk"))
             ):
-                status = "unexecuted" if key == "plans" and not row["managed"] else row["status"]
+                status = (
+                    "unexecuted"
+                    if key == "plans" and not row["managed"] and not row["defect_verification"]
+                    else row["status"]
+                )
                 add(row["assignee_id"], key, status, row["count"])
         for user, count in grouped(period_executions, "created_by_id").items():
             (by_user.get(user, unassigned if user == "unassigned" else previous))["period_executions"] += count
@@ -304,6 +357,7 @@ class ProjectPeriodReport(QualityView):
             ("work_created", detail_queries["work_created"], "created_at"),
             ("defects_created", detail_queries["defects_created"], "created_at"),
             ("test_executions", period_executions, "created_at"),
+            ("manual_executions", manual_executions, "created_at"),
         ]:
             for value in qs.values_list(field, flat=True):
                 key = value.astimezone(zone).date().isoformat()
@@ -320,12 +374,19 @@ class ProjectPeriodReport(QualityView):
                 "date": (data["start"] + timedelta(days=offset)).isoformat(),
                 **{
                     key: daily.get((data["start"] + timedelta(days=offset)).isoformat(), {}).get(key, 0)
-                    for key in ["work_created", "defects_created", "defects_closed", "test_executions"]
+                    for key in [
+                        "work_created",
+                        "defects_created",
+                        "defects_closed",
+                        "test_executions",
+                        "manual_executions",
+                    ]
                 },
             }
             for offset in range((data["end"] - data["start"]).days + 1)
         ]
         results = grouped(period_executions, "result")
+        manual_results = grouped(manual_executions, "result")
         return Response(
             {
                 "project": {"id": str(project.id), "name": project.name},
@@ -341,6 +402,10 @@ class ProjectPeriodReport(QualityView):
                 "test_results": {
                     key: results.get(key, 0) for key in ["passed", "failed", "blocked", "inconclusive", "skipped"]
                 },
+                "manual_results": {
+                    key: manual_results.get(key, 0)
+                    for key in ["passed", "failed", "blocked", "inconclusive", "skipped"]
+                },
                 "workload": list(by_user.values())
                 + (
                     [previous]
@@ -352,6 +417,7 @@ class ProjectPeriodReport(QualityView):
                 "definitions": [
                     "区间活动使用北京时间的起止日期，包含结束日；当前待办是实时存量，不受区间限制。",
                     "测试执行保留每次追加结果，不以最终一次覆盖历史；执行用例数按不同用例去重。",
+                    "人工实测独立按每次真实提交计数，不计入测试用例数；归档计划不会抹除区间历史执行。当前计划排除取消、已归档和过期缺陷验证轮次。",
                     "缺陷关闭和重开按状态变更记录按缺陷去重；未关缺陷采用当前状态，可能包含区间之前或之后创建的记录。",
                     "同一任务多人负责时，每个人的负载分别计数；人员负载之和不等于独立任务总量。",
                 ],

@@ -13,7 +13,10 @@ function harness(fail) {
   const mocks = {
     react: { ...React, useEffect() {}, useState: () => [true, () => {}] },
     "mobx-react": { observer: (fn) => fn },
-    "next/navigation": { useParams: () => ({ workspaceSlug: "w", projectId: "p" }) },
+    "next/navigation": {
+      useParams: () => ({ workspaceSlug: "w", projectId: "p" }),
+      usePathname: () => "/w/p/P/issues/",
+    },
     "react-hook-form": {
       useForm: () => ({
         reset: (value) => {

@@ -8,7 +8,6 @@ from plane.app.views.base import BaseAPIView
 from plane.db.models import ProjectMember, WorkspaceMember, Issue, IssueAssignee
 from .models import (
     BusinessNumber,
-    BusinessRole,
     ProjectRolePolicy,
     Defect,
     TestPlan,
@@ -19,7 +18,7 @@ from .models import (
     PlanItem,
     TestExecution,
 )
-from .permissions import ROLE_CAPABILITIES
+from .permissions import ROLE_CAPABILITIES, roles_for
 from .views import QualityPagination
 
 KINDS = {
@@ -57,10 +56,7 @@ def permitted_projects(user, workspace):
     strict = set(
         ProjectRolePolicy.objects.filter(project_id__in=memberships, enabled=True).values_list("project_id", flat=True)
     )
-    duties = {
-        r.project_id: {r.role, *(r.additional_roles or [])}
-        for r in BusinessRole.objects.filter(project_id__in=memberships, user=user)
-    }
+    duties = {project_id: roles_for(project_id, user.id) for project_id in strict}
 
     def allowed(capability):
         return [

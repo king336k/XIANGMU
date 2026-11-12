@@ -11,7 +11,7 @@ import { PlusIcon } from "@plane/propel/icons";
 import type { TQuickAddIssueButton } from "../root";
 
 export const SpreadsheetAddIssueButton = observer(function SpreadsheetAddIssueButton(props: TQuickAddIssueButton) {
-  const { onClick, isEpic = false } = props;
+  const { onClick, isEpic = false, label } = props;
   const { t } = useTranslation();
   return (
     <div className="flex items-center">
@@ -21,7 +21,7 @@ export const SpreadsheetAddIssueButton = observer(function SpreadsheetAddIssueBu
         onClick={onClick}
       >
         <PlusIcon className="h-3.5 w-3.5 stroke-2" />
-        <span className="text-13 font-medium">{isEpic ? t("epic.add.label") : t("issue.add.label")}</span>
+        <span className="text-13 font-medium">{isEpic ? t("epic.add.label") : label || t("issue.add.label")}</span>
       </button>
     </div>
   );
