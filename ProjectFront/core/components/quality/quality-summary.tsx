@@ -3,13 +3,30 @@ import { Distribution } from "./statistics-display";
 import { Badge } from "./shared";
 import { resultNames } from "./types";
 import type { Report } from "./types";
+import { useState } from "react";
+import { QualityOverviewDetails } from "./quality-overview-details";
+import type { OverviewRecord, OverviewSelection } from "./quality-overview-details";
 export function QualitySummary({
   report,
   onNavigate,
+  base,
+  onOpenRecord,
 }: {
   report: Report;
   onNavigate?: (tab: string, result?: string, currentOnly?: boolean) => void;
+  base?: string;
+  onOpenRecord?: (record: OverviewRecord) => void;
 }) {
+  const [selection, setSelection] = useState<OverviewSelection | null>(null);
+  const open = (kind: OverviewSelection["kind"], title: string, result?: string) => {
+    if (base) setSelection({ kind, title, result });
+    else
+      onNavigate?.(
+        kind === "manual" ? "verification-results" : kind === "pending" ? "plans" : kind,
+        result,
+        kind === "plans" || !!result
+      );
+  };
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -22,12 +39,12 @@ export function QualitySummary({
           <button
             type="button"
             key={label}
-            disabled={!onNavigate}
-            onClick={() => onNavigate?.(String(tab), undefined, tab === "plans")}
-            className="rounded-md border border-subtle bg-surface-1 p-4 text-left hover:bg-layer-1 disabled:cursor-default"
+            disabled={!base && !onNavigate}
+            onClick={() => open(tab as OverviewSelection["kind"], String(label))}
+            className="focus-visible:ring-accent-primary rounded-md border border-subtle bg-surface-1 p-4 text-left hover:bg-layer-1 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default"
           >
             <p className="text-12 text-secondary">{label}</p>
-            <p className="mt-2 text-24 font-semibold">{number}</p>
+            <p className="mt-2 text-24 font-semibold text-accent-primary">{number}</p>
           </button>
         ))}
       </div>
@@ -45,12 +62,12 @@ export function QualitySummary({
         <Distribution
           title="执行结果分布"
           onSelect={
-            onNavigate
+            base || onNavigate
               ? (value) =>
-                  onNavigate(
-                    value === "pending" ? "plans" : "executions",
-                    value === "pending" ? undefined : value,
-                    true
+                  open(
+                    value === "pending" ? "pending" : "executions",
+                    resultNames[value],
+                    value === "pending" ? undefined : value
                   )
               : undefined
           }
@@ -78,11 +95,7 @@ export function QualitySummary({
         <section className="space-y-3 rounded-md border border-subtle p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-14 font-semibold">人工验证</h2>
-            <button
-              type="button"
-              className="text-12 text-accent-primary"
-              onClick={() => onNavigate?.("verification-results")}
-            >
+            <button type="button" className="text-12 text-accent-primary" onClick={() => open("manual", "人工验证")}>
               查看缺陷验证
             </button>
           </div>
@@ -107,6 +120,14 @@ export function QualitySummary({
           <p key={text}>{text}</p>
         ))}
       </details>
+      {selection && base && (
+        <QualityOverviewDetails
+          base={base}
+          selection={selection}
+          onClose={() => setSelection(null)}
+          onOpenRecord={onOpenRecord}
+        />
+      )}
     </div>
   );
 }

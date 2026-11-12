@@ -96,6 +96,14 @@ def test_overview_separates_manual_current_round_from_history_and_active_library
     assert data["manual_execution_count"] == 3 and data["execution_count"] == 2
     assert data["plan_count"] == 1 and data["historical_plan_count"] == 2
     assert data["case_count"] == 1 and data["open_defects"] == 0
+    manual = session_client.get(base + "verification-results/?current_only=true&mode=manual")
+    assert manual.status_code == 200 and manual.data["count"] == data["manual_verification"]["total"] == 1
+    assert manual.data["results"][0]["current"]["id"] == str(current.id)
+    assert manual.data["results"][0]["current"]["summary"]["passed"] == data["manual_verification"]["passed"]
+    defect.fixed_build = "v3"
+    defect.save()
+    assert session_client.get(base + "verification-results/?current_only=true&mode=manual").data["count"] == 0
+    assert session_client.get(base + "verification-results/").data["count"] == 1
 
 
 def test_old_verification_plan_and_changed_build_do_not_inflate_current_pass(session_client, scope):

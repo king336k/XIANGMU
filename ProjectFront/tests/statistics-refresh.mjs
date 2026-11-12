@@ -16,16 +16,18 @@ test("缺陷报表打开时定时重新取数，DAQ新增或他人处理不会�
     ).outputText
   )(
     (id) =>
-      id === "swr"
-        ? {
-            default: (...args) => {
-              calls.push(args);
-              return {};
-            },
-          }
-        : id === "react/jsx-runtime"
-          ? require(id)
-          : new Proxy({}, { get: () => () => null }),
+      id === "react"
+        ? { useState: (value) => [value, () => {}] }
+        : id === "swr"
+          ? {
+              default: (...args) => {
+                calls.push(args);
+                return {};
+              },
+            }
+          : id === "react/jsx-runtime"
+            ? require(id)
+            : new Proxy({}, { get: () => () => null }),
     exports
   );
   exports.DefectStatistics({

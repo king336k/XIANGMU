@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { useState } from "react";
 import useSWR from "swr";
 import { Distribution, TrendChart } from "./statistics-display";
 import { qualityApi, errorMessage } from "./api";
 import { statusNames, severityNames } from "./types";
+import { DefectStatisticsDetails } from "./defect-statistics-details";
+import type { DefectStatisticSelection } from "./defect-statistics-details";
 import { defectReport } from "./defect-report";
 import type { DefectStatisticsData } from "./defect-report";
 
@@ -32,14 +35,16 @@ const severityColors: Record<string, string> = {
 export function DefectStatistics({
   base,
   params,
-  onFilter,
+  onOpenDefect,
 }: {
   base: string;
   params: URLSearchParams;
-  onFilter: (key: string, value: string) => void;
+  onFilter?: (key: string, value: string) => void;
+  onOpenDefect?: (id: string) => void;
 }) {
+  const [detail, setDetail] = useState<DefectStatisticSelection>();
   const query = new URLSearchParams(params);
-  for (const key of ["page", "per_page", "tab", "panel", "layout", "saved_view"]) query.delete(key);
+  for (const key of ["page", "per_page", "tab", "panel", "layout", "saved_view", "defect", "create"]) query.delete(key);
   const { data, error } = useSWR(
     `${base}defect-statistics/?${query}`,
     (url: string) => qualityApi.read<DefectStatisticsData>(url),
@@ -69,21 +74,55 @@ export function DefectStatistics({
         <span className="text-12 text-secondary">当前筛选范围 · 不受分页影响</span>
       </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[
-          { title: "全部缺陷", value: data.total, caption: "当前范围" },
-          { title: "未关闭", value: data.unclosed, caption: "含待处理、处理中和待回归" },
-          { title: "待回归", value: report.awaitingRegression, caption: "已修复，等待验证" },
-          {
-            title: "关闭率",
-            value: `${report.closedPercent}%`,
-            caption: `${report.closed} 条已关闭 / ${data.total} 条`,
-          },
-        ].map((item) => (
-          <div key={item.title} className="rounded-md border border-subtle px-4 py-3">
+        {(
+          [
+            { title: "全部缺陷", value: data.total, caption: "当前范围", filters: {}, count: data.total },
+            {
+              title: "未关闭",
+              value: data.unclosed,
+              caption: "含待处理、处理中和待回归",
+              filters: { exclude_status: "closed" },
+              count: data.unclosed,
+            },
+            {
+              title: "待回归",
+              value: report.awaitingRegression,
+              caption: "已修复，等待验证",
+              filters: { status: "resolved" },
+              count: report.awaitingRegression,
+            },
+            {
+              title: "关闭率",
+              value: `${report.closedPercent}%`,
+              caption: `${report.closed} 条已关闭 / ${data.total} 条`,
+              filters: { status: "closed" },
+              count: report.closed,
+            },
+          ] as {
+            title: string;
+            value: number | string;
+            caption: string;
+            filters: Record<string, string>;
+            count: number;
+          }[]
+        ).map((item) => (
+          <button
+            type="button"
+            key={item.title}
+            aria-label={`查看${item.title}明细`}
+            onClick={() =>
+              setDetail({
+                title: item.title === "关闭率" ? "已关闭" : item.title,
+                filters: item.filters,
+                expectedCount: item.count,
+              })
+            }
+            className="focus-visible:outline-accent-primary rounded-md border border-subtle px-4 py-3 text-left hover:bg-layer-1 focus-visible:outline-2"
+          >
             <p className="text-12 text-secondary">{item.title}</p>
-            <p className="my-2 text-24 font-semibold tabular-nums">{item.value}</p>
+            <p className="my-2 text-24 font-semibold text-accent-primary tabular-nums">{item.value}</p>
             <p className="text-11 text-tertiary">{item.caption}</p>
-          </div>
+          </button>
         ))}
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -95,7 +134,13 @@ export function DefectStatistics({
             count: row.count,
             color: statusColors[row.value],
           }))}
-          onSelect={(value) => onFilter("status", value)}
+          onSelect={(value) =>
+            setDetail({
+              title: statusNames[value],
+              filters: { status: value },
+              expectedCount: data.by_status.find((row) => row.value === value)?.count,
+            })
+          }
         />
         <Distribution
           title="严重程度"
@@ -105,7 +150,13 @@ export function DefectStatistics({
             count: data.by_severity.find((row) => row.value === value)?.count ?? 0,
             color: severityColors[value],
           }))}
-          onSelect={(value) => onFilter("severity", value)}
+          onSelect={(value) =>
+            setDetail({
+              title: severityNames[value],
+              filters: { severity: value },
+              expectedCount: data.by_severity.find((row) => row.value === value)?.count,
+            })
+          }
         />
       </div>
       {data.by_category && (
@@ -117,7 +168,13 @@ export function DefectStatistics({
             count: row.count,
             color: ["#4b86c6", "#379b76", "#d99a27", "#9673c5"][index % 4],
           }))}
-          onSelect={(value) => onFilter("category", value)}
+          onSelect={(value) =>
+            setDetail({
+              title: categoryNames[value] || "其他上报",
+              filters: { category: value },
+              expectedCount: data.by_category?.find((row) => row.value === value)?.count,
+            })
+          }
         />
       )}
       {!!data.stage_durations?.length && (
@@ -147,8 +204,24 @@ export function DefectStatistics({
         title={`近30天新增 · ${report.recentTotal} 条 · 按创建日期（北京时间）`}
         data={report.trend.map((row) => ({ key: row.date, date: row.date, name: row.name, count: row.count }))}
         series={[{ key: "count", label: "新增缺陷", color: "#4b86c6" }]}
+        onSelect={(date) =>
+          setDetail({
+            title: `${date} 新增`,
+            filters: { created_after: date, created_before: date },
+            expectedCount: report.trend.find((row) => row.date === date)?.count,
+          })
+        }
       />
-      <p className="text-11 text-tertiary">点击状态或严重程度，查看对应缺陷列表。</p>
+      <p className="text-11 text-tertiary">点击数字或图表，查看对应缺陷明细。</p>
+      {detail && (
+        <DefectStatisticsDetails
+          base={base}
+          params={params}
+          selection={detail}
+          onClose={() => setDetail(undefined)}
+          onOpenDefect={onOpenDefect}
+        />
+      )}
     </section>
   );
 }

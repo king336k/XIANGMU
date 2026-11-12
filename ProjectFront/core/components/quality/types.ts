@@ -34,6 +34,7 @@ export type Execution = {
   number?: number;
   id: string;
   item_id: string;
+  plan_id?: string;
   result: Result;
   actual_result: string;
   evidence: string;

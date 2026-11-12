@@ -23,7 +23,9 @@ export function PlanDetail({
   onBack,
   onSaved,
   onCopied,
+  backLabel = "返回测试计划",
 }: {
+  backLabel?: string;
   base: string;
   value: Plan;
   canWrite: boolean;
@@ -70,7 +72,7 @@ export function PlanDetail({
     <div className="space-y-5">
       <button onClick={onBack} className="flex items-center gap-2 text-13 text-secondary">
         <ArrowLeft className="size-4" />
-        返回测试计划
+        {backLabel}
       </button>
       <div>
         <p className="mb-2 text-12 text-secondary">

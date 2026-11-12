@@ -505,6 +505,16 @@ class DefectVerificationWorkflow(QualityView):
 class DefectVerificationResults(QualityView):
     def get(self, request, **kwargs):
         defects = Defect.objects.filter(project=self.project(), verification_rounds__isnull=False).distinct()
+        if request.query_params.get("current_only") == "true":
+            from .views import current_verifications
+
+            current = current_verifications(self.project())
+            mode = request.query_params.get("mode")
+            if mode:
+                if mode not in {"manual", "cases"}:
+                    raise ValidationError({"mode": "请选择人工或用例验证。"})
+                current = current.filter(mode=mode)
+            defects = defects.filter(pk__in=current.values("defect_id"))
         search = request.query_params.get("search", "").strip()
         if search:
             identifiers = BusinessNumber.objects.filter(

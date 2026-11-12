@@ -115,6 +115,7 @@ class RevisionSerializer(serializers.ModelSerializer):
 
 
 class ExecutionSerializer(AuthoredRecordSerializer):
+    plan_id = serializers.UUIDField(source="item.plan_id", read_only=True)
     executor = serializers.CharField(source="created_by.display_name", default="")
     case_title = serializers.CharField(source="item.revision.title", read_only=True)
     case_id = serializers.UUIDField(source="item.case_id", read_only=True)
@@ -128,6 +129,7 @@ class ExecutionSerializer(AuthoredRecordSerializer):
         fields = [
             "id",
             "item_id",
+            "plan_id",
             "request_id",
             "result",
             "actual_result",

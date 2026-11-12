@@ -47,6 +47,8 @@ import { CaseList, PlanList, ExecutionList, DefectList } from "./record-lists";
 import { AssetsPanel } from "./assets-panel";
 import type { Suite, Release } from "./assets-panel";
 import { QualitySummary } from "./quality-summary";
+import { QualityRecordPeek } from "./quality-record-peek";
+import type { OverviewRecord } from "./quality-overview-details";
 import type { Context, Defect, Execution, Page, Plan, Report, TestCase } from "./types";
 
 const tabs = [
@@ -161,10 +163,11 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
   const saved = async () => {
     await mutateCache(
       (key) =>
-        typeof key === "string" &&
-        ["defects/", "defect-statistics/", "verification-results/", "record-progress/", "project-report/"].some(
-          (path) => key.startsWith(`${base}${path}`)
-        )
+        (Array.isArray(key) && key[0] === "quality-overview-details" && key[1] === base) ||
+        (typeof key === "string" &&
+          ["defects/", "defect-statistics/", "verification-results/", "record-progress/", "project-report/"].some(
+            (path) => key.startsWith(`${base}${path}`)
+          ))
     );
     await mutate();
     await refreshReport();
@@ -249,6 +252,7 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
     };
   });
   const present = ["defects", "plans", "executions", "cases"].includes(tab) && (tab === "defects" || layout !== "list");
+  const [overviewRecord, setOverviewRecord] = useState<OverviewRecord>();
   const [viewExecution, setViewExecution] = useState<Execution>();
   const openRecord = (id: string) => {
     const row = visible.find((value) => value.id === id);
@@ -562,12 +566,11 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
                     <DefectStatistics
                       base={base}
                       params={params}
-                      onFilter={(key, value) => {
+                      onOpenDefect={(id) => {
                         const next = new URLSearchParams(params);
-                        next.set(key, value);
-                        next.delete("panel");
-                        next.delete("page");
-                        setParams(next);
+                        next.set("panel", "statistics");
+                        next.set("defect", id);
+                        setParams(next, { preventScrollReset: true });
                       }}
                     />
                   )}
@@ -775,6 +778,8 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
                   {tab === "resources" && <FieldResourcesPanel base={base} context={context} />}
                   {tab === "overview" && report && (
                     <QualitySummary
+                      base={base}
+                      onOpenRecord={setOverviewRecord}
                       report={report}
                       onNavigate={(nextTab, result, currentOnly) => {
                         if (nextTab === "defects") window.location.assign(`${projectUrl}/defects/?view=unclosed`);
@@ -879,10 +884,20 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
             setDefectEntryMode(undefined);
             const next = new URLSearchParams(params);
             next.delete("defect");
-            setParams(next);
+            setParams(next, { preventScrollReset: true });
           }}
           onSaved={saved}
           projectUrl={projectUrl}
+        />
+      )}
+      {context && overviewRecord && (
+        <QualityRecordPeek
+          base={base}
+          context={context}
+          record={overviewRecord}
+          projectUrl={projectUrl}
+          onClose={() => setOverviewRecord(undefined)}
+          onSaved={saved}
         />
       )}
       {context && form === "source" && <SourceForm base={base} onClose={() => setForm(null)} onSaved={saved} />}

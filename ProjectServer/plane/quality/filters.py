@@ -88,8 +88,9 @@ def filter_records(queryset, params, user):
     numbered = resource in PREFIXES
     if queryset.model._meta.model_name == "defect" and params.get("category"):
         from .defect_categories import with_category, CATEGORIES
-        category=serializers.ChoiceField(choices=list(CATEGORIES)).run_validation(params["category"])
-        queryset=with_category(queryset).filter(defect_category=category)
+
+        category = serializers.ChoiceField(choices=list(CATEGORIES)).run_validation(params["category"])
+        queryset = with_category(queryset).filter(defect_category=category)
     spec = SPECS.get(queryset.model._meta.model_name)
     if spec is None:
         return queryset
@@ -163,6 +164,10 @@ def filter_records(queryset, params, user):
     from plane.utils.date_utils import china_date_filter
 
     filters.update(china_date_filter(dates.get("created_after"), dates.get("created_before")))
+    if queryset.model._meta.model_name == "defect" and params.get("exclude_status"):
+        raw_excluded = params.getlist("exclude_status") if hasattr(params, "getlist") else [params["exclude_status"]]
+        excluded = [choice("open in_progress resolved closed").run_validation(value) for value in raw_excluded]
+        queryset = queryset.exclude(status__in=excluded)
     if source_filters:
         generic = Q(**source_filters)
         daq = Q(daq_report__isnull=False)
