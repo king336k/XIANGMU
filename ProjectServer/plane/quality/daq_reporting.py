@@ -286,6 +286,19 @@ class DaqOwnReportDetail(ReportingView):
                 },
                 "source": receipt(link, self),
                 "timeline": report_timeline(defect),
+                "comments": [
+                    {
+                        "id": str(comment.id),
+                        "actor": (comment.created_by.display_name or comment.created_by.username)
+                        if comment.created_by_id
+                        else "系统",
+                        "content": comment.content,
+                        "created_at": comment.created_at,
+                    }
+                    for comment in defect.comments.filter(project_id=defect.project_id, visibility="public")
+                    .select_related("created_by")
+                    .order_by("created_at", "id")
+                ],
             }
         )
 

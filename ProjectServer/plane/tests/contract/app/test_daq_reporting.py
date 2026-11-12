@@ -8,7 +8,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from rest_framework.test import APIClient
 from plane.db.models import Project, ProjectMember, WorkspaceMember
-from plane.quality.models import BusinessRole, PlatformAccount, PlatformIdentity, PlatformProject, Defect, SourceLink
+from plane.quality.models import BusinessRole, PlatformIdentity, PlatformProject, Defect
 from plane.tests.contract.app.test_daq_incidents import signature
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
@@ -271,7 +271,6 @@ def test_report_scope_does_not_read_another_collectors_report_or_materials(repor
     base = "/api/quality-auth/daq-reports/"
     first = call(base, {**payload, "hubProjectId": str(destination.id)}, "POST")
     assert first.status_code == 201
-    from plane.db.models import User
 
     assert call(base + first.data["issueId"] + "/", actor=17).status_code in {403, 404}
     assert call(
@@ -539,7 +538,7 @@ def test_report_only_progress_returns_status_without_internal_materials_or_diagn
     (tmp_path / file.storage_key).write_bytes(raw)
     response = call(f"/api/quality-auth/daq-reports/{report_id}/")
     assert response.status_code == 200, response.content
-    assert set(response.data) == {"defect", "source", "timeline"}
+    assert set(response.data) == {"defect", "source", "timeline", "comments"}
     assert all(set(item) == {"id", "actor", "action", "created_at", "status"} for item in response.data["timeline"])
     assert set(response.data["defect"]) == {"id", "code", "title", "status", "created_at", "updated_at"}
     assert response.data["defect"]["status"] == "resolved"
@@ -647,3 +646,27 @@ def test_report_diagnostic_reads_only_materials_uploaded_by_its_reporter(reporti
     assert job.status == "completed", job.error_code
     assert {row["file_id"] for row in job.result["sources"]} == {str(files[0].id)}
     assert "internal-tech-material-sentinel" not in json.dumps(job.result)
+
+
+def test_report_only_detail_returns_public_replies_without_internal_notes_or_cross_actor_access(reporting):
+    from plane.quality.models import DefectComment
+
+    destination, user, payload, state = reporting
+    created = call("/api/quality-auth/daq-reports/", {**payload, "hubProjectId": str(destination.id)}, "POST")
+    defect = Defect.objects.get(pk=created.data["issueId"])
+    public = DefectComment.objects.create(
+        project=destination, defect=defect, created_by=user, visibility="public", content="已修复，请复查"
+    )
+    DefectComment.objects.create(
+        project=destination, defect=defect, created_by=user, visibility="internal", content="internal-reply-secret"
+    )
+    detail = call(f"/api/quality-auth/daq-reports/{defect.id}/")
+    assert detail.status_code == 200
+    assert detail.data["comments"] == [
+        {"id": str(public.id), "content": public.content, "actor": user.display_name, "created_at": public.created_at}
+    ]
+    assert b"internal-reply-secret" not in detail.content
+    assert call(f"/api/quality-auth/daq-reports/{defect.id}/", actor=99).status_code in {403, 404}
+    defect.status = "closed"
+    defect.save()
+    assert len(call(f"/api/quality-auth/daq-reports/{defect.id}/").data["comments"]) == 1

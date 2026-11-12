@@ -95,6 +95,7 @@ export type Plan = {
   assignee_name: string;
 };
 export type Defect = {
+  reporter?: { id: number; username: string };
   has_verification?: boolean;
   responsible_department?: string;
   component?: string;

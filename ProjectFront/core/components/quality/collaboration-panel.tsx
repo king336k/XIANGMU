@@ -128,6 +128,7 @@ export function CollaborationPanel({
         const specific = note.match(
           /^(验证安排|验证方式|人工验证关闭|人工验证安排|记录人工实测|接收交接|拒绝交接|取消待确认交接|补充上报信息|提交验证结果|提交验证|经理验收通过|验收关闭|退回复测|退回补测|退回修复|重新打开|重开)([：，；（]|$)/
         )?.[1];
+        const daqCreated = !event.previous_status && value.source_kind === "daq";
         const changed = event.previous_status !== event.status;
         const unsuccessful =
           /^(退回|拒绝|重开)/.test(note) ||
@@ -136,15 +137,18 @@ export function CollaborationPanel({
         const passed = !unsuccessful && (event.status === "closed" || /验证通过|验收通过/.test(note));
         return {
           id: `event-${event.id}`,
-          actor: event.actor || "成员",
+          actor: daqCreated ? "" : event.actor || "成员",
           at: event.created_at,
-          action: changed
-            ? event.previous_status
-              ? `${statusNames[event.previous_status] || event.previous_status} → ${statusNames[event.status] || event.status}`
-              : "提交缺陷"
-            : specific || "更新缺陷",
-          content:
-            !changed && specific && note.startsWith(`${specific}：`)
+          action: daqCreated
+            ? "DAQ异常反馈上报"
+            : changed
+              ? event.previous_status
+                ? `${statusNames[event.previous_status] || event.previous_status} → ${statusNames[event.status] || event.status}`
+                : "提交缺陷"
+              : specific || "更新缺陷",
+          content: daqCreated
+            ? `采集员：${value.reporter?.username || value.created_by_name || "未记录"}\n问题：${value.title}`
+            : !changed && specific && note.startsWith(`${specific}：`)
               ? note.slice(specific.length + 1).trim()
               : note === "更新缺陷"
                 ? ""

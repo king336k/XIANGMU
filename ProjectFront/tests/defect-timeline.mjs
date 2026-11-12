@@ -10,7 +10,7 @@ const nodes = (tree) =>
     : Array.isArray(tree)
       ? tree.flatMap(nodes)
       : [tree, ...nodes(tree.props?.children)];
-function render(events, comments) {
+function render(events, comments, value = {}) {
   const exports = {};
   new Function(
     "require",
@@ -36,7 +36,7 @@ function render(events, comments) {
   }, exports);
   return exports.CollaborationPanel({
     base: "/q/",
-    value: { id: "d", events },
+    value: { id: "d", events, ...value },
     context: {},
     onChanged: async () => {},
   });
@@ -117,4 +117,32 @@ test("通过和返修都有语义色且保留动作文字", () => {
   const spans = nodes(tree).filter((n) => n.type === "span");
   assert.ok(spans.some((n) => n.props.className?.includes("text-success-primary")));
   assert.ok(spans.some((n) => n.props.className?.includes("text-danger-primary") && n.props.children === "退回修复"));
+});
+
+test("DAQ创建记录显示真实采集员和问题标题，不再展示服务账号和技术说明", () => {
+  const event = {
+    id: "created",
+    actor: "DAQ反馈服务",
+    previous_status: "",
+    status: "open",
+    created_at: "2026-11-12T07:10:00Z",
+    note: "DAQ启动或采集异常，等待真实诊断材料；事件不是采集Session。",
+  };
+  const tree = render([event], [], {
+    source_kind: "daq",
+    title: "数据异常",
+    reporter: { id: 228, username: "caiji2" },
+  });
+  const all = nodes(tree),
+    texts = all
+      .flatMap((n) => [n.props?.children].flat())
+      .filter((v) => typeof v === "string")
+      .join("");
+  assert.ok(texts.includes("DAQ异常反馈上报"));
+  assert.ok(texts.includes("采集员：caiji2"));
+  assert.ok(texts.includes("问题：数据异常"));
+  assert.ok(!texts.includes("DAQ反馈服务"));
+  assert.ok(!texts.includes("事件不是采集Session"));
+  const action = all.find((n) => n.props?.children === "DAQ异常反馈上报");
+  assert.match(action.props.className, /text-secondary/);
 });
