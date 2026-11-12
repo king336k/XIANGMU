@@ -19,6 +19,11 @@ const solution = {
   status: "draft",
   edit_version: 3,
   revisions: [revision],
+  current_revision_id: "r1",
+  current_revision_version: 2,
+  can_edit: true,
+  can_submit: true,
+  can_review: true,
   root_cause: "已记录根因",
 };
 function harness(is_administrator, status = "draft") {
@@ -50,9 +55,48 @@ function harness(is_administrator, status = "draft") {
       };
     if (id === "react/jsx-runtime") return require(id);
     if (id === "swr")
-      return { default: () => ({ data: { results: [{ ...solution, status }], count: 1 }, mutate: async () => {} }) };
+      return {
+        default: () => ({
+          data: {
+            results: [
+              {
+                ...solution,
+                status,
+                can_edit: status !== "review",
+                can_submit: status === "draft",
+                can_review: status === "review" && is_administrator,
+              },
+            ],
+            count: 1,
+            can_create: true,
+          },
+          mutate: async () => {},
+        }),
+      };
     if (id === "./use-collection-pagination")
       return { useCollectionPagination: () => ({ query: "page=1", paging: {} }) };
+    if (id === "./solution-data") {
+      const helper = {};
+      new Function(
+        "exports",
+        ts.transpileModule(
+          readFileSync(new URL("../core/components/quality/solution-data.ts", import.meta.url), "utf8"),
+          { compilerOptions: { module: ts.ModuleKind.CommonJS } }
+        ).outputText
+      )(helper);
+      return helper;
+    }
+    if (id === "./solution-card")
+      return {
+        SolutionCard: (props) => {
+          const b = [];
+          if (props.solution.can_submit)
+            b.push(require("react/jsx-runtime").jsx(stub("Button"), { children: "提交审核", onClick: props.onSubmit }));
+          if (props.solution.can_review)
+            b.push(require("react/jsx-runtime").jsx(stub("Button"), { children: "审核方案", onClick: props.onReview }));
+          return require("react/jsx-runtime").jsx("div", { children: b });
+        },
+      };
     if (id === "./types") return { can: (c, key) => c.capabilities[key] === true };
     if (id === "./api") return { qualityApi: { write: async (...args) => writes.push(args) }, errorMessage: String };
     return new Proxy({}, { get: (_, key) => (key === "fieldClass" ? "field" : stub(key)) });
@@ -77,7 +121,25 @@ function harness(is_administrator, status = "draft") {
     writes,
     render() {
       cursor = 0;
-      return exp.SolutionPanel({ base: "/q/", defectId: "d", context });
+      const tree = exp.SolutionPanel({ base: "/q/", defectId: "d", context });
+      function expand(t) {
+        if (!t || typeof t !== "object") return t;
+        if (Array.isArray(t)) return t.map(expand);
+        if (typeof t.type === "function" && t.props?.onSubmit && t.props?.solution) {
+          return require("react/jsx-runtime").jsx("div", {
+            children: [
+              t.props.solution.can_submit
+                ? require("react/jsx-runtime").jsx(stub("Button"), { children: "提交审核", onClick: t.props.onSubmit })
+                : null,
+              t.props.solution.can_review
+                ? require("react/jsx-runtime").jsx(stub("Button"), { children: "审核方案", onClick: t.props.onReview })
+                : null,
+            ],
+          });
+        }
+        return { ...t, props: { ...t.props, children: expand(t.props?.children) } };
+      }
+      return expand(tree);
     },
   };
 }
@@ -88,7 +150,7 @@ test("权威管理员送审时可选本人，不需要第二管理员，普通�
   for (const admin of [true, false]) {
     const h = harness(admin);
     let tree = h.render();
-    button(tree, "送审").props.onClick();
+    button(tree, "提交审核").props.onClick();
     tree = h.render();
     const input = nodes(tree).find(
       (n) => n.type === "input" && n.props.name === "reviewer_ids" && n.props.value === "actor"
@@ -99,8 +161,8 @@ test("权威管理员送审时可选本人，不需要第二管理员，普通�
 test("权威管理员能审核本人指定的当前方案版本，普通经理作者仍不显示自审", async () => {
   const h = harness(true, "review");
   let tree = h.render();
-  assert.ok(button(tree, "提交审核意见"));
-  button(tree, "提交审核意见").props.onClick();
+  assert.ok(button(tree, "审核方案"));
+  button(tree, "审核方案").props.onClick();
   tree = h.render();
   await nodes(tree)
     .find((n) => n.type === stub("Modal"))
@@ -113,13 +175,13 @@ test("权威管理员能审核本人指定的当前方案版本，普通经理�
   assert.deepEqual(h.writes, [
     ["/q/solutions/s/review/", { revision_id: "r1", decision: "approve", comment: "本人按材料核对通过" }],
   ]);
-  assert.equal(button(harness(false, "review").render(), "提交审核意见"), undefined);
+  assert.equal(button(harness(false, "review").render(), "审核方案"), undefined);
 });
 
 test("管理员送审仍保留版本号、显式审核人和通过人数，不改写真实actor", async () => {
   const h = harness(true);
   let tree = h.render();
-  button(tree, "送审").props.onClick();
+  button(tree, "提交审核").props.onClick();
   tree = h.render();
   const form = {
     getAll: (key) => (key === "reviewer_ids" ? ["actor"] : []),

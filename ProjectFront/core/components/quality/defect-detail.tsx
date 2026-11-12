@@ -225,7 +225,12 @@ export function DefectDetail({
               <DiagnosticsPanel base={base} defectId={value.id} context={context} />
             </div>
             <div hidden={activeTab !== "solution"} className="platform-detail-panel space-y-5">
-              <DefectTeam base={base} value={value} context={context} onChanged={onChanged} />
+              <details className="rounded-md border border-subtle px-4 py-3">
+                <summary className="cursor-pointer text-13 text-secondary">分工与交接</summary>
+                <div className="mt-3">
+                  <DefectTeam base={base} value={value} context={context} onChanged={onChanged} />
+                </div>
+              </details>
               <SolutionPanel base={base} defectId={value.id} context={context} />
             </div>
             <div hidden={activeTab !== "regression"} className="defect-page-verification">

@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from django.db import transaction
+from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from .authorship import AuthoredRecordSerializer
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from plane.db.models import ProjectMember
-from .permissions import strict, require_assignee, has_role, is_administrator
+from .permissions import strict, require_assignee, has_role, is_administrator, capable, writable_member
 from .models import Defect, Solution, SolutionRevision, SolutionReview
 from .views import Conflict, QualityView
 
@@ -34,13 +35,20 @@ class VoteSerializer(serializers.ModelSerializer):
         fields = ["id", "created_by_id", "actor", "decision", "comment", "created_at"]
 
 
-class SnapshotSerializer(serializers.ModelSerializer):
+class SnapshotSerializer(AuthoredRecordSerializer):
     reviews = VoteSerializer(many=True, read_only=True)
 
     class Meta:
         model = SolutionRevision
         fields = [
-            "id", "version", "snapshot", "reviewer_ids", "required_count", "reviews", "created_at", "created_by_id"
+            "id",
+            "version",
+            "snapshot",
+            "reviewer_ids",
+            "required_count",
+            "reviews",
+            "created_at",
+            "created_by_id",
         ]
 
 
@@ -48,6 +56,31 @@ class SolutionSerializer(AuthoredRecordSerializer):
     revisions = SnapshotSerializer(many=True, read_only=True)
     defect_title = serializers.CharField(source="defect.title", read_only=True)
     created_by_id = serializers.UUIDField(read_only=True, allow_null=True)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        view = self.context.get("view")
+        revision = current_revision(instance)
+        data.update(
+            {
+                "can_edit": bool(
+                    view
+                    and mutable_defect(instance.defect)
+                    and instance.status != "review"
+                    and author_allowed(view, instance)
+                ),
+                "can_submit": bool(
+                    view
+                    and mutable_defect(instance.defect)
+                    and instance.status == "draft"
+                    and author_allowed(view, instance)
+                ),
+                "can_review": bool(view and review_allowed(view, instance, revision)),
+                "current_revision_id": str(revision.id) if revision else None,
+                "current_revision_version": revision.version if revision else None,
+            }
+        )
+        return data
 
     class Meta:
         model = Solution
@@ -67,56 +100,135 @@ class SolutionSerializer(AuthoredRecordSerializer):
 
 
 def solutions():
-    return Solution.objects.select_related("defect").prefetch_related("revisions__reviews__created_by")
+    revisions = (
+        SolutionRevision.objects.select_related("created_by")
+        .order_by("-version", "-id")
+        .prefetch_related("reviews__created_by")
+    )
+    return Solution.objects.select_related("defect", "created_by").prefetch_related(
+        Prefetch("revisions", queryset=revisions)
+    )
+
+
+def current_revision(solution):
+    revision = max(solution.revisions.all(), key=lambda row: row.version, default=None)
+    return revision if revision and revision.version == solution.submitted_version else None
+
+
+def mutable_defect(defect):
+    return defect.status != "closed" and not defect.archived_at
+
+
+def writable(view, capability):
+    return writable_member(view.project_id, view.request.user.id, view.workspace_slug) and capable(
+        view.project_id, view.request.user.id, capability
+    )
+
+
+def create_allowed(view, defect):
+    return (
+        mutable_defect(defect)
+        and writable(view, "solution")
+        and (
+            not strict(view.project_id)
+            or defect.assignee_id == view.request.user.id
+            or has_role(view.project_id, view.request.user.id, "PLATFORM_ADMIN")
+        )
+    )
+
+
+def author_allowed(view, solution):
+    if not writable(view, "solution"):
+        return False
+    if strict(view.project_id):
+        return solution.defect.assignee_id == view.request.user.id or has_role(
+            view.project_id, view.request.user.id, "PLATFORM_ADMIN"
+        )
+    return (
+        solution.created_by_id == view.request.user.id
+        or ProjectMember.objects.filter(
+            project_id=view.project_id, member=view.request.user, is_active=True, role=20
+        ).exists()
+    )
+
+
+def review_allowed(view, solution, revision):
+    if (
+        not revision
+        or not mutable_defect(solution.defect)
+        or solution.status != "review"
+        or not writable(view, "review")
+    ):
+        return False
+    actor = str(view.request.user.id)
+    contributors = {
+        str(solution.created_by_id),
+        str(revision.created_by_id),
+        *map(str, revision.snapshot.get("contributor_ids", [])),
+    }
+    return (
+        actor in revision.reviewer_ids
+        and (actor not in contributors or is_administrator(view.request.user))
+        and not any(vote.created_by_id == view.request.user.id for vote in revision.reviews.all())
+    )
+
+
+def require_mutable(solution_or_defect):
+    defect = solution_or_defect.defect if isinstance(solution_or_defect, Solution) else solution_or_defect
+    if not mutable_defect(defect):
+        raise Conflict("缺陷已关闭或归档，请先恢复并重开后再处理方案。")
+
+
+def representation(view, solution):
+    return SolutionSerializer(solution, context={"view": view}).data
 
 
 class SolutionList(QualityView):
     def get(self, request, **kwargs):
         qs = solutions().filter(project=self.project())
+        defect = None
         if request.query_params.get("defect_id"):
             validator = serializers.UUIDField()
             defect_id = validator.run_validation(request.query_params["defect_id"])
+            defect = self.obj(Defect, defect_id)
             qs = qs.filter(defect_id=defect_id)
-        return self.listing(qs, SolutionSerializer)
+        response = self.listing(qs, lambda *args, **kwargs: SolutionSerializer(*args, context={"view": self}, **kwargs))
+        if defect:
+            response.data["can_create"] = create_allowed(self, defect)
+        return response
 
     @transaction.atomic
     def post(self, request, **kwargs):
         data = self.input(SolutionInput)
         data.pop("expected_version", None)
-        defect = self.obj(Defect, data.pop("defect_id"))
+        defect = get_object_or_404(
+            Defect.objects.select_for_update(), pk=data.pop("defect_id"), project_id=self.project_id
+        )
+        require_mutable(defect)
         if (
-            strict(self.project_id) and defect.assignee_id != request.user.id
+            strict(self.project_id)
+            and defect.assignee_id != request.user.id
             and not has_role(self.project_id, request.user.id, "PLATFORM_ADMIN")
         ):
             raise PermissionDenied("只有当前技术负责人可以维护方案。")
         value = Solution.objects.create(defect=defect, project=defect.project, created_by=request.user, **data)
-        return Response(SolutionSerializer(value).data, status=201)
+        return Response(representation(self, value), status=201)
 
 
 class SolutionDetail(QualityView):
     def get(self, request, pk, **kwargs):
-        return Response(SolutionSerializer(get_object_or_404(solutions(), pk=pk, project_id=self.project_id)).data)
+        return Response(representation(self, get_object_or_404(solutions(), pk=pk, project_id=self.project_id)))
 
     def author(self, solution):
-        if strict(self.project_id):
-            if (
-                solution.defect.assignee_id != self.request.user.id
-                and not has_role(self.project_id, self.request.user.id, "PLATFORM_ADMIN")
-            ):
-                raise PermissionDenied("只有当前技术负责人可以维护方案。")
-            return
-        if solution.created_by_id != self.request.user.id and (
-            strict(self.project_id)
-            or not ProjectMember.objects.filter(
-                project_id=self.project_id, member=self.request.user, is_active=True, role=20
-            ).exists()
-        ):
-            raise PermissionDenied("只有方案作者或获授权的管理员可以编辑与提交。")
+        if not author_allowed(self, solution):
+            raise PermissionDenied("只有当前技术负责人或获授权的方案作者、管理员可以编辑与提交。")
 
     @transaction.atomic
     def patch(self, request, pk, **kwargs):
         data = self.input(SolutionInput, partial=True)
         solution = get_object_or_404(Solution.objects.select_for_update(), pk=pk, project_id=self.project_id)
+        solution.defect = Defect.objects.select_for_update().get(pk=solution.defect_id)
+        require_mutable(solution)
         self.author(solution)
         if data.pop("expected_version", None) != solution.edit_version:
             raise Conflict()
@@ -133,7 +245,7 @@ class SolutionDetail(QualityView):
         from .notifications import defect_notice
 
         defect_notice(solution.defect, request.user, "技术方案状态已更新", [solution.created_by_id])
-        return Response(SolutionSerializer(solutions().get(pk=solution.pk)).data)
+        return Response(representation(self, solutions().get(pk=solution.pk)))
 
 
 class SubmitInput(serializers.Serializer):
@@ -147,15 +259,17 @@ class SolutionSubmit(SolutionDetail):
     def post(self, request, pk, **kwargs):
         data = self.input(SubmitInput)
         solution = get_object_or_404(Solution.objects.select_for_update(), pk=pk, project_id=self.project_id)
+        solution.defect = Defect.objects.select_for_update().get(pk=solution.defect_id)
+        require_mutable(solution)
         self.author(solution)
         if data["expected_version"] != solution.edit_version or solution.status != "draft":
             raise Conflict("当前方案不能重复送审，请刷新后确认状态。")
         ids = {str(value) for value in data["reviewer_ids"]}
         contributors = {str(solution.created_by_id), str(request.user.id), *map(str, solution.contributor_ids or [])}
         if (contributors & ids and not is_administrator(request.user)) or data["required_count"] > len(ids):
-            raise ValidationError({
-                "reviewer_ids": "审核人不能包含方案作者、本版修改人或提交人，且通过人数不能超过审核人数。"
-            })
+            raise ValidationError(
+                {"reviewer_ids": "审核人不能包含方案作者、本版修改人或提交人，且通过人数不能超过审核人数。"}
+            )
         members = ProjectMember.objects.filter(
             project_id=self.project_id, member_id__in=ids, is_active=True, role__gte=15, member__is_bot=False
         )
@@ -183,7 +297,7 @@ class SolutionSubmit(SolutionDetail):
         from .notifications import defect_notice
 
         defect_notice(solution.defect, request.user, "技术方案状态已更新", [solution.created_by_id])
-        return Response(SolutionSerializer(solutions().get(pk=solution.pk)).data)
+        return Response(representation(self, solutions().get(pk=solution.pk)))
 
 
 class ReviewInput(serializers.Serializer):
@@ -197,19 +311,25 @@ class SolutionDecision(QualityView):
     def post(self, request, pk, **kwargs):
         data = self.input(ReviewInput)
         solution = get_object_or_404(Solution.objects.select_for_update(), pk=pk, project_id=self.project_id)
+        solution.defect = Defect.objects.select_for_update().get(pk=solution.defect_id)
+        require_mutable(solution)
         revision = get_object_or_404(SolutionRevision, pk=data["revision_id"], solution=solution)
         contributors = {
-            str(solution.created_by_id), str(revision.created_by_id),
+            str(solution.created_by_id),
+            str(revision.created_by_id),
             *map(str, revision.snapshot.get("contributor_ids", [])),
         }
-        if str(request.user.id) not in revision.reviewer_ids or (str(request.user.id) in contributors and not is_administrator(request.user)):
+        if str(request.user.id) not in revision.reviewer_ids or (
+            str(request.user.id) in contributors and not is_administrator(request.user)
+        ):
             raise PermissionDenied("您不是该冻结版本的审核人。")
         existing = SolutionReview.objects.filter(revision=revision, created_by=request.user).first()
         if existing:
             if existing.decision != data["decision"] or existing.comment != data["comment"]:
                 raise Conflict("本版本已提交决定，不能改写审核历史。")
-            return Response(SolutionSerializer(solutions().get(pk=solution.pk)).data)
-        if solution.status != "review" or revision.version != solution.submitted_version:
+            return Response(representation(self, solutions().get(pk=solution.pk)))
+        current = current_revision(solution)
+        if solution.status != "review" or current is None or revision.id != current.id:
             raise Conflict("该版本已经完成审核或不再是当前送审版本。")
         if data["decision"] == "reject" and not data["comment"].strip():
             raise ValidationError({"comment": "退回方案必须说明原因。"})
@@ -229,4 +349,4 @@ class SolutionDecision(QualityView):
         from .notifications import defect_notice
 
         defect_notice(solution.defect, request.user, "技术方案状态已更新", [solution.created_by_id])
-        return Response(SolutionSerializer(solutions().get(pk=solution.pk)).data)
+        return Response(representation(self, solutions().get(pk=solution.pk)))
