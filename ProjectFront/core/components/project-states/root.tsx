@@ -14,7 +14,7 @@ import { EUserProjectRoles } from "@plane/types";
 import { ProjectStateLoader, GroupList } from "@/components/project-states";
 // hooks
 import { useProjectState } from "@/hooks/store/use-project-state";
-import { useUserPermissions } from "@/hooks/store/user";
+import { useSettingsPermissions } from "@/components/settings/use-settings-permissions";
 
 type TProjectState = {
   workspaceSlug: string;
@@ -33,7 +33,7 @@ export const ProjectStateRoot = observer(function ProjectStateRoot(props: TProje
     deleteState,
     markStateAsDefault,
   } = useProjectState();
-  const { allowPermissions } = useUserPermissions();
+  const { allowPermissions } = useSettingsPermissions();
   // derived values
   const isEditable = allowPermissions(
     [EUserProjectRoles.ADMIN],

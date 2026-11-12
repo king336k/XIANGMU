@@ -157,6 +157,6 @@ test("新账号首页便签与最近访问空态简洁且不误称全部为项�
   const recents = JSON.parse(repoFile("packages/i18n/src/locales/zh-CN/home.json")).home.recents;
   assert.equal(stickies["no-data"], "还没有便签");
   assert.equal(stickies.empty_state.simple, "还没有便签");
-  assert.equal(stickies.add, "添加便签");
+  assert.equal(stickies.add, "新建便签");
   assert.equal(recents.empty.default, "还没有最近访问记录");
 });

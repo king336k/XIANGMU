@@ -23,7 +23,7 @@ import {
 } from "@/components/labels";
 // hooks
 import { useLabel } from "@/hooks/store/use-label";
-import { useUserPermissions } from "@/hooks/store/user";
+import { useSettingsPermissions } from "@/components/settings/use-settings-permissions";
 // local imports
 import { SettingsHeading } from "../settings/heading";
 
@@ -40,7 +40,7 @@ export const ProjectSettingsLabelList = observer(function ProjectSettingsLabelLi
   const { t } = useTranslation();
   // store hooks
   const { projectLabels, updateLabelPosition, projectLabelsTree, createLabel, updateLabel } = useLabel();
-  const { allowPermissions } = useUserPermissions();
+  const { allowPermissions } = useSettingsPermissions();
   // derived values
   const isEditable = allowPermissions([EUserPermissions.ADMIN], EUserPermissionsLevel.PROJECT);
   const labelOperationsCallbacks: TLabelOperationsCallbacks = {
@@ -113,26 +113,30 @@ export const ProjectSettingsLabelList = observer(function ProjectSettingsLabelLi
               assetKey="label"
               assetClassName="size-20"
               title={t("settings_empty_state.labels.title")}
-              actions={[
-                {
-                  label: t("settings_empty_state.labels.cta_primary"),
-                  onClick: () => {
-                    newLabel();
-                  },
-                },
-              ]}
+              actions={
+                isEditable
+                  ? [
+                      {
+                        label: t("settings_empty_state.labels.cta_primary"),
+                        onClick: () => {
+                          newLabel();
+                        },
+                      },
+                    ]
+                  : []
+              }
               align="start"
               rootClassName="py-20"
             />
           ) : (
-            projectLabelsTree?.map((label, index) => {
-              if (label.children && label.children.length) {
+            projectLabelsTree?.map((rowLabel, index) => {
+              if (rowLabel.children && rowLabel.children.length) {
                 return (
                   <ProjectSettingLabelGroup
-                    key={label.id}
-                    label={label}
-                    labelChildren={label.children || []}
-                    handleLabelDelete={(label: IIssueLabel) => setSelectDeleteLabel(label)}
+                    key={rowLabel.id}
+                    label={rowLabel}
+                    labelChildren={rowLabel.children || []}
+                    handleLabelDelete={(selectedLabel: IIssueLabel) => setSelectDeleteLabel(selectedLabel)}
                     isUpdating={isUpdating}
                     setIsUpdating={setIsUpdating}
                     isLastChild={index === projectLabelsTree.length - 1}
@@ -144,8 +148,8 @@ export const ProjectSettingsLabelList = observer(function ProjectSettingsLabelLi
               }
               return (
                 <ProjectSettingLabelItem
-                  label={label}
-                  key={label.id}
+                  label={rowLabel}
+                  key={rowLabel.id}
                   setIsUpdating={setIsUpdating}
                   handleLabelDelete={(label) => setSelectDeleteLabel(label)}
                   isChild={false}

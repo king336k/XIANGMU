@@ -13,11 +13,11 @@ import { getWorkspaceActivePath, pathnameToAccessKey } from "@/components/settin
 import { SettingsMobileNav } from "@/components/settings/mobile/nav";
 // plane imports
 import { WORKSPACE_SETTINGS_ACCESS } from "@plane/constants";
-import type { EUserWorkspaceRoles } from "@plane/types";
+import { EUserPermissionsLevel } from "@plane/constants";
 // components
 import { WorkspaceSettingsSidebarRoot } from "@/components/settings/workspace/sidebar";
 // hooks
-import { useUserPermissions } from "@/hooks/store/user";
+import { useSettingsPermissions } from "@/components/settings/use-settings-permissions";
 
 import type { Route } from "./+types/layout";
 
@@ -25,16 +25,19 @@ const WorkspaceSettingLayout = observer(function WorkspaceSettingLayout({ params
   // router
   const { workspaceSlug } = params;
   // store hooks
-  const { workspaceUserInfo, getWorkspaceRoleByWorkspaceSlug } = useUserPermissions();
+  const { workspaceUserInfo, allowPermissions } = useSettingsPermissions();
   // next hooks
   const pathname = usePathname();
   // derived values
   const { accessKey } = pathnameToAccessKey(pathname);
-  const userWorkspaceRole = getWorkspaceRoleByWorkspaceSlug(workspaceSlug);
 
   let isAuthorized: boolean | string = false;
-  if (pathname && workspaceSlug && userWorkspaceRole) {
-    isAuthorized = WORKSPACE_SETTINGS_ACCESS[accessKey]?.includes(userWorkspaceRole as EUserWorkspaceRoles);
+  if (pathname && workspaceSlug) {
+    isAuthorized = allowPermissions(
+      WORKSPACE_SETTINGS_ACCESS[accessKey] || [],
+      EUserPermissionsLevel.WORKSPACE,
+      workspaceSlug
+    );
   }
 
   return (

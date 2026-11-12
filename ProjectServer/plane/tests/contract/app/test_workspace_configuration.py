@@ -7,7 +7,10 @@ from plane.license.models import Instance, InstanceAdmin, InstanceConfiguration
 from plane.quality.models import ProjectRolePolicy
 from plane.quality.permissions import roles_for, capable
 from plane.knowledge.assistant import provider_config
-from plane.tests.contract.app.test_member_scopes import scopes
+
+from plane.tests.contract.app import test_member_scopes
+
+scopes = test_member_scopes.scopes
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 
@@ -110,7 +113,7 @@ def test_workspace_grant_preserves_existing_project_admin(scopes):
     assert ProjectMember.objects.get(project=projects[0], member=target).role == 20
 
 
-def test_last_workspace_manager_cannot_be_revoked(scopes):
+def test_global_admin_can_remove_workspace_duty_without_losing_management(scopes):
     from plane.tests.contract.app.test_member_scopes import rows, save, change
 
     client, target, spaces, projects, actor = scopes
@@ -119,8 +122,9 @@ def test_last_workspace_manager_cannot_be_revoked(scopes):
     ProjectMember.objects.filter(project=projects[0], member=actor).update(is_active=False)
     scope = next(row for row in rows(client, target) if row["id"] == str(spaces[0].id))
     response = save(client, target, [change(scope, 15, [])])
-    assert response.status_code == 400, response.content
-    assert capable(projects[0].id, target.id, "review")
+    assert response.status_code == 200, response.content
+    assert not capable(projects[0].id, target.id, "review")
+    assert capable(projects[0].id, actor.id, "review")
 
 
 def test_project_scope_displays_inherited_roles_and_accepts_no_override(scopes):
@@ -136,7 +140,7 @@ def test_project_scope_displays_inherited_roles_and_accepts_no_override(scopes):
     assert capable(projects[0].id, target.id, "execute")
 
 
-def test_workspace_readonly_admin_cannot_change_model(workspace, create_user):
+def test_global_admin_can_change_model_despite_old_readonly_membership(workspace, create_user):
     instance = Instance.objects.create(
         instance_name="readonly", instance_id=str(uuid4()), current_version="test", last_checked_at=timezone.now()
     )
@@ -147,4 +151,4 @@ def test_workspace_readonly_admin_cannot_change_model(workspace, create_user):
     response = client.patch(
         f"/api/workspaces/{workspace.slug}/model-configuration/", {"model": "must-not-save"}, format="json"
     )
-    assert response.status_code == 403
+    assert response.status_code == 200

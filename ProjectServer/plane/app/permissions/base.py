@@ -40,7 +40,7 @@ def allow_permission(allowed_roles, level="PROJECT", creator=False, model=None):
             # Convert allowed_roles to their values if they are enum members
             allowed_role_values = [role.value if isinstance(role, ROLE) else role for role in allowed_roles]
 
-            if type(instance).__name__ in {"ProjectMemberViewSet", "WorkSpaceMemberViewSet", "WorkSpaceViewSet"}:
+            if ROLE.ADMIN.value in allowed_role_values:
                 from plane.quality.native_permissions import can_manage_native_access
 
                 if can_manage_native_access(request.user, kwargs.get("slug"), kwargs.get("project_id")):

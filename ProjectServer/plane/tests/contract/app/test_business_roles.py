@@ -234,9 +234,12 @@ def test_strict_business_roles_control_knowledge_review_without_native_role_resi
 @pytest.mark.parametrize(
     "restriction", ["project_removed", "workspace_removed", "project_guest", "workspace_guest", "archived"]
 )
-def test_admin_knowledge_review_respects_project_access(session_client, business, workspace, restriction):
+def test_former_admin_knowledge_review_respects_project_access(session_client, business, workspace, restriction):
     base, project, people, owner = business
     reviewer = people["PLATFORM_ADMIN"]
+    from plane.license.models import InstanceAdmin
+
+    InstanceAdmin.objects.filter(user=reviewer).delete()
     if restriction == "project_removed":
         ProjectMember.objects.filter(project=project, member=reviewer).update(is_active=False)
     elif restriction == "workspace_removed":
@@ -276,8 +279,12 @@ def test_role_menu_permissions_match_admin_api_and_project_boundaries(session_cl
     admin = role_name in {"PLATFORM_ADMIN", "PROJECT_MANAGER"}
     assert context.data["can_review_knowledge"] is admin
     assert context.data["can_configure_model"] is (role_name == "PLATFORM_ADMIN")
-    for resource in ["roles/", "integrations/"]:
+    for resource in ["roles/"]:
         assert session_client.get(base + resource).status_code == (200 if admin else 403)
+    assert session_client.get(base + "collaboration-settings/").status_code == 200
+    assert session_client.post(base + "collaboration-settings/", {}, format="json").status_code == (
+        400 if admin else 403
+    )
     for resource in ["cases/", "plans/", "defects/", "report/"]:
         assert session_client.get(base + resource).status_code == 200
     knowledge = base.replace("/quality/", "/knowledge/")
@@ -287,9 +294,11 @@ def test_role_menu_permissions_match_admin_api_and_project_boundaries(session_cl
     ).status_code == (200 if role_name == "PLATFORM_ADMIN" else 403)
     other = Project.objects.create(workspace=workspace, name="无项目权限", identifier="NOPERM")
     other_base = base.replace(str(project.id), str(other.id))
-    for resource in ["context/", "cases/", "plans/", "defects/", "report/", "roles/", "integrations/"]:
-        assert session_client.get(other_base + resource).status_code == 403
-    assert session_client.get(other_base.replace("/quality/", "/knowledge/") + "search/").status_code == 403
+    for resource in ["context/", "cases/", "plans/", "defects/", "report/", "roles/", "collaboration-settings/"]:
+        assert session_client.get(other_base + resource).status_code == (200 if role_name == "PLATFORM_ADMIN" else 403)
+    assert session_client.get(other_base.replace("/quality/", "/knowledge/") + "search/").status_code == (
+        200 if role_name == "PLATFORM_ADMIN" else 403
+    )
 
 
 def test_business_manager_cannot_disable_policy_or_grant_platform_authority(session_client, business):

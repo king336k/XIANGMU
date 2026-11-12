@@ -120,33 +120,23 @@ def test_managed_native_api_key_cannot_create_a_project(api_client, workspace):
     assert response.status_code == 403, response.content
 
 
-def test_source_user_can_later_join_native_project_without_a_data_project_mapping(
-    session_client, owner, workspace, mocker
-):
-    from plane.quality.models import PlatformAccount, PlatformIdentity
+def test_retired_source_identity_cannot_join_native_project(session_client, owner, workspace, mocker):
+    from plane.quality.models import PlatformAccount
 
-    user = User.objects.create(email="external-native@accounts.invalid", username="external-native")
+    project = Project.objects.create(workspace=workspace, name="本地账号准入", identifier="NATONLY")
+    person = User.objects.create(username="old-source", email="old-source@test.invalid")
     PlatformAccount.objects.create(
-        user=user, source_instance="authority", external_user_id=42, source_username="source-user"
+        user=person, source_instance="authority", external_user_id=42, source_username="old-source"
     )
-    mocker.patch(
-        "plane.quality.account_management.authority_config",
-        return_value={"service_token": "test-only", "configured_by": str(owner.id)},
-    )
-    mocker.patch(
-        "plane.quality.account_management.authority_request", return_value={"id": 42, "active": True, "role": "Manager"}
-    )
-    project = Project.objects.create(workspace=workspace, name="本平台独立项目", identifier="NATIVEJOIN")
-    ProjectMember.objects.create(project=project, member=owner, role=20)
+    outbound = mocker.patch("plane.quality.platform.fetch", side_effect=AssertionError("no source lookup"))
     response = session_client.post(
         f"/api/quality-auth/accounts/{workspace.slug}/projects/{project.id}/members/",
-        {"user_id": str(user.id), "role": "REGRESSION_TESTER"},
+        {"user_id": str(person.id), "role": "TECHNICIAN"},
         format="json",
     )
-    assert response.status_code == 200, response.content
-    assert BusinessRole.objects.get(project=project, user=user).role == "REGRESSION_TESTER"
-    assert ProjectMember.objects.filter(project=project, member=user, is_active=True).exists()
-    assert not PlatformIdentity.objects.filter(project=project, user=user).exists()
+    assert response.status_code in {400, 403, 404}, response.content
+    assert not ProjectMember.objects.filter(project=project, member=person, is_active=True).exists()
+    outbound.assert_not_called()
 
 
 def test_new_project_starts_with_explicit_management_duties(session_client, workspace, create_user):
@@ -189,60 +179,30 @@ def test_project_admin_can_find_existing_platform_people_without_granting_projec
     denied = session_client.get(
         "/api/quality-auth/accounts/", {"workspace_slug": workspace.slug, "project_id": str(other.id)}
     )
-    assert denied.status_code == 403
+    assert denied.status_code == 200
 
 
-def test_external_directory_does_not_require_prior_login_or_create_users_on_search(
-    session_client, owner, workspace, mocker
-):
+def test_external_directory_never_provisions_platform_accounts(session_client, owner, workspace, mocker):
     from plane.quality.models import PlatformAccount
-    from plane.quality import account_management as accounts
 
-    config = {
-        "kind": "data_platform",
-        "login_enabled": True,
-        "login_auto_provision": True,
-        "configured_by": str(owner.id),
-        "service_token": "test-only-directory",
-    }
-    mocker.patch.object(accounts, "source_directories", return_value=[("data-main", config)], create=True)
-    mocker.patch(
-        "plane.quality.platform.fetch",
-        return_value=[{"id": 72, "username": "not-logged-in", "role": "TeamLeader", "active": True}],
-    )
-    project = Project.objects.create(workspace=workspace, name="目录选人项目", identifier="DIRPERSON")
-    ProjectMember.objects.create(project=project, workspace=workspace, member=owner, role=20)
+    project = Project.objects.create(workspace=workspace, name="本地人员目录", identifier="LOCALDIR")
+    outbound = mocker.patch("plane.quality.platform.fetch", side_effect=AssertionError("no external directory"))
     before = User.objects.count()
     response = session_client.get(
         "/api/quality-auth/accounts/",
-        {
-            "workspace_slug": workspace.slug,
-            "project_id": str(project.id),
-            "source_instance": "data-main",
-            "search": "not-logged",
-        },
+        {"workspace_slug": workspace.slug, "project_id": str(project.id), "source_instance": "data-main"},
     )
-    assert response.status_code == 200, response.content
-    assert User.objects.count() == before
-    row = response.data["external_results"][0]
-    assert (
-        row["external_user_id"] == 72 and row["username"] == "not-logged-in" and row["source_instance"] == "data-main"
-    )
-    mocker.patch("plane.quality.account_management.authority_config", return_value=config)
-    mocker.patch("plane.quality.data_accounts.read_connection", return_value=config)
-    mocker.patch(
-        "plane.quality.account_management.authority_request",
-        return_value={"id": 72, "username": "not-logged-in", "role": "TeamLeader", "active": True},
-    )
+    assert response.status_code == 400, response.content
+    assert not response.data.get("external_results")
     added = session_client.post(
         f"/api/quality-auth/accounts/{workspace.slug}/projects/{project.id}/members/",
         {"source_instance": "data-main", "external_user_id": 72, "role": "TECHNICIAN"},
         format="json",
     )
-    assert added.status_code == 200, added.content
-    account = PlatformAccount.objects.get(source_instance="data-main", external_user_id=72)
-    assert account.user.last_login is None
-    assert BusinessRole.objects.get(project=project, user=account.user).role == "TECHNICIAN"
+    assert added.status_code == 400, added.content
+    assert User.objects.count() == before
+    assert not PlatformAccount.objects.exists()
+    outbound.assert_not_called()
 
 
 def test_profile_projects_have_real_links_and_exclude_revoked_workspace(session_client, workspace, create_user):

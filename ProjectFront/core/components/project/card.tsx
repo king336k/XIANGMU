@@ -272,7 +272,7 @@ export const ProjectCard = observer(function ProjectCard(props: Props) {
                 isMobile={isMobile}
                 tooltipHeading="项目成员"
                 tooltipContent={
-                  project.members && project.members.length > 0 ? `${project.members.length} Members` : "暂无成员"
+                  project.members && project.members.length > 0 ? `${project.members.length} 位项目成员` : "暂无成员"
                 }
                 position="top"
               >

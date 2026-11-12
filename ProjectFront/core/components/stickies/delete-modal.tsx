@@ -47,6 +47,8 @@ export const StickyDeleteModal = observer(function StickyDeleteModal(props: ISti
       isOpen={isOpen}
       title={t("stickies.delete")}
       content={t("stickies.delete_confirmation")}
+      primaryButtonText={{ loading: "正在删除…", default: "删除便签" }}
+      secondaryButtonText="取消"
     />
   );
 });

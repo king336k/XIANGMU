@@ -7,7 +7,7 @@
 - [发布、安装、升级和日志说明](../deploy/release/部署说明.md)
 - [当前部署目录](../deploy/README.md)与[其他部署方式](../deployments/README.md)
 - [可选 FRP 连接](../deploy/network/frp-bridge/README.md)
-- [角色权限说明](guides/角色权限说明.md)
+- [角色权限与操作入口](guides/角色权限与操作入口.md)
 - [菜单入口与操作对照](guides/菜单入口与操作对照.html)
 - [菜单名称与位置](guides/菜单名称与位置.csv)
 

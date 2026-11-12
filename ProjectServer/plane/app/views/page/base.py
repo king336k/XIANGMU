@@ -55,6 +55,7 @@ from plane.bgtasks.page_version_task import track_page_version
 from plane.bgtasks.recent_visited_task import recent_visited_task
 from plane.bgtasks.copy_s3_object import copy_s3_objects_of_description_and_assets
 from plane.app.permissions import ProjectPagePermission
+from plane.quality.native_permissions import can_manage_native_access
 
 
 def unarchive_archive_page_and_descendants(page_id, archived_at):
@@ -336,6 +337,7 @@ class PageViewSet(BaseViewSet):
                 project_id=project_id, member=request.user, is_active=True, role__lte=15
             ).exists()
             and request.user.id != page.owned_by_id
+            and not can_manage_native_access(request.user, slug, project_id)
         ):
             return Response(
                 {"error": "Only the owner or admin can archive the page"},
@@ -367,6 +369,7 @@ class PageViewSet(BaseViewSet):
                 project_id=project_id, member=request.user, is_active=True, role__lte=15
             ).exists()
             and request.user.id != page.owned_by_id
+            and not can_manage_native_access(request.user, slug, project_id)
         ):
             return Response(
                 {"error": "Only the owner or admin can un archive the page"},
@@ -396,7 +399,7 @@ class PageViewSet(BaseViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if page.owned_by_id != request.user.id and (
+        if page.owned_by_id != request.user.id and not can_manage_native_access(request.user, slug, project_id) and (
             not ProjectMember.objects.filter(
                 workspace__slug=slug,
                 member=request.user,

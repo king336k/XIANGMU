@@ -22,7 +22,7 @@ import { WebhooksList, CreateWebhookModal } from "@/components/web-hooks";
 // hooks
 import { useWebhook } from "@/hooks/store/use-webhook";
 import { useWorkspace } from "@/hooks/store/use-workspace";
-import { useUserPermissions } from "@/hooks/store/user";
+import { useSettingsPermissions } from "@/components/settings/use-settings-permissions";
 // local imports
 import type { Route } from "./+types/page";
 import { WebhooksWorkspaceSettingsHeader } from "./header";
@@ -35,7 +35,7 @@ function WebhooksListPage({ params }: Route.ComponentProps) {
   // plane hooks
   const { t } = useTranslation();
   // mobx store
-  const { workspaceUserInfo, allowPermissions } = useUserPermissions();
+  const { workspaceUserInfo, allowPermissions } = useSettingsPermissions();
   const { fetchWebhooks, webhooks, clearSecretKey, webhookSecretKey, createWebhook } = useWebhook();
   const { currentWorkspace } = useWorkspace();
   // derived values

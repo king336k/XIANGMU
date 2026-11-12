@@ -84,6 +84,7 @@ export class BasePage extends ExtendedBasePage implements TBasePage {
   isSyncingWithServer: "syncing" | "synced" | "error" = "syncing";
   // page properties
   can_write: boolean;
+  can_manage: boolean;
   id: string | undefined;
   name: string | undefined;
   logo_props: TLogoProps | undefined;
@@ -122,6 +123,7 @@ export class BasePage extends ExtendedBasePage implements TBasePage {
     super(store, page, services);
 
     this.can_write = page?.can_write === true;
+    this.can_manage = page?.can_manage === true;
     this.id = page?.id || undefined;
     this.name = page?.name;
     this.logo_props = page?.logo_props || undefined;
@@ -148,6 +150,7 @@ export class BasePage extends ExtendedBasePage implements TBasePage {
       isSubmitting: observable.ref,
       // page properties
       can_write: observable.ref,
+      can_manage: observable.ref,
       id: observable.ref,
       name: observable.ref,
       logo_props: observable.ref,
@@ -225,6 +228,7 @@ export class BasePage extends ExtendedBasePage implements TBasePage {
   get asJSON() {
     return {
       can_write: this.can_write,
+      can_manage: this.can_manage,
       id: this.id,
       name: this.name,
       description_json: this.description_json,

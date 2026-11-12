@@ -185,7 +185,7 @@ def test_search_and_pagination_do_not_include_archived_or_other_workspace_projec
     assert client.get(url(target), {"per_page": 500}).status_code == 400
 
 
-def test_project_assignment_outside_admin_current_membership_does_not_join_actor(scopes):
+def test_global_admin_project_assignment_projects_all_scopes_automatically(scopes):
     client, target, spaces, projects, actor = scopes
     ProjectMember.objects.filter(project=projects[2], member=actor).update(is_active=False)
     WorkspaceMember.objects.filter(workspace=spaces[1], member=actor).update(is_active=False)
@@ -194,21 +194,22 @@ def test_project_assignment_outside_admin_current_membership_does_not_join_actor
     prow = rows(client, target, "project", spaces[1])[0]
     response = save(client, target, [change(prow, 15, ["TECHNICIAN", "REGRESSION_TESTER"])])
     assert response.status_code == 200, response.content
-    assert not ProjectMember.objects.filter(project=projects[2], member=actor, is_active=True).exists()
+    assert ProjectMember.objects.filter(project=projects[2], member=actor, is_active=True, role=20).exists()
     assert capable(projects[2].id, target.id, "solution")
 
 
-def test_last_manager_cannot_be_removed_by_project_or_workspace_scope(scopes):
+def test_global_admin_remains_responsible_when_project_manager_is_removed(scopes):
     client, target, spaces, projects, actor = scopes
     save(client, target, [change(row, 15) for row in rows(client, target)])
     arow = next(row for row in rows(client, target, "project", spaces[0]) if row["id"] == str(projects[0].id))
     assert save(client, target, [change(arow, 15, ["PROJECT_MANAGER"])]).status_code == 200
     ProjectMember.objects.filter(project=projects[0], member=actor).update(is_active=False)
     arow = next(row for row in rows(client, target, "project", spaces[0]) if row["id"] == str(projects[0].id))
-    assert save(client, target, [change(arow, 0)]).status_code == 400
+    assert save(client, target, [change(arow, 0)]).status_code == 200
     wsrow = next(row for row in rows(client, target) if row["id"] == str(spaces[0].id))
-    assert save(client, target, [change(wsrow, 0)]).status_code == 400
-    assert capable(projects[0].id, target.id, "review")
+    assert save(client, target, [change(wsrow, 0)]).status_code == 200
+    assert not capable(projects[0].id, target.id, "review")
+    assert capable(projects[0].id, actor.id, "review")
 
 
 def test_other_invalid_batch_changes_roll_back_prior_valid_grant(scopes):

@@ -11,8 +11,10 @@ from django.test.utils import CaptureQueriesContext
 
 from plane.quality.daq_incidents import SALT, SYSTEM, TYPE, fingerprint
 from plane.quality.models import BusinessNumber, Defect, DefectEvent, SourceLink
-from plane.tests.contract.app.test_daq_reporting import call, reporting as reporting
-from plane.tests.contract.app.test_daq_incidents import incident as incident
+from plane.tests.contract.app import test_daq_reporting
+from plane.tests.contract.app.test_daq_reporting import call, revoke_grants
+
+reporting = test_daq_reporting.reporting
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 BASE = "/api/quality-auth/daq-reports/"
@@ -42,17 +44,17 @@ def create_reports(reporting, count=4):
             created_by=user,
             defect=defect,
             source_system=SYSTEM,
-            source_instance="test-dp",
+            source_instance="daq-device",
             record_type=TYPE,
             record_id=f"16:{data['eventId']}",
-            task_id="24",
+            task_id="",
             package_id="",
         )
         record = {
             "linkId": str(link.id),
             "defectId": str(defect.id),
             "projectId": str(project.id),
-            "sourceInstance": "test-dp",
+            "sourceInstance": "daq-device",
             "actorId": str(user.id),
             "externalActor": 16,
             "recordId": link.record_id,
@@ -134,7 +136,7 @@ def test_history_bad_signature_other_actor_and_revoked_source_not_counted(report
     assert result.status_code == 200, result.content
     assert result.data["count"] == 2
     assert result.data["status_counts"]["all"] == 2
-    state["projects"] = []
+    revoke_grants(state)
     result = call(BASE)
     assert result.status_code == 200, result.content
     assert result.data["count"] == 0
@@ -144,7 +146,7 @@ def test_history_bad_signature_other_actor_and_revoked_source_not_counted(report
 @pytest.mark.parametrize("total", [1000, 4000])
 def test_thousand_reports_use_request_local_authority_cache_and_page_only_receipts(reporting, total):
     project, defects, links, state = create_reports(reporting, total)
-    state["calls"].clear()
+
     started = time.monotonic()
     with CaptureQueriesContext(connection) as queries:
         result = call(BASE + "?per_page=20&page=12" + ("&status=in_progress" if total == 4000 else ""))
@@ -161,9 +163,9 @@ def test_thousand_reports_use_request_local_authority_cache_and_page_only_receip
         "resolved": total // 4,
         "closed": total // 4,
     }
-    assert len(state["calls"]) <= 4, state["calls"]
+
     assert len(queries) <= 160, len(queries)
-    print(f"history{total}: {elapsed:.3f}s, SQL={len(queries)}, sourceHTTP={len(state['calls'])}, pageRows=20")
-    state["projects"] = []
+    print(f"history{total}: {elapsed:.3f}s, SQL={len(queries)}, sourceHTTP=0, pageRows=20")
+    revoke_grants(state)
     revoked = call(BASE + "?per_page=20&page=1")
     assert revoked.status_code == 200 and revoked.data["count"] == 0

@@ -102,10 +102,10 @@ def test_ota_unauthorized_user_cannot_read_or_modify_global_directories(session_
     assert session_client.get(url).status_code == 403
 
 
-def test_non_ota_configuration_contract_stays_compatible(session_client, ota_config):
+def test_retired_data_platform_connection_is_rejected(session_client, ota_config):
     url, _ = ota_config
     response = session_client.post(
         url, {"source_instance": "data", "kind": "data_platform", "base_url": "https://platform.example"}, format="json"
     )
-    assert response.status_code == 201
-    assert read_connection("data")["kind"] == "data_platform"
+    assert response.status_code == 400
+    assert not read_connection("data")

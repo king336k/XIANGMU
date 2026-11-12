@@ -763,7 +763,23 @@ class LocalManagedAccount(models.Model):
     created_by = models.ForeignKey("db.User", on_delete=models.PROTECT, related_name="created_local_accounts")
     created_at = models.DateTimeField(auto_now_add=True)
 
+
 # Offline migration audit tables; no API or permission changes.
 from .legacy_migration_models import LegacyMigrationRun, LegacyMigrationRecord  # noqa: F401,E402
 
 from .external_release_models import ExternalReleaseSnapshot  # noqa: E402,F401
+
+
+class AdministratorAccessGrant(models.Model):
+    """Keep prior native access so global authority can be removed without privilege residue."""
+
+    user = models.ForeignKey("db.User", on_delete=models.CASCADE)
+    scope = models.CharField(max_length=10, choices=[("workspace", "workspace"), ("project", "project")])
+    target_id = models.UUIDField()
+    membership_id = models.UUIDField()
+    previous_access = models.JSONField(null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "scope", "target_id"], name="quality_admin_access_scope_unique")
+        ]

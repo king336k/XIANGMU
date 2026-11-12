@@ -16,8 +16,10 @@ from plane.quality.models import (
     TestExecution as QualityExecution,
     TestPlan as QualityPlan,
 )
-from plane.tests.contract.app.test_daq_incidents import incident as incident
-from plane.tests.contract.app.test_daq_reporting import call, reporting as reporting
+from plane.tests.contract.app import test_daq_reporting
+from plane.tests.contract.app.test_daq_reporting import call
+
+reporting = test_daq_reporting.reporting
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 

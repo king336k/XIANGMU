@@ -5,6 +5,7 @@ import test from "node:test";
 const require = createRequire(new URL("../package.json", import.meta.url)),
   ts = require("typescript");
 const api = {};
+function ProjectPageService() {}
 new Function(
   "require",
   "exports",
@@ -16,12 +17,12 @@ new Function(
   if (id === "mobx-utils") return { computedFn: (fn) => fn };
   if (id === "@plane/constants")
     return { EPageAccess: { PUBLIC: 0, PRIVATE: 1 }, EUserPermissions: { MEMBER: 15, ADMIN: 20 } };
-  if (id === "@/services/page") return { ProjectPageService: class {} };
+  if (id === "@/services/page") return { ProjectPageService };
   if (id === "./base-page")
     return {
       BasePage: class {
-        constructor(store, page) {
-          Object.assign(this, page);
+        constructor(store, record) {
+          Object.assign(this, record);
           this.rootStore = store;
         }
         get isCurrentUserOwner() {
@@ -60,4 +61,12 @@ test("合法编辑仍受文档可见范围、锁定和归档限制", () => {
   assert.equal(page(true, 15, { archived_at: "2026/11/08" }).isContentEditable, false);
   assert.equal(page(true, 15, { access: 1, owned_by: "other" }).isContentEditable, false);
   assert.equal(page(true, 15, { access: 1, owned_by: "u" }).isContentEditable, true);
+});
+
+test("原生成员身份的管理员按后端管理标记获得文档管理入口，普通编辑者不获得", () => {
+  for (const allowed of [true, false]) {
+    const doc = page(true, 15, { owned_by: "other", can_manage: allowed });
+    for (const field of ["canCurrentUserLockPage", "canCurrentUserArchivePage", "canCurrentUserDeletePage"])
+      assert.equal(doc[field], allowed, field);
+  }
 });

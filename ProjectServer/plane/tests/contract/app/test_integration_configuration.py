@@ -27,7 +27,7 @@ def test_config_saved_encrypted_and_runtime_reads_it_without_echo(session_client
         base + "integrations/connections/",
         {
             "source_instance": "test-source",
-            "kind": "data_platform",
+            "kind": "feishu",
             "base_url": "https://platform.example",
             "timezone": "Asia/Shanghai",
             "service_token": "not-real-test-service",
@@ -50,7 +50,7 @@ def test_non_instance_manager_cannot_save_connections(session_client, configurat
     assert (
         session_client.post(
             base + "integrations/connections/",
-            {"source_instance": "bad", "kind": "data_platform", "base_url": "https://platform.example"},
+            {"source_instance": "bad", "kind": "feishu", "base_url": "https://platform.example"},
             format="json",
         ).status_code
         == 403
@@ -71,7 +71,7 @@ def test_connection_rejects_metadata_loopback_credentials_and_nonorigin_urls(ses
     base, _ = configuration
     response = session_client.post(
         base + "integrations/connections/",
-        {"source_instance": "bad", "kind": "data_platform", "base_url": url, "allow_private_http": True},
+        {"source_instance": "bad", "kind": "feishu", "base_url": url, "allow_private_http": True},
         format="json",
     )
     assert response.status_code == 400, response.content

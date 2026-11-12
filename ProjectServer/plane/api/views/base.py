@@ -38,6 +38,12 @@ class TimezoneMixin:
     to the user set timezone
     """
 
+    def perform_authentication(self, request):
+        super().perform_authentication(request)
+        from plane.quality.administrator_access import synchronize_administrator_access
+
+        synchronize_administrator_access(request.user)
+
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
         from plane.quality.native_permissions import guard_native_mutation

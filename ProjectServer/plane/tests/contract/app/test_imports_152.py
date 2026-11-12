@@ -11,9 +11,7 @@ from plane.knowledge.models import Article
 from plane.quality.models import BusinessRole, ProjectRolePolicy
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
-PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
-)
+PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=")
 
 
 def docx(text="导入正文", external=False, extra=None):
@@ -37,11 +35,7 @@ def docx(text="导入正文", external=False, extra=None):
         z.writestr(
             "word/_rels/document.xml.rels",
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="'
-            + (
-                'https://example.org/image.png" TargetMode="External'
-                if external
-                else "media/image1.png"
-            )
+            + ('https://example.org/image.png" TargetMode="External' if external else "media/image1.png")
             + '"/></Relationships>',
         )
         for name, raw in (extra or {}).items():
@@ -64,11 +58,7 @@ def pdf(text=True, encrypted=False):
             }
         )
         page[NameObject("/Resources")] = DictionaryObject(
-            {
-                NameObject("/Font"): DictionaryObject(
-                    {NameObject("/F1"): writer._add_object(font)}
-                )
-            }
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): writer._add_object(font)})}
         )
         stream = DecodedStreamObject()
         stream.set_data(b"BT /F1 12 Tf 20 100 Td (Actual PDF text) Tj ET")
@@ -84,9 +74,7 @@ def pdf(text=True, encrypted=False):
 def imports152(workspace, create_user, settings, tmp_path):
     settings.QUALITY_ATTACHMENT_ROOT = tmp_path / "private"
     settings.DATA_UPLOAD_MAX_MEMORY_SIZE = 22 * 1024 * 1024
-    WorkspaceMember.objects.filter(workspace=workspace, member=create_user).update(
-        role=15
-    )
+    WorkspaceMember.objects.filter(workspace=workspace, member=create_user).update(role=15)
     p = Project.objects.create(workspace=workspace, name="文档原件", identifier="D152")
     ProjectMember.objects.create(project=p, member=create_user, role=15)
     ProjectRolePolicy.objects.create(project=p, enabled=True)
@@ -102,46 +90,66 @@ def upload(client, base, raw, name="source.docx", resource="knowledge"):
     )
 
 
-def test_docx_preserves_original_tables_images_and_creates_one_draft(
-    session_client, imports152
-):
+def review_embedded_image(client, base, import_id):
+    """Confirm actual OCR review contract with a controlled worker candidate."""
+    from uuid import uuid4
+    from plane.quality.models import DocumentImport
+
+    row = DocumentImport.objects.get(pk=import_id)
+    token = uuid4().hex
+    row.extraction["ocr"] = {
+        "token": token,
+        "status": "completed",
+        "requires_review": True,
+        "reviewed": False,
+        "segments": [
+            {"key": "ocr-1", "text": "图片中的核对文字", "method": "ocr", "source_image": "word/media/image1.png"}
+        ],
+        "failures": [],
+        "source_sha256": row.files.get(kind="original").sha256,
+    }
+    row.save(update_fields=["extraction"])
+    response = client.post(
+        base + f"document-imports/{import_id}/ocr/review/",
+        {
+            "expected_token": token,
+            "confirmed": True,
+            "segments": [{"key": "ocr-1", "text": "图片中的核对文字"}],
+        },
+        format="json",
+    )
+    assert response.status_code == 200, response.content
+
+
+def test_docx_preserves_original_tables_images_and_creates_one_draft(session_client, imports152):
     base, project = imports152
     raw = docx()
     response = upload(session_client, base, raw)
     assert response.status_code == 201 and response.data["valid"], response.content
     data = response.data
-    assert (
-        "导入正文" in data["rows"][0]["content"]
-        and "表格内容" in data["rows"][0]["content"]
-    )
+    assert "导入正文" in data["rows"][0]["content"] and "表格内容" in data["rows"][0]["content"]
     assert data["extraction"]["image_count"] == 1 and data["extraction"]["segments"]
     original = next(f for f in data["files"] if f["kind"] == "original")
-    assert original["sha256"] == hashlib.sha256(
-        raw
-    ).hexdigest() and "storage_key" not in str(data)
+    assert original["sha256"] == hashlib.sha256(raw).hexdigest() and "storage_key" not in str(data)
     downloaded = session_client.get(original["download_url"])
     assert downloaded.status_code == 200
-    assert (
-        hashlib.sha256(b"".join(downloaded.streaming_content)).hexdigest()
-        == original["sha256"]
-    )
+    assert hashlib.sha256(b"".join(downloaded.streaming_content)).hexdigest() == original["sha256"]
     assert downloaded["X-Content-Type-Options"] == "nosniff"
     image = next(f for f in data["files"] if f["kind"] == "image")
     assert session_client.get(image["preview_url"]).status_code == 200
     assert upload(session_client, base, raw).data["id"] == data["id"]
     assert not Article.objects.filter(project=project).exists()
+    # Automatic OCR blocks confirmation until image text is reviewed.
+    assert session_client.post(base + f"document-imports/{data['id']}/confirm/", {}, format="json").status_code == 400
+    review_embedded_image(session_client, base, data["id"])
     for expected in (201, 200):
         assert (
-            session_client.post(
-                base + f"document-imports/{data['id']}/confirm/", {}, format="json"
-            ).status_code
+            session_client.post(base + f"document-imports/{data['id']}/confirm/", {}, format="json").status_code
             == expected
         )
     article = Article.objects.get(project=project)
     assert article.status == "draft" and not article.publication_active
-    detail = session_client.get(
-        base.replace("/quality/", "/knowledge/") + f"articles/{article.id}/"
-    )
+    detail = session_client.get(base.replace("/quality/", "/knowledge/") + f"articles/{article.id}/")
     assert detail.status_code == 200 and len(detail.data["source_files"]) == 2
     from plane.knowledge.serializers import PublicationSerializer
 
@@ -166,11 +174,7 @@ def test_pdf_actual_text_is_extracted_by_page(session_client, imports152):
         (lambda: docx(external=True), "external.docx", "外部"),
         (lambda: docx(extra={"../evil.xml": b"<root/>"}), "path.docx", "路径"),
         (
-            lambda: docx(
-                extra={
-                    "word/evil.xml": b'<!DOCTYPE a [<!ENTITY x SYSTEM "file:///etc/passwd">]><a>&x;</a>'
-                }
-            ),
+            lambda: docx(extra={"word/evil.xml": b'<!DOCTYPE a [<!ENTITY x SYSTEM "file:///etc/passwd">]><a>&x;</a>'}),
             "entity.docx",
             "实体",
         ),
@@ -181,26 +185,20 @@ def test_pdf_actual_text_is_extracted_by_page(session_client, imports152):
         ),
     ],
 )
-def test_incomplete_extraction_cannot_be_confirmed(
-    session_client, imports152, raw, name, expected
-):
+def test_incomplete_extraction_cannot_be_confirmed(session_client, imports152, raw, name, expected):
     base, _ = imports152
     response = upload(session_client, base, raw(), name)
     assert response.status_code == 201 and not response.data["valid"], response.content
     assert expected in str(response.data["errors"])
     assert response.data["extraction"]["failures"]
     assert (
-        session_client.post(
-            base + f"document-imports/{response.data['id']}/confirm/", {}, format="json"
-        ).status_code
+        session_client.post(base + f"document-imports/{response.data['id']}/confirm/", {}, format="json").status_code
         == 400
     )
     assert any(f["kind"] == "original" for f in response.data["files"])
 
 
-def test_originals_require_editor_permission_and_project_membership(
-    session_client, imports152, create_user, workspace
-):
+def test_originals_require_editor_permission_and_project_membership(session_client, imports152, create_user, workspace):
     base, p = imports152
     data = upload(session_client, base, docx()).data
     url = data["files"][0]["download_url"]
@@ -210,34 +208,20 @@ def test_originals_require_editor_permission_and_project_membership(
     BusinessRole.objects.filter(project=p, user=create_user).update(role="REPORTER")
     assert session_client.get(url).status_code == 403
     assert session_client.get(base + "document-imports/").data == []
-    assert (
-        session_client.post(
-            base + f"document-imports/{data['id']}/confirm/", {}, format="json"
-        ).status_code
-        == 403
-    )
+    assert session_client.post(base + f"document-imports/{data['id']}/confirm/", {}, format="json").status_code == 403
     ProjectMember.objects.filter(project=p, member=create_user).update(is_active=False)
     assert session_client.get(url).status_code == 403
 
 
-def test_sensitive_original_blocked_and_nonknowledge_permission_unchanged(
-    session_client, imports152
-):
+def test_sensitive_original_blocked_and_nonknowledge_permission_unchanged(session_client, imports152):
     base, _ = imports152
     response = upload(session_client, base, docx("password=SuperSecret123456"))
     assert response.status_code == 201 and not response.data["valid"], response.content
     assert (
-        session_client.post(
-            base + f"document-imports/{response.data['id']}/confirm/", {}, format="json"
-        ).status_code
+        session_client.post(base + f"document-imports/{response.data['id']}/confirm/", {}, format="json").status_code
         == 400
     )
-    assert (
-        upload(
-            session_client, base, b"[]", "requirements.json", "requirements"
-        ).status_code
-        == 403
-    )
+    assert upload(session_client, base, b"[]", "requirements.json", "requirements").status_code == 403
 
 
 @pytest.mark.parametrize("field", ["content", "tags"])
@@ -253,9 +237,7 @@ def test_multiline_import_fields_cannot_hide_sensitive_content(field):
 
 def test_upload_size_and_legacy_doc_are_rejected(session_client, imports152):
     base, _ = imports152
-    assert (
-        upload(session_client, base, b"x" * (20 * 1024 * 1024 + 1)).status_code == 400
-    )
+    assert upload(session_client, base, b"x" * (20 * 1024 * 1024 + 1)).status_code == 400
     assert upload(session_client, base, b"legacy binary", "old.doc").status_code == 400
 
 
@@ -269,15 +251,14 @@ def test_concurrent_confirmation_produces_exactly_one_article(imports152, create
     client = APIClient()
     client.force_authenticate(create_user)
     preview = upload(client, base, docx()).data
+    review_embedded_image(client, base, preview["id"])
 
     def confirm():
         close_old_connections()
         try:
             other = APIClient()
             other.force_authenticate(create_user)
-            response = other.post(
-                base + f"document-imports/{preview['id']}/confirm/", {}, format="json"
-            )
+            response = other.post(base + f"document-imports/{preview['id']}/confirm/", {}, format="json")
             return response.status_code, response.data.get("object_ids")
         finally:
             close_old_connections()
@@ -304,9 +285,7 @@ def test_mixed_text_and_scanned_page_blocks_whole_pdf(session_client, imports152
     assert response.data["extraction"]["failures"][0]["page"] == 2
     assert "Actual PDF text" in response.data["rows"][0]["content"]
     assert (
-        session_client.post(
-            base + f"document-imports/{response.data['id']}/confirm/", {}, format="json"
-        ).status_code
+        session_client.post(base + f"document-imports/{response.data['id']}/confirm/", {}, format="json").status_code
         == 400
     )
 
@@ -361,10 +340,7 @@ def test_pdf_image_and_attachment_manifest_are_downloadable(session_client, impo
     assert preview.status_code == 200
     assert b"".join(preview.streaming_content).startswith(b"\x89PNG")
     attachment = next(f for f in response.data["files"] if f["kind"] == "attachment")
-    assert (
-        b"".join(session_client.get(attachment["download_url"]).streaming_content)
-        == b"complete embedded attachment"
-    )
+    assert b"".join(session_client.get(attachment["download_url"]).streaming_content) == b"complete embedded attachment"
 
 
 @pytest.mark.parametrize(
@@ -375,15 +351,11 @@ def test_pdf_image_and_attachment_manifest_are_downloadable(session_client, impo
         '<Relationships><Relationship Id="missing-image" Target="media/missing.png"/></Relationships>',
     ],
 )
-def test_docx_drawing_relationship_integrity_is_required(
-    session_client, imports152, relations
-):
+def test_docx_drawing_relationship_integrity_is_required(session_client, imports152, relations):
     base, _ = imports152
     original = docx()
     output = BytesIO()
-    with ZipFile(BytesIO(original)) as source, ZipFile(
-        output, "w", ZIP_DEFLATED
-    ) as dest:
+    with ZipFile(BytesIO(original)) as source, ZipFile(output, "w", ZIP_DEFLATED) as dest:
         for name in source.namelist():
             if name == "word/_rels/document.xml.rels":
                 continue
@@ -399,44 +371,29 @@ def test_docx_drawing_relationship_integrity_is_required(
     response = upload(session_client, base, output.getvalue())
     assert response.status_code == 201 and not response.data["valid"], response.content
     assert (
-        session_client.post(
-            base + f"document-imports/{response.data['id']}/confirm/", {}, format="json"
-        ).status_code
+        session_client.post(base + f"document-imports/{response.data['id']}/confirm/", {}, format="json").status_code
         == 400
     )
 
 
-def test_changed_original_cannot_download_or_confirm(
-    session_client, imports152, settings
-):
+def test_changed_original_cannot_download_or_confirm(session_client, imports152, settings):
     from pathlib import Path
     from plane.quality.models import DocumentFile
 
     base, _ = imports152
     data = upload(session_client, base, docx()).data
+    review_embedded_image(session_client, base, data["id"])
     original = DocumentFile.objects.get(document_import_id=data["id"], kind="original")
-    (
-        Path(settings.QUALITY_ATTACHMENT_ROOT)
-        / "document-imports"
-        / original.storage_key
-    ).write_bytes(b"changed original")
-    assert (
-        session_client.get(
-            next(f["download_url"] for f in data["files"] if f["kind"] == "original")
-        ).status_code
-        == 409
+    (Path(settings.QUALITY_ATTACHMENT_ROOT) / "document-imports" / original.storage_key).write_bytes(
+        b"changed original"
     )
     assert (
-        session_client.post(
-            base + f"document-imports/{data['id']}/confirm/", {}, format="json"
-        ).status_code
-        == 409
+        session_client.get(next(f["download_url"] for f in data["files"] if f["kind"] == "original")).status_code == 409
     )
+    assert session_client.post(base + f"document-imports/{data['id']}/confirm/", {}, format="json").status_code == 409
 
 
-def test_pdf_inline_image_is_explicitly_blocked_instead_of_omitted(
-    session_client, imports152
-):
+def test_pdf_inline_image_is_explicitly_blocked_instead_of_omitted(session_client, imports152):
     from pypdf import PdfReader, PdfWriter
     from pypdf.generic import NameObject, DecodedStreamObject
 
@@ -445,8 +402,7 @@ def test_pdf_inline_image_is_explicitly_blocked_instead_of_omitted(
     writer.add_page(reader.pages[0])
     stream = DecodedStreamObject()
     stream.set_data(
-        writer.pages[0].get_contents().get_data()
-        + b"\nq BI /W 1 /H 1 /CS /RGB /BPC 8 ID \xff\x00\x00 EI Q"
+        writer.pages[0].get_contents().get_data() + b"\nq BI /W 1 /H 1 /CS /RGB /BPC 8 ID \xff\x00\x00 EI Q"
     )
     writer.pages[0][NameObject("/Contents")] = writer._add_object(stream)
     output = BytesIO()

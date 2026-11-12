@@ -182,6 +182,8 @@ class MemberScopes(BaseAPIView):
     @transaction.atomic
     def post(self, request, user_id):
         target = self.target(request, user_id, lock=True)
+        if is_administrator(target):
+            raise ValidationError("管理员自动管理全部工作空间和项目；如需限制访问，请先取消管理员身份。")
         parser = ScopeChanges(data=request.data)
         parser.is_valid(raise_exception=True)
         changes = parser.validated_data["changes"]

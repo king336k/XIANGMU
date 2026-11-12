@@ -10,6 +10,7 @@ import type { TPageExtended } from "./extended";
 
 export type TPage = {
   can_write?: boolean;
+  can_manage?: boolean;
   access: EPageAccess | undefined;
   archived_at: string | null | undefined;
   color: string | undefined;

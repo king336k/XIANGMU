@@ -75,7 +75,8 @@ def test_explicit_external_connection_remains_preserved_with_builtin_available(b
         "KNOWLEDGE_EMBEDDING_API_KEY": "external-test-key",
     }
     mocker.patch(
-        "plane.knowledge.assistant.model_option", side_effect=lambda name, fallback: values.get(name, fallback)
+        "plane.knowledge.assistant.model_option",
+        side_effect=lambda name, fallback, workspace_id=None: values.get(name, fallback),
     )
     value = semantic_provider.configuration()
     assert value["source"] == "external" and value["model"] == "external-vector"
@@ -90,7 +91,8 @@ def test_legacy_external_endpoint_is_not_silently_replaced(builtin_env, mocker):
         "KNOWLEDGE_EMBEDDING_API_KEY": "legacy-custom-key",
     }
     mocker.patch(
-        "plane.knowledge.assistant.model_option", side_effect=lambda name, fallback: values.get(name, fallback)
+        "plane.knowledge.assistant.model_option",
+        side_effect=lambda name, fallback, workspace_id=None: values.get(name, fallback),
     )
     config = semantic_provider.configuration()
     assert config["source"] == "external" and config["api_key"] == "legacy-custom-key"
@@ -103,7 +105,8 @@ def test_broken_explicit_external_config_never_uses_chat_model(builtin_env, mock
         "KNOWLEDGE_EMBEDDING_MODEL": "vector-model",
     }
     mocker.patch(
-        "plane.knowledge.assistant.model_option", side_effect=lambda name, fallback: values.get(name, fallback)
+        "plane.knowledge.assistant.model_option",
+        side_effect=lambda name, fallback, workspace_id=None: values.get(name, fallback),
     )
     mocker.patch(
         "plane.knowledge.assistant.provider_config",

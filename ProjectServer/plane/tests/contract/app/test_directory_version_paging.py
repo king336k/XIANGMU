@@ -130,25 +130,20 @@ def test_non_admin_directory_still_hides_accounts(session_client):
     assert response.status_code == 200 and response.data == {"can_manage": False, "results": []}
 
 
-def test_remote_directory_marks_partial_scope_and_search_still_reaches_later_users(
+def test_source_directory_is_not_queried_even_when_client_requests_it(
     session_client, directory_admin, directory_project, workspace, mocker
 ):
     project, _ = directory_project
-    mocker.patch("plane.quality.account_management.source_directories", return_value=[("source", {})])
-    mocker.patch(
-        "plane.quality.account_management.platform.fetch",
-        return_value=[
-            {"id": index + 1, "username": f"remote-{index:03}", "active": True, "role": "Technician"}
-            for index in range(130)
-        ],
+    outbound = mocker.patch("plane.quality.platform.fetch", side_effect=AssertionError("no source directory"))
+    response = session_client.get(
+        "/api/quality-auth/accounts/",
+        {
+            "source_instance": "source",
+            "workspace_slug": workspace.slug,
+            "project_id": str(project.id),
+            "search": "remote-129",
+        },
     )
-    params = {"source_instance": "source", "workspace_slug": workspace.slug, "project_id": str(project.id)}
-    response = session_client.get("/api/quality-auth/accounts/", params)
-    assert response.status_code == 200, response.data
-    assert len(response.data["external_results"]) == 100
-    assert response.data["external_partial"] is True and response.data["external_limit"] == 100
-    assert response.data["external_notice"]
-    searched = session_client.get("/api/quality-auth/accounts/", {**params, "search": "remote-129"})
-    assert len(searched.data["external_results"]) == 1
-    assert searched.data["external_results"][0]["username"] == "remote-129"
-    assert searched.data["count"] == 0  # Count describes local authorized records only.
+    assert response.status_code == 400, response.content
+    assert not response.data.get("external_results")
+    outbound.assert_not_called()

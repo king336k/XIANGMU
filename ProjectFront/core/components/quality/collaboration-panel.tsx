@@ -1,3 +1,4 @@
+import { sortBy } from "lodash-es";
 import { renderNumericDateTime } from "@plane/utils";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { can, statusNames } from "./types";
@@ -120,25 +121,28 @@ export function CollaborationPanel({
     }
   };
   const failed = commentsError || sourcesError || packagesError;
-  const timeline = [
-    ...(value.events || []).map((event) => ({
-      id: `event-${event.id}`,
-      actor: event.actor || "成员",
-      at: event.created_at,
-      action:
-        event.previous_status === event.status
-          ? "更新记录"
-          : `${statusNames[event.previous_status] || "新建"} → ${statusNames[event.status] || event.status}`,
-      content: event.note,
-    })),
-    ...(comments || []).map((comment) => ({
-      id: `comment-${comment.id}`,
-      actor: comment.actor,
-      at: comment.created_at,
-      action: comment.visibility === "internal" ? "内部备注" : "采集员可见回复",
-      content: comment.content,
-    })),
-  ].toSorted((left, right) => new Date(right.at).getTime() - new Date(left.at).getTime());
+  const timeline = sortBy(
+    [
+      ...(value.events || []).map((event) => ({
+        id: `event-${event.id}`,
+        actor: event.actor || "成员",
+        at: event.created_at,
+        action:
+          event.previous_status === event.status
+            ? "更新记录"
+            : `${statusNames[event.previous_status] || "新建"} → ${statusNames[event.status] || event.status}`,
+        content: event.note,
+      })),
+      ...(comments || []).map((comment) => ({
+        id: `comment-${comment.id}`,
+        actor: comment.actor,
+        at: comment.created_at,
+        action: comment.visibility === "internal" ? "内部备注" : "采集员可见回复",
+        content: comment.content,
+      })),
+    ],
+    (entry) => -new Date(entry.at).getTime()
+  );
   return (
     <section className="space-y-4">
       <h3 className="text-13 font-medium">操作记录</h3>

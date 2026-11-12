@@ -19,7 +19,7 @@ import { DeleteWebhookModal, WebhookDeleteSection, WebhookForm } from "@/compone
 // hooks
 import { useWebhook } from "@/hooks/store/use-webhook";
 import { useWorkspace } from "@/hooks/store/use-workspace";
-import { useUserPermissions } from "@/hooks/store/user";
+import { useSettingsPermissions } from "@/components/settings/use-settings-permissions";
 // local imports
 import type { Route } from "./+types/page";
 import { WebhookDetailsWorkspaceSettingsHeader } from "./header";
@@ -32,7 +32,7 @@ function WebhookDetailsPage({ params }: Route.ComponentProps) {
   // mobx store
   const { currentWebhook, fetchWebhookById, updateWebhook } = useWebhook();
   const { currentWorkspace } = useWorkspace();
-  const { allowPermissions } = useUserPermissions();
+  const { allowPermissions } = useSettingsPermissions();
 
   // TODO: fix this error
   // useEffect(() => {

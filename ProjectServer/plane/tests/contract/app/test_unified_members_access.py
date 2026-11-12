@@ -91,8 +91,10 @@ def test_effective_admin_can_remove_higher_native_member_without_global_revoke(a
 @pytest.mark.parametrize(
     "denial", ["project_guest", "workspace_guest", "workspace_inactive", "project_inactive", "actor_inactive"]
 )
-def test_effective_admin_does_not_bypass_membership_boundaries(access_scope, denial):
+def test_former_admin_does_not_bypass_membership_boundaries(access_scope, denial):
     client, project, actor, target, ws, own, target_ws, target_project = access_scope
+    # Global admins now manage every scope; this boundary applies after revocation.
+    InstanceAdmin.objects.filter(user=actor).delete()
     if denial == "project_guest":
         own.role = 5
         own.save()
@@ -118,8 +120,10 @@ def test_effective_admin_does_not_bypass_membership_boundaries(access_scope, den
     assert target_project.role == 15
 
 
-def test_global_admin_outside_private_project_or_workspace_cannot_manage_access(access_scope, create_user):
+def test_former_admin_outside_private_project_or_workspace_cannot_manage_access(access_scope, create_user):
     client, project, actor, target, ws, own, target_ws, target_project = access_scope
+    # Global admins now manage every scope; this boundary applies after revocation.
+    InstanceAdmin.objects.filter(user=actor).delete()
     other = Project.objects.create(
         workspace=project.workspace, name="未加入私有项目", identifier="NOPRIVATE", network=0
     )
@@ -199,8 +203,10 @@ def test_effective_admin_native15_can_set_project_defaults_and_guest_visibility(
 
 @pytest.mark.parametrize("scope", ["workspace", "project"])
 @pytest.mark.parametrize("boundary", ["guest", "inactive", "foreign"])
-def test_settings_write_preserves_effective_admin_membership_scope(access_scope, scope, boundary, create_user):
+def test_settings_write_preserves_former_admin_membership_scope(access_scope, scope, boundary, create_user):
     client, project, actor, target, ws, own, target_ws, target_project = access_scope
+    # Global admins now manage every scope; this boundary applies after revocation.
+    InstanceAdmin.objects.filter(user=actor).delete()
     url = f"/api/workspaces/{project.workspace.slug}/" + (f"projects/{project.id}/" if scope == "project" else "")
     if boundary == "guest":
         membership = own if scope == "project" else ws
@@ -236,10 +242,12 @@ def test_effective_admin_native15_can_delete_in_scope_fixture(access_scope, scop
 
 @pytest.mark.parametrize("scope", ["workspace", "project"])
 @pytest.mark.parametrize("boundary", ["guest", "inactive", "foreign"])
-def test_destructive_settings_operation_never_escapes_active_writable_scope(
+def test_former_admin_destructive_operation_never_escapes_active_writable_scope(
     access_scope, scope, boundary, create_user, mocker
 ):
     client, project, actor, target, ws, own, target_ws, target_project = access_scope
+    # Global admins now manage every scope; this boundary applies after revocation.
+    InstanceAdmin.objects.filter(user=actor).delete()
     mocker.patch("plane.app.views.workspace.base.track_event.delay")
     mocker.patch("plane.app.views.project.base.webhook_activity.delay")
     url = f"/api/workspaces/{project.workspace.slug}/" + (f"projects/{project.id}/" if scope == "project" else "")

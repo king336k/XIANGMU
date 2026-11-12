@@ -1,9 +1,8 @@
 """Mature operations preserve frozen evidence and domain-specific verification gates."""
 
-from uuid import uuid4
 import pytest
 from plane.db.models import Project, ProjectMember
-from plane.quality.models import TestPlan, DaqBinding, DaqReport
+from plane.quality.models import TestPlan
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 
@@ -105,37 +104,18 @@ def test_test_generated_defect_cannot_use_manual_verification_to_skip_case_regre
     assert response.status_code == 400
 
 
-def test_daq_defect_cannot_use_manual_note_to_bypass_new_data_verification(session_client, operations, create_user):
-    from plane.db.models import Issue
-
+def test_daq_origin_does_not_require_retired_external_regression(session_client, operations, create_user):
     base, project, case, plan = operations
-    row = session_client.post(base + "defects/", {"title": "采集异常"}, format="json").data
-    issue = Issue.objects.create(project=project, workspace=project.workspace, name="采集任务", created_by=create_user)
-    binding = DaqBinding.objects.create(
-        project=project,
-        created_by=create_user,
-        source_instance="test",
-        platform_task_id=24,
-        source_record_id="session-origin",
-        issue=issue,
-    )
-    DaqReport.objects.create(
-        project=project,
-        created_by=create_user,
-        binding=binding,
-        defect_id=row["id"],
-        request_id=uuid4(),
-        request_hash="hash",
-        category="Other",
-    )
+    row = session_client.post(base + "defects/", {"title": "正常功能联调"}, format="json").data
     url = base + f"defects/{row['id']}/"
     assert session_client.patch(url, {"status": "resolved", "fixed_build": "v2"}, format="json").status_code == 200
     response = session_client.patch(
         url,
-        {"status": "closed", "verification_method": "manual", "verification_note": "不能代替重新采集的证据"},
+        {"status": "closed", "verification_method": "manual", "verification_note": "已在修复版本现场验证功能通过"},
         format="json",
     )
-    assert response.status_code == 400
+    assert response.status_code == 200, response.content
+    assert response.data["status"] == "closed" and not response.data["requires_data_regression"]
 
 
 def test_nonmanager_cannot_manually_close_defect(session_client, operations, create_user):

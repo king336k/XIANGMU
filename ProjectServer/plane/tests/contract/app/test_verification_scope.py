@@ -88,41 +88,23 @@ def test_scope_change_needs_reason_manager_and_separate_close(session_client, sc
     assert combined.status_code == 400
 
 
-def test_native_created_data_issue_cannot_bypass_data_verification(session_client, scope_case):
-    base, p, row = scope_case
-    native = session_client.post(base + "defects/", {"title": "平台建立的录制丢帧问题"}, format="json").data
-    url = base + f"defects/{native['id']}/"
-    changed = session_client.patch(
-        url, {"verification_scope": "data", "verification_scope_reason": "需要实际数据核验丢帧修复"}, format="json"
+def test_external_data_verification_is_not_supported_in_standalone_platform(session_client, scope_case):
+    base, project, row = scope_case
+    response = session_client.patch(
+        base + f"defects/{row['id']}/",
+        {"verification_scope": "data", "verification_scope_reason": "外部平台已取消"},
+        format="json",
     )
-    assert changed.status_code == 200 and changed.data["requires_data_regression"] is True, changed.content
-    assert (
-        session_client.patch(url, {"status": "resolved", "fixed_build": "capture-v2"}, format="json").status_code == 200
-    )
-    assert (
-        session_client.patch(
-            url,
-            {"status": "closed", "verification_method": "manual", "verification_note": "不能只看页面就通过"},
-            format="json",
-        ).status_code
-        == 400
-    )
+    assert response.status_code == 400, response.content
+    assert not response.data.get("requires_data_regression")
 
 
-def test_daq_default_keeps_existing_new_data_gate(session_client, scope_case):
-    base, p, row = scope_case
-    url = base + f"defects/{row['id']}/"
-    current = session_client.get(url).data
-    assert current["requires_data_regression"] is True
-    session_client.patch(url, {"status": "resolved", "fixed_build": "v2"}, format="json")
-    assert (
-        session_client.patch(
-            url,
-            {"status": "closed", "verification_method": "manual", "verification_note": "默认仍需数据验证"},
-            format="json",
-        ).status_code
-        == 400
-    )
+def test_retired_data_regression_route_never_reactivates_upstream_lookup(session_client, scope_case, mocker):
+    base, project, row = scope_case
+    outbound = mocker.patch("plane.quality.platform.fetch", side_effect=AssertionError("No external regression"))
+    response = session_client.post(base + "data-regressions/", {"defect_id": row["id"]}, format="json")
+    assert response.status_code == 404, response.content
+    outbound.assert_not_called()
 
 
 def test_functional_close_creates_reviewable_knowledge_with_verified_context(session_client, scope_case, create_user):
@@ -135,23 +117,45 @@ def test_functional_close_creates_reviewable_knowledge_with_verified_context(ses
     ).data
     defect = Defect.objects.get(pk=row["id"])
     solution = Solution.objects.create(
-        project=project, created_by=create_user, defect=defect, title="修正保存提示",
-        root_cause="不可引用的未审核改动", steps="不可引用的未审核步骤", verification="重新点击保存",
-        status="approved", submitted_version=1,
+        project=project,
+        created_by=create_user,
+        defect=defect,
+        title="修正保存提示",
+        root_cause="不可引用的未审核改动",
+        steps="不可引用的未审核步骤",
+        verification="重新点击保存",
+        status="approved",
+        submitted_version=1,
     )
     SolutionRevision.objects.create(
-        project=project, created_by=create_user, solution=solution, version=1,
-        snapshot={"title": "修正保存提示", "root_cause": "成功分支引用了失败文案", "steps": "修正成功提示映射",
-                  "verification": "保存后核对提示和实际保存结果"},
-        reviewer_ids=[str(create_user.id)], required_count=1,
+        project=project,
+        created_by=create_user,
+        solution=solution,
+        version=1,
+        snapshot={
+            "title": "修正保存提示",
+            "root_cause": "成功分支引用了失败文案",
+            "steps": "修正成功提示映射",
+            "verification": "保存后核对提示和实际保存结果",
+        },
+        reviewer_ids=[str(create_user.id)],
+        required_count=1,
     )
     url = base + f"defects/{defect.id}/"
-    assert session_client.patch(
-        url, {"status": "resolved", "fixed_build": "ui-v3", "resolution": "已修正提示映射"}, format="json"
-    ).status_code == 200
+    assert (
+        session_client.patch(
+            url, {"status": "resolved", "fixed_build": "ui-v3", "resolution": "已修正提示映射"}, format="json"
+        ).status_code
+        == 200
+    )
     closed = session_client.patch(
-        url, {"status": "closed", "verification_method": "manual",
-              "verification_note": "连续保存三次，提示成功且数据持久化，经理复核通过"}, format="json"
+        url,
+        {
+            "status": "closed",
+            "verification_method": "manual",
+            "verification_note": "连续保存三次，提示成功且数据持久化，经理复核通过",
+        },
+        format="json",
     )
     assert closed.status_code == 200, closed.content
     draft = Article.objects.get(source_defect=defect)
@@ -176,13 +180,20 @@ def test_functional_close_without_reviewed_solution_does_not_invent_root_cause(s
     base, _, _ = scope_case
     row = session_client.post(base + "defects/", {"title": "更新按钮文字"}, format="json").data
     url = base + f"defects/{row['id']}/"
-    assert session_client.patch(
-        url, {"status": "resolved", "fixed_build": "ui-v4", "resolution": "按钮改为保存"}, format="json"
-    ).status_code == 200
-    assert session_client.patch(
-        url, {"status": "closed", "verification_method": "manual", "verification_note": "按钮文字显示保存，操作正常"},
-        format="json",
-    ).status_code == 200
+    assert (
+        session_client.patch(
+            url, {"status": "resolved", "fixed_build": "ui-v4", "resolution": "按钮改为保存"}, format="json"
+        ).status_code
+        == 200
+    )
+    assert (
+        session_client.patch(
+            url,
+            {"status": "closed", "verification_method": "manual", "verification_note": "按钮文字显示保存，操作正常"},
+            format="json",
+        ).status_code
+        == 200
+    )
     draft = Article.objects.get(source_defect_id=row["id"])
     assert draft.status == "draft" and "按钮改为保存" in draft.content
     assert "根因：" not in draft.content and "新数据" not in draft.content

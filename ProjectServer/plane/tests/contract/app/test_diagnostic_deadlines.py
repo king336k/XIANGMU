@@ -1,63 +1,40 @@
-"""DAQ polling must expose expired worker and queue jobs as terminal failures."""
+"""Exercise the deployed report-only polling route rather than the retired DAQ routes."""
 
 from datetime import timedelta
 from uuid import uuid4
 import pytest
 from django.utils import timezone
-from plane.db.models import Issue, Project, ProjectMember
-from plane.quality.models import DiagnosticJob
+from plane.quality.models import DiagnosticJob, Defect
+from plane.tests.contract.app import test_daq_reporting
+
+call = test_daq_reporting.call
+reporting_fixture = test_daq_reporting.reporting
+
+
+@pytest.fixture
+def report_scope(reporting_fixture):
+    return reporting_fixture
+
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 
 
 @pytest.mark.parametrize(
-    "status,age,error",
-    [
-        ("running", 200, "DIAGNOSTIC_TIMEOUT"),
-        ("queued", 901, "QUEUE_WAIT_TIMEOUT"),
-    ],
+    "status,age,error", [("running", 200, "DIAGNOSTIC_TIMEOUT"), ("queued", 901, "QUEUE_WAIT_TIMEOUT")]
 )
-def test_daq_detail_expires_stale_jobs_without_native_dashboard_visit(
-    session_client, workspace, create_user, mocker, status, age, error
-):
-    mocker.patch("plane.quality.diagnostics.enqueue")
-    project = Project.objects.create(workspace=workspace, name="DAQ时限", identifier="DEADLINE")
-    ProjectMember.objects.create(project=project, member=create_user, role=20)
-    issue = Issue.objects.create(project=project, workspace=workspace, name="采集任务")
-    base = f"/api/workspaces/{workspace.slug}/projects/{project.id}/quality/"
-    response = session_client.post(
-        base + "daq/bindings/",
-        {
-            "source_instance": "daq",
-            "platform_task_id": 18,
-            "source_record_id": "deadline-session",
-            "issue_id": str(issue.id),
-        },
-        format="json",
-    )
-    assert response.status_code == 201
-    response = session_client.post(
-        base + "daq/reports/",
-        {
-            "sourceRecordId": "deadline-session",
-            "platformTaskId": 18,
-            "category": "Other",
-            "title": "连接失败",
-            "description": "受控超时测试",
-        },
-        format="json",
-        HTTP_IDEMPOTENCY_KEY=str(uuid4()),
-    )
-    assert response.status_code == 201
-    defect = response.data["issueId"]
-    job = DiagnosticJob.objects.get(defect_id=defect)
+def test_report_only_polling_expires_stalled_diagnosis(report_scope, status, age, error):
+    project, user, payload, _ = report_scope
+    response = call("/api/quality-auth/daq-reports/", {**payload, "hubProjectId": str(project.id)}, method="POST")
+    assert response.status_code == 201, response.content
+    defect = Defect.objects.get(pk=response.data["issueId"])
     old = timezone.now() - timedelta(seconds=age)
-    DiagnosticJob.objects.filter(pk=job.pk).update(
-        status=status, started_at=old if status == "running" else None, created_at=old
+    job = DiagnosticJob.objects.create(
+        project=project, defect=defect, created_by=user, mode="auto", status=status, request_id=uuid4()
     )
-    response = session_client.get(base + f"daq/issues/{defect}/")
-    assert response.status_code == 200
-    latest = response.data["diagnostics"][0]
-    assert latest["status"] == "failed"
-    assert latest["error_code"] == error
-    assert latest["completed_at"]
+    DiagnosticJob.objects.filter(pk=job.pk).update(created_at=old, started_at=old if status == "running" else None)
+    response = call(f"/api/quality-auth/daq-reports/{defect.id}/")
+    assert response.status_code == 200, response.content
+    job.refresh_from_db()
+    assert job.status == "failed"
+    assert job.error_code == error and job.completed_at
+    assert response.data["source"]["diagnosticStatus"] == "failed"

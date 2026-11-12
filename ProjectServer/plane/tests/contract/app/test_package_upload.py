@@ -9,18 +9,11 @@ pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 
 
 @pytest.fixture(autouse=True)
-def clean_test_attachment_storage():
-    from pathlib import Path
-    import shutil
-
-    root = Path("/code/.test-quality-attachments")
-    yield
-    if root.exists():
-        shutil.rmtree(root)
+def isolated_attachment_storage(settings, tmp_path):
+    settings.QUALITY_ATTACHMENT_ROOT = str(tmp_path / "attachments")
 
 
 def test_real_diagnostic_upload_hash_download_and_bad_archive(session_client, workspace, create_user, settings):
-    settings.QUALITY_ATTACHMENT_ROOT = str(__import__("pathlib").Path("/code/.test-quality-attachments"))
     project = Project.objects.create(workspace=workspace, name="诊断文件", identifier="FILES")
     ProjectMember.objects.create(project=project, member=create_user, role=20)
     base = f"/api/workspaces/{workspace.slug}/projects/{project.id}/quality/"
@@ -68,7 +61,6 @@ def test_real_diagnostic_upload_hash_download_and_bad_archive(session_client, wo
 def test_manifest_relative_path_can_be_uploaded_without_using_it_as_disk_path(
     session_client, workspace, create_user, settings
 ):
-    settings.QUALITY_ATTACHMENT_ROOT = "/code/.test-quality-attachments"
     project = Project.objects.create(workspace=workspace, name="嵌套路径", identifier="NEST")
     ProjectMember.objects.create(project=project, member=create_user, role=20)
     base = f"/api/workspaces/{workspace.slug}/projects/{project.id}/quality/"
@@ -94,7 +86,6 @@ def test_manifest_relative_path_can_be_uploaded_without_using_it_as_disk_path(
 
 
 def test_direct_defect_file_and_safe_image_preview(session_client, workspace, create_user, settings):
-    settings.QUALITY_ATTACHMENT_ROOT = "/code/.test-quality-attachments"
     project = Project.objects.create(workspace=workspace, name="手工附件", identifier="DIRECT")
     ProjectMember.objects.create(project=project, member=create_user, role=20)
     base = f"/api/workspaces/{workspace.slug}/projects/{project.id}/quality/"
@@ -123,7 +114,6 @@ def test_direct_defect_file_and_safe_image_preview(session_client, workspace, cr
 
 
 def test_log_preview_returns_complete_file_beyond_old_limit(session_client, workspace, create_user, settings):
-    settings.QUALITY_ATTACHMENT_ROOT = "/code/.test-quality-attachments"
     project = Project.objects.create(workspace=workspace, name="完整日志", identifier="FULLLOG")
     ProjectMember.objects.create(project=project, member=create_user, role=20)
     base = f"/api/workspaces/{workspace.slug}/projects/{project.id}/quality/"

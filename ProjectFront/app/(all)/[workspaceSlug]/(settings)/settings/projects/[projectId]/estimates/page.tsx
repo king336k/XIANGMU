@@ -14,7 +14,7 @@ import { EstimateRoot } from "@/components/estimates";
 import { SettingsContentWrapper } from "@/components/settings/content-wrapper";
 // hooks
 import { useProject } from "@/hooks/store/use-project";
-import { useUserPermissions } from "@/hooks/store/user";
+import { useSettingsPermissions } from "@/components/settings/use-settings-permissions";
 // local imports
 import type { Route } from "./+types/page";
 import { EstimatesProjectSettingsHeader } from "./header";
@@ -23,7 +23,7 @@ function EstimatesSettingsPage({ params }: Route.ComponentProps) {
   const { workspaceSlug, projectId } = useParams() as typeof params;
   // store
   const { currentProjectDetails } = useProject();
-  const { workspaceUserInfo, allowPermissions } = useUserPermissions();
+  const { workspaceUserInfo, allowPermissions } = useSettingsPermissions();
 
   // derived values
   const pageTitle = currentProjectDetails?.name ? `${currentProjectDetails?.name} - 估点` : undefined;

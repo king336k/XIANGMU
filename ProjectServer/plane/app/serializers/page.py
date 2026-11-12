@@ -24,6 +24,7 @@ from plane.db.models import (
 
 class PageSerializer(BaseSerializer):
     can_write = serializers.SerializerMethodField()
+    can_manage = serializers.SerializerMethodField()
     is_favorite = serializers.BooleanField(read_only=True)
     labels = serializers.ListField(
         child=serializers.PrimaryKeyRelatedField(queryset=Label.objects.all()),
@@ -50,11 +51,32 @@ class PageSerializer(BaseSerializer):
             )
         return cached[key]
 
+    def get_can_manage(self, obj):
+        from plane.quality.native_permissions import can_manage_native_access
+        from plane.db.models import ProjectMember
+
+        request = self.context.get("request")
+        view = self.context.get("view")
+        project_id = self.context.get("project_id") or (view.kwargs.get("project_id") if view else None)
+        if not request or not project_id or not self.get_can_write(obj):
+            return False
+        cache = self.context.setdefault("project_management_permissions", {})
+        key = (str(project_id), str(request.user.id))
+        if key not in cache:
+            cache[key] = (
+                can_manage_native_access(request.user, obj.workspace.slug, project_id)
+                or ProjectMember.objects.filter(
+                    project_id=project_id, member=request.user, is_active=True, role=20
+                ).exists()
+            )
+        return obj.owned_by_id == request.user.id or cache[key]
+
     class Meta:
         model = Page
         fields = [
             "id",
             "can_write",
+            "can_manage",
             "name",
             "owned_by",
             "access",

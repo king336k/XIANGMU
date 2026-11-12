@@ -229,59 +229,12 @@ def test_administrator_has_all_capabilities_without_multiple_business_roles(scen
     assert context["is_administrator"] and all(context["capabilities"].values())
 
 
-def test_source_relogin_preserves_primary_and_additional_roles(scenario, mocker):
-    from django.core.cache import cache
-    from plane.quality.models import PlatformAccount, PlatformProject
-
+def test_retired_source_login_cannot_override_local_role_changes(scenario, mocker):
     project, target, other, admin, client, base, call, roles = scenario
-    config = {
-        "kind": "data_platform",
-        "base_url": "https://source.example",
-        "allowed_hosts": ["source.example"],
-        "login_enabled": True,
-        "login_auto_provision": True,
-        "configured_by": str(InstanceAdmin.objects.first().user_id),
-        "service_token": "test-only",
-    }
-    info = {"id": 42, "username": "source-multi", "status": "Active", "role": "Auditor"}
-    PlatformProject.objects.create(project=project, source_instance="source", external_project_id=7)
-    mocker.patch("plane.quality.data_accounts.read_connection", return_value=config)
-    mocker.patch("plane.quality.data_accounts.authenticate_upstream", return_value=(info, "test-access-only"))
-    mocker.patch("plane.quality.data_accounts.source_user", return_value=info)
-    mocker.patch(
-        "plane.quality.data_accounts.authority_request", return_value={"projects": [{"id": 7}], "administrator": False}
+    # Current local-role switching already exercises unchanged-session permission changes above.
+    outbound = mocker.patch("plane.quality.platform.fetch", side_effect=AssertionError("no source login"))
+    response = APIClient().post(
+        "/api/quality-auth/data-login/", {"username": "source-multi", "password": "synthetic"}, format="json"
     )
-    mocker.patch(
-        "plane.quality.platform.fetch",
-        side_effect=lambda name, path, *a, **kw: (
-            {"id": 42, "active": True, "role": "Auditor"} if "/issue-users/" in path else {"projects": [{"id": 7}]}
-        ),
-    )
-    cache.clear()
-    source = APIClient()
-    first = source.post(
-        "/api/quality-auth/data-login/",
-        {"source_instance": "source", "username": "source-multi", "password": "test-input-only"},
-        format="json",
-    )
-    assert first.status_code == 200, first.data
-    account = PlatformAccount.objects.get(source_instance="source", external_user_id=42)
-    changed = admin.post(
-        base + "roles/",
-        {"user_id": str(account.user_id), "roles": ["REGRESSION_TESTER", "PROJECT_MANAGER"]},
-        format="json",
-    )
-    assert changed.status_code == 200, changed.data
-    cache.clear()
-    again = APIClient()
-    response = again.post(
-        "/api/quality-auth/data-login/",
-        {"source_instance": "source", "username": "source-multi", "password": "test-input-only"},
-        format="json",
-    )
-    assert response.status_code == 200, response.data
-    context = again.get(base + "context/")
-    assert context.status_code == 200, context.data
-    assert set(context.data["business_roles"]) == {"REGRESSION_TESTER", "PROJECT_MANAGER"}
-    binding = BusinessRole.objects.get(project=project, user=account.user)
-    assert binding.role == "REGRESSION_TESTER" and binding.additional_roles == ["PROJECT_MANAGER"]
+    assert response.status_code == 404, response.content
+    outbound.assert_not_called()

@@ -31,15 +31,15 @@ def request(user, method="post", data=None):
 def test_create_needs_only_type_address_and_optional_credential(administrator):
     response = request(
         administrator,
-        data={"kind": "data_platform", "base_url": "http://10.20.30.40:6324", "service_token": "synthetic-only"},
+        data={"kind": "ota", "base_url": "http://10.20.30.40:6324", "service_token": "synthetic-only"},
     )
     assert response.status_code == 201, response.data
     name = response.data["source_instance"]
-    assert name.startswith("data-platform-")
+    assert name.startswith("ota-")
     config = read_connection(name)
     assert config["allow_http_local"] is True
     assert config["portal_url"] == "http://10.20.30.40:6324"
-    assert config["bridge_key_id"] and config["bridge_audience"] == "plane-quality"
+    assert not config["bridge_key_id"] and not config["bridge_audience"]
     assert not config["bridge_secret"]
     assert "synthetic-only" not in str(response.data)
 
@@ -49,14 +49,14 @@ def test_edit_basic_fields_preserves_hidden_configuration_and_secrets(administra
         administrator,
         data={
             "source_instance": "existing",
-            "kind": "data_platform",
+            "kind": "ota",
             "base_url": "https://platform.example",
             "service_token": "synthetic-token",
             "bridge_secret": "synthetic-signature",
             "bridge_key_id": "existing-key",
             "bridge_audience": "existing-audience",
-            "login_enabled": True,
-            "login_auto_provision": True,
+            "login_enabled": False,
+            "login_auto_provision": False,
             "login_role_map": {"Admin": "PLATFORM_ADMIN", "Collector": "REPORTER"},
             "portal_url": "https://portal.example",
         },
@@ -67,7 +67,7 @@ def test_edit_basic_fields_preserves_hidden_configuration_and_secrets(administra
         administrator,
         data={
             "source_instance": "existing",
-            "kind": "data_platform",
+            "kind": "ota",
             "base_url": "https://new.example",
             "service_token": "",
         },
@@ -91,7 +91,7 @@ def test_edit_basic_fields_preserves_hidden_configuration_and_secrets(administra
 def test_global_admin_does_not_need_any_project_and_secret_is_never_listed(administrator):
     response = request(
         administrator,
-        data={"kind": "data_platform", "base_url": "http://10.20.30.40", "service_token": "synthetic-token"},
+        data={"kind": "ota", "base_url": "http://10.20.30.40", "service_token": "synthetic-token"},
     )
     assert response.status_code == 201
     listed = request(administrator, "get")
@@ -102,9 +102,7 @@ def test_global_admin_does_not_need_any_project_and_secret_is_never_listed(admin
 
 def test_nonadministrator_cannot_read_or_modify_global_connections(create_user):
     assert request(create_user, "get").status_code == 403
-    assert (
-        request(create_user, data={"kind": "data_platform", "base_url": "https://platform.example"}).status_code == 403
-    )
+    assert request(create_user, data={"kind": "ota", "base_url": "https://platform.example"}).status_code == 403
 
 
 @pytest.mark.parametrize(
@@ -118,7 +116,7 @@ def test_nonadministrator_cannot_read_or_modify_global_connections(create_user):
     ],
 )
 def test_simplification_keeps_connection_address_guards(administrator, url):
-    response = request(administrator, data={"kind": "data_platform", "base_url": url})
+    response = request(administrator, data={"kind": "ota", "base_url": url})
     assert response.status_code == 400, response.data
 
 
@@ -127,10 +125,10 @@ def test_explicit_disable_and_credential_clear_still_work(administrator):
         administrator,
         data={
             "source_instance": "clearable",
-            "kind": "data_platform",
+            "kind": "ota",
             "base_url": "https://platform.example",
             "service_token": "synthetic-token",
-            "login_enabled": True,
+            "login_enabled": False,
         },
     )
     assert first.status_code == 201
@@ -138,7 +136,7 @@ def test_explicit_disable_and_credential_clear_still_work(administrator):
         administrator,
         data={
             "source_instance": "clearable",
-            "kind": "data_platform",
+            "kind": "ota",
             "base_url": "https://platform.example",
             "clear_token": True,
             "login_enabled": False,
@@ -149,24 +147,11 @@ def test_explicit_disable_and_credential_clear_still_work(administrator):
     assert config["service_token"] == "" and config["login_enabled"] is False
 
 
-def test_basic_edit_keeps_legacy_directory_settings(administrator):
-    initial = {
-        "source_instance": "legacy-preserve",
-        "kind": "legacy_hub",
-        "base_url": "https://legacy.example",
-        "directory_auth": "trusted_v2",
-        "directory_key_id": "directory-test",
-        "directory_user_id": 19,
-        "directory_username": "readonly-test",
-    }
-    assert request(administrator, data=initial).status_code == 201
-    response = request(
-        administrator, data={"source_instance": "legacy-preserve", "base_url": "https://updated.example"}
-    )
-    assert response.status_code == 201, response.data
-    stored = read_connection("legacy-preserve")
-    for name in ["directory_auth", "directory_key_id", "directory_user_id", "directory_username"]:
-        assert stored[name] == initial[name]
+def test_retired_legacy_hub_directory_configuration_is_rejected(administrator):
+    payload = {"source_instance": "legacy-preserve", "kind": "legacy_hub", "base_url": "https://legacy.example"}
+    response = request(administrator, data=payload)
+    assert response.status_code == 400, response.data
+    assert read_connection("legacy-preserve") is None
 
 
 def test_same_generated_source_identifier_makes_ui_retry_update_same_connection(administrator):
@@ -174,7 +159,7 @@ def test_same_generated_source_identifier_makes_ui_retry_update_same_connection(
 
     payload = {
         "source_instance": "source-automatic-stable",
-        "kind": "data_platform",
+        "kind": "ota",
         "base_url": "https://platform.example",
     }
     assert request(administrator, data=payload).status_code == 201
@@ -186,7 +171,7 @@ def test_edit_cannot_repurpose_an_existing_connection_identity(administrator):
     assert (
         request(
             administrator,
-            data={"source_instance": "immutable-type", "kind": "data_platform", "base_url": "https://platform.example"},
+            data={"source_instance": "immutable-type", "kind": "ota", "base_url": "https://platform.example"},
         ).status_code
         == 201
     )
@@ -195,10 +180,10 @@ def test_edit_cannot_repurpose_an_existing_connection_identity(administrator):
         data={"source_instance": "immutable-type", "kind": "feishu", "base_url": "https://open.feishu.cn"},
     )
     assert response.status_code == 400
-    assert read_connection("immutable-type")["kind"] == "data_platform"
+    assert read_connection("immutable-type")["kind"] == "ota"
 
 
 @pytest.mark.parametrize("data", [{"source_instance": {"bad": "type"}}, {"base_url": "https://[invalid"}])
 def test_invalid_basic_input_is_validation_error_without_server_error(administrator, data):
-    response = request(administrator, data={"kind": "data_platform", "base_url": "https://platform.example", **data})
+    response = request(administrator, data={"kind": "ota", "base_url": "https://platform.example", **data})
     assert response.status_code == 400, response.data

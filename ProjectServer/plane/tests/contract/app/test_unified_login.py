@@ -73,26 +73,26 @@ def test_same_username_local_password_uses_local_identity(login_env):
     assert local.email not in str(r.data)
 
 
-def test_same_username_data_password_uses_source_identity_without_merging(login_env):
+def test_same_username_source_password_never_establishes_local_session(login_env):
     local, directory, source, config = login_env
     c, r = submit("source-password")
-    assert r.status_code == 200, r.content
-    linked = PlatformAccount.objects.get(source_instance="data-main", external_user_id=42)
-    assert linked.user_id != local.id
-    assert c.session["_auth_user_id"] == str(linked.user_id)
-    assert c.session["quality_data_account"] == str(linked.id)
-    assert r.data["next"] == "/settings/profile/security/"
-    assert "source-password" not in str(dict(c.session))
+    assert r.status_code in {401, 403}, r.content
+    assert "_auth_user_id" not in c.session
+    assert not PlatformAccount.objects.exists()
+    source.assert_not_called()
+    directory.assert_not_called()
 
 
-def test_identical_name_and_password_never_selects_arbitrary_identity(login_env):
+def test_identical_source_name_cannot_override_local_identity(login_env):
     local, directory, source, config = login_env
     local.set_password("source-password")
     local.save()
     c, r = submit("source-password")
-    assert r.status_code == 409, r.content
-    assert "_auth_user_id" not in c.session
+    assert r.status_code == 200, r.content
+    assert c.session["_auth_user_id"] == str(local.id)
     assert not PlatformAccount.objects.exists()
+    source.assert_not_called()
+    directory.assert_not_called()
 
 
 def test_unknown_username_does_not_forward_password_to_any_authority(login_env):
@@ -103,21 +103,24 @@ def test_unknown_username_does_not_forward_password_to_any_authority(login_env):
     assert "_auth_user_id" not in c.session
 
 
-def test_authority_failure_cannot_fall_back_to_same_named_local_account(login_env):
+def test_retired_authority_failure_does_not_block_local_login(login_env):
     local, directory, source, config = login_env
     source.side_effect = PlatformUnavailable()
     c, r = submit("local-password")
-    assert r.status_code == 503, r.content
-    assert "_auth_user_id" not in c.session
+    assert r.status_code == 200, r.content
+    assert c.session["_auth_user_id"] == str(local.id)
+    source.assert_not_called()
+    directory.assert_not_called()
 
 
 def test_directory_failure_does_not_send_password_to_sources(login_env):
     local, directory, source, config = login_env
     directory.side_effect = PlatformUnavailable()
     c, r = submit("local-password")
-    assert r.status_code == 503, r.content
+    assert r.status_code == 200, r.content
+    assert c.session["_auth_user_id"] == str(local.id)
     source.assert_not_called()
-    assert "_auth_user_id" not in c.session
+    directory.assert_not_called()
 
 
 def test_wrong_password_and_disabled_local_cannot_create_session(login_env):
@@ -149,33 +152,14 @@ def test_client_cannot_choose_source_or_redirect_to_external_host(login_env):
     assert c.session["_auth_user_id"] == str(local.id)
 
 
-def test_same_named_accounts_across_two_sources_use_password_and_source_id(login_env, mocker):
+def test_other_source_password_never_establishes_platform_session(login_env):
     local, directory, source, config = login_env
-    second = {**config, "source_test": "second"}
-    mocker.patch(
-        "plane.quality.unified_login.configured_sources", return_value=[("data-main", config), ("data-second", second)]
-    )
-    directory.side_effect = lambda name, path: [
-        {"id": 42 if name == "data-main" else 99, "username": "same-user", "active": True}
-    ]
-
-    def auth(cfg, name, password):
-        expected = "second-password" if cfg.get("source_test") == "second" else "source-password"
-        if password != expected:
-            raise AuthenticationFailed("invalid")
-        return {
-            "id": 99 if cfg.get("source_test") == "second" else 42,
-            "username": name,
-            "status": "Active",
-            "role": "Pending",
-        }, "test-source-session-token"
-
-    source.side_effect = auth
     c, r = submit("second-password")
-    assert r.status_code == 200, r.content
-    account = PlatformAccount.objects.get(source_instance="data-second", external_user_id=99)
-    assert c.session["_auth_user_id"] == str(account.user_id)
-    assert not PlatformAccount.objects.filter(source_instance="data-main").exists()
+    assert r.status_code in {401, 403}, r.content
+    assert "_auth_user_id" not in c.session
+    assert not PlatformAccount.objects.exists()
+    source.assert_not_called()
+    directory.assert_not_called()
 
 
 def test_local_only_login_still_uses_enabled_native_provider(login_env, mocker):

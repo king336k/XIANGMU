@@ -123,22 +123,19 @@ def test_external_role_string_and_stale_business_grant_never_bypass_authority(sc
     assert not permissions.is_administrator(user)
 
 
-def test_verified_source_admin_grant_and_demotion_are_immediate(scope):
+def test_source_admin_claim_never_grants_local_administrator(scope):
     from plane.quality.data_accounts import sync_administrator
 
     project, user, instance = scope
-    actor = User.objects.create(email="canonical@admin.invalid", username="canonical")
+    actor = User.objects.create(username="local-actor", email="local-actor@test.invalid")
     InstanceAdmin.objects.create(instance=instance, user=actor)
     account = PlatformAccount.objects.create(
-        user=user, source_instance="source", external_user_id=1, source_username="sourceadmin", source_role="Admin"
+        user=user, source_instance="source", external_user_id=1, source_username="Admin", source_role="Admin"
     )
-    config = {"configured_by": str(actor.id), "service_token": "test-only"}
+    config = {"configured_by": str(actor.id), "service_token": "synthetic"}
     sync_administrator(account, {"role": "Admin"}, config, {"administrator": True})
-    assert permissions.is_administrator(user)
-    sync_administrator(account, {"role": "Manager"}, config, {"administrator": False})
     assert not permissions.is_administrator(user)
-    InstanceAdmin.objects.create(instance=instance, user=user)
-    assert permissions.is_administrator(user)
+    assert not InstanceAdmin.objects.filter(user=user).exists()
 
 
 @pytest.mark.parametrize("source_role", ["TeamLeader", "Annotator", "Auditor", "Collector"])
@@ -181,25 +178,24 @@ def test_account_admin_grant_revoke_is_explicit_and_last_admin_protected(scope, 
     assert revoked.status_code == 200 and not permissions.is_administrator(other)
 
 
-def test_only_source_admin_plus_internal_administrator_claim_grants_admin(scope):
+def test_retired_source_claim_cannot_override_manual_platform_administrator(scope):
     from plane.quality.data_accounts import sync_administrator
 
     project, user, instance = scope
-    actor = User.objects.create(email="source-config@admin.invalid", username="source-config")
+    actor = User.objects.create(username="claim-actor", email="claim-actor@test.invalid")
     InstanceAdmin.objects.create(instance=instance, user=actor)
     account = PlatformAccount.objects.create(
         user=user, source_instance="source", external_user_id=1, source_username="person", source_role="Admin"
     )
-    config = {"configured_by": str(actor.id), "service_token": "test-only"}
-    assert not sync_administrator(account, {"role": "Admin"}, config, {"administrator": False})
-    assert not permissions.is_administrator(user)
-    assert not sync_administrator(account, {"role": "Auditor"}, config, {"administrator": True})
-    assert not permissions.is_administrator(user)
-    sync_administrator(account, {"role": "Manager"}, config, {"administrator": False})
-    assert not permissions.is_administrator(user)
-    # A separate manual administrator grant survives source demotion.
-    InstanceAdmin.objects.create(instance=instance, user=user)
-    assert permissions.is_administrator(user)
+    for role in ["Admin", "Auditor", "Collector"]:
+        sync_administrator(
+            account,
+            {"role": role},
+            {"configured_by": str(actor.id), "service_token": "synthetic"},
+            {"administrator": True},
+        )
+        assert not permissions.is_administrator(user)
+    assert not InstanceAdmin.objects.filter(user=user).exists()
 
 
 @pytest.mark.parametrize(
@@ -317,62 +313,18 @@ def test_explicit_grant_normalizes_old_administrator_role(scope, session_client)
 
 
 @pytest.mark.parametrize("source_role", ["TeamLeader", "Annotator", "Auditor", "Collector"])
-def test_real_login_keeps_admin_reassigned_source_duty(scope, mocker, source_role):
+def test_retired_source_login_cannot_create_or_reassign_platform_accounts(scope, mocker, source_role):
     from rest_framework.test import APIClient
-    from django.core.cache import cache
-    from plane.quality.models import PlatformProject
 
     project, user, instance = scope
-    actor = User.objects.create(email="rolemanager@admin.invalid", username="rolemanager")
-    InstanceAdmin.objects.create(instance=instance, user=actor)
-    WorkspaceMember.objects.create(workspace=project.workspace, member=actor, role=15)
-    ProjectMember.objects.create(project=project, member=actor, role=15)
-    PlatformProject.objects.create(project=project, source_instance="source", external_project_id=7)
-    config = {
-        "kind": "data_platform",
-        "base_url": "https://authority.example",
-        "allowed_hosts": ["authority.example"],
-        "login_enabled": True,
-        "login_auto_provision": True,
-        "configured_by": str(actor.id),
-        "service_token": "test-only",
-    }
-    info = {"id": 42, "username": "source-person", "status": "Active", "role": source_role}
-    mocker.patch("plane.quality.data_accounts.read_connection", return_value=config)
-    mocker.patch("plane.quality.data_accounts.authenticate_upstream", return_value=(info, "test-access-only"))
-    mocker.patch("plane.quality.data_accounts.source_user", return_value=info)
-    mocker.patch(
-        "plane.quality.data_accounts.authority_request", return_value={"projects": [{"id": 7}], "administrator": False}
-    )
-    mocker.patch(
-        "plane.quality.platform.fetch",
-        side_effect=lambda name, path, *a, **kw: (
-            {"id": 42, "active": True, "role": source_role} if "/issue-users/" in path else {"projects": [{"id": 7}]}
-        ),
-    )
-    post = lambda client: client.post(
+    outbound = mocker.patch("plane.quality.platform.fetch", side_effect=AssertionError("No source login"))
+    before = User.objects.count()
+    response = APIClient().post(
         "/api/quality-auth/data-login/",
-        {"source_instance": "source", "username": "source-person", "password": "test-input-only"},
+        {"source_instance": "source", "username": "source-person", "password": "synthetic"},
         format="json",
     )
-    cache.clear()
-    client = APIClient()
-    first = post(client)
-    assert first.status_code == 200, first.data
-    account = PlatformAccount.objects.get(source_instance="source", external_user_id=42)
-    assert BusinessRole.objects.get(project=project, user=account.user).role == "REPORTER"
-    manager = APIClient()
-    manager.force_authenticate(actor)
-    for duty in ["TECHNICIAN", "REGRESSION_TESTER", "PROJECT_MANAGER"]:
-        assigned = manager.post(
-            f"/api/workspaces/{project.workspace.slug}/projects/{project.id}/quality/roles/",
-            {"user_id": str(account.user_id), "role": duty},
-            format="json",
-        )
-        assert assigned.status_code == 200, assigned.data
-        cache.clear()
-        client = APIClient()
-        again = post(client)
-        assert again.status_code == 200, again.data
-        assert BusinessRole.objects.get(project=project, user=account.user).role == duty
-        assert not permissions.is_administrator(account.user)
+    assert response.status_code == 404, response.content
+    assert User.objects.count() == before
+    assert not PlatformAccount.objects.exists()
+    outbound.assert_not_called()

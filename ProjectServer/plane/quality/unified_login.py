@@ -82,6 +82,9 @@ class UnifiedLogin(BaseAPIView):
             except AuthenticationException:
                 raise AuthenticationFailed("用户名或密码不正确，或账号登录已停用。")
             user_login(request._request, user, is_app=True)
+            from .administrator_access import synchronize_administrator_access
+
+            synchronize_administrator_access(user)
             path = data["next_path"]
             if (
                 not path.startswith("/")

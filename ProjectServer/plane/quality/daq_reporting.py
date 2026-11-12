@@ -271,6 +271,9 @@ class DaqOwnReportDetail(ReportingView):
     def get(self, request, report_id):
         link = self.own_report(report_id)
         defect = link.defect
+        from .diagnostics import expire_stale
+
+        expire_stale(defect)
         return Response(
             {
                 "defect": {

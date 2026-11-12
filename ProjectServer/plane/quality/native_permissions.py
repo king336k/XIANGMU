@@ -3,7 +3,7 @@
 
 from rest_framework.permissions import SAFE_METHODS
 from rest_framework.exceptions import PermissionDenied
-from plane.db.models import IssueAssignee, DraftIssue, WorkspaceMember
+from plane.db.models import IssueAssignee, DraftIssue, WorkspaceMember, ProjectMember
 from .permissions import strict, has_role, can_create_projects, writable_member, is_administrator
 
 WORK_MUTATIONS = {
@@ -39,6 +39,19 @@ WORK_MUTATIONS = {
     "IssueRelationViewSet",
     "IssueRelationListCreateAPIEndpoint",
     "IssueRelationDetailAPIEndpoint",
+}
+
+PROJECT_SETTINGS_MUTATIONS = {
+    "StateViewSet",
+    "IntakeStateEndpoint",
+    "LabelViewSet",
+    "BulkCreateIssueLabelsEndpoint",
+    "BulkEstimatePointEndpoint",
+    "EstimatePointEndpoint",
+    "StateListCreateAPIEndpoint",
+    "StateDetailAPIEndpoint",
+    "LabelListCreateAPIEndpoint",
+    "LabelDetailAPIEndpoint",
 }
 
 
@@ -81,6 +94,23 @@ def guard_native_mutation(view, request, kwargs):
         ).exists()
     ):
         raise PermissionDenied("当前账号没有此工作空间的访问权限。")
+    if (
+        request.method not in SAFE_METHODS
+        and request.user.is_authenticated
+        and type(view).__module__.startswith(("plane.app.views.", "plane.api.views."))
+        and type(view).__name__ in PROJECT_SETTINGS_MUTATIONS
+    ):
+        slug, project_id = kwargs.get("slug"), kwargs.get("project_id")
+        if not writable_member(project_id, request.user.id, slug) or not (
+            can_manage_native_access(request.user, slug, project_id)
+            or ProjectMember.objects.filter(
+                project_id=project_id, member=request.user, is_active=True, role=20
+            ).exists()
+            or WorkspaceMember.objects.filter(
+                workspace__slug=slug, member=request.user, is_active=True, role=20
+            ).exists()
+        ):
+            raise PermissionDenied("项目配置由管理员维护。")
     if (
         request.user.is_authenticated
         and (

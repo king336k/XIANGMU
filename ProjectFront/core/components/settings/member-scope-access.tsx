@@ -40,7 +40,7 @@ function WorkspaceScopes({ row, endpoint, pending, busy, administrator, own, onC
             type="checkbox"
             aria-label={`${row.name}工作空间访问`}
             checked={access > 0}
-            disabled={busy || (own && row.access_role > 0)}
+            disabled={busy || administrator || (own && row.access_role > 0)}
             onChange={(event) => onChange(row, event.target.checked ? 15 : 0)}
           />
           <span className="truncate">{row.name}</span>
@@ -50,7 +50,7 @@ function WorkspaceScopes({ row, endpoint, pending, busy, administrator, own, onC
             aria-label={`${row.name}工作空间访问级别`}
             className={`${fieldClass} max-w-36`}
             value={access}
-            disabled={busy || (own && row.access_role > 0)}
+            disabled={busy || administrator || (own && row.access_role > 0)}
             onChange={(event) => onChange(row, Number(event.target.value))}
           >
             {Object.entries(ACCESS_LABELS).map(([value, label]) => (
@@ -128,7 +128,7 @@ function WorkspaceScopes({ row, endpoint, pending, busy, administrator, own, onC
                         type="checkbox"
                         aria-label={`${project.name}项目访问`}
                         checked={projectAccess > 0}
-                        disabled={busy || !access}
+                        disabled={busy || administrator || !access}
                         onChange={(event) =>
                           onChange(project, event.target.checked ? (access === 5 ? 5 : 15) : 0, roles)
                         }
@@ -143,7 +143,7 @@ function WorkspaceScopes({ row, endpoint, pending, busy, administrator, own, onC
                         aria-label={`${project.name}项目访问级别`}
                         className={`${fieldClass} max-w-36`}
                         value={projectAccess}
-                        disabled={busy || !access}
+                        disabled={busy || administrator || !access}
                         onChange={(event) => onChange(project, Number(event.target.value), roles)}
                       >
                         {Object.entries(ACCESS_LABELS)
@@ -239,7 +239,11 @@ export function MemberScopeAccess({
   };
   return (
     <div className="space-y-3">
-      <p className="text-12 text-secondary">选择工作空间和项目。取消工作空间会同时移除其项目访问。</p>
+      <p className="text-12 text-secondary">
+        {data?.is_administrator
+          ? "管理员自动管理全部工作空间和项目，无需逐项分配；如需限制访问，请先取消管理员身份。"
+          : "选择工作空间和项目。取消工作空间会同时移除其项目访问。"}
+      </p>
       <label className="block text-13">
         搜索工作空间
         <input

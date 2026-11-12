@@ -121,11 +121,11 @@ export function StickyEditorToolbar(props: Props) {
       <Tooltip
         tooltipContent={
           <p className="flex flex-col gap-1 text-center text-11">
-            <span className="font-medium">删除</span>
+            <span className="font-medium">删除便签</span>
           </p>
         }
       >
-        <button type="button" onClick={handleDelete} className="my-auto text-primary/50">
+        <button type="button" aria-label="删除便签" onClick={handleDelete} className="my-auto text-primary/50">
           <TrashIcon className="size-4" />
         </button>
       </Tooltip>

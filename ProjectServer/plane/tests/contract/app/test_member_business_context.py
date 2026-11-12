@@ -50,7 +50,7 @@ def test_removed_project_member_is_not_shown_with_stale_business_role(workspace,
     assert response.data["members"][str(create_user.id)]["business_roles"] == []
 
 
-def test_member_context_uses_source_username_and_includes_additional_duties(workspace, create_user):
+def test_member_context_uses_local_username_and_includes_additional_duties(workspace, create_user):
     from plane.quality.models import PlatformAccount
 
     project = Project.objects.create(workspace=workspace, name="Mixed", identifier="MIX")
@@ -73,11 +73,12 @@ def test_member_context_uses_source_username_and_includes_additional_duties(work
     browser.force_authenticate(create_user)
     response = browser.get(f"/api/workspaces/{workspace.slug}/member-context/")
     row = response.data["members"][str(create_user.id)]
-    assert row["username"] == "daq_operator"
+    assert row["username"] == create_user.username
+    assert row["identity_mapped"] is False
     assert {item["role"] for item in row["business_roles"]} == {"项目经理", "技术员"}
 
 
-def test_admin_member_serializer_preserves_local_and_authority_usernames(create_user):
+def test_admin_member_serializer_keeps_local_username_despite_retired_source_metadata(create_user):
     from plane.app.serializers.user import UserAdminLiteSerializer
     from plane.quality.models import PlatformAccount
 
@@ -90,7 +91,7 @@ def test_admin_member_serializer_preserves_local_and_authority_usernames(create_
         source_role="Collector",
     )
     create_user.refresh_from_db()
-    assert UserAdminLiteSerializer(create_user).data["username"] == "source_account"
+    assert UserAdminLiteSerializer(create_user).data["username"] == create_user.username
 
 
 def test_disabled_account_is_not_assignable_or_shown_as_active_project_member(workspace, create_user, session_client):
@@ -115,6 +116,7 @@ def test_disabled_account_is_not_assignable_or_shown_as_active_project_member(wo
 
 def test_member_serializer_reports_disabled_login_status(create_user):
     from plane.app.serializers.user import UserAdminLiteSerializer
+
     create_user.is_active = False
     create_user.save(update_fields=["is_active"])
     assert UserAdminLiteSerializer(create_user).data["is_active"] is False

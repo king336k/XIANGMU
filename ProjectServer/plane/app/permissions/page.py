@@ -4,6 +4,7 @@
 
 from plane.db.models import ProjectMember, WorkspaceMember, Page
 from plane.quality.permissions import capable
+from plane.quality.native_permissions import can_manage_native_access
 from plane.app.permissions import ROLE
 
 
@@ -77,7 +78,12 @@ class ProjectPagePermission(BasePermission):
             if page.access == Page.PRIVATE_ACCESS:
                 return self._has_private_page_action_access(request, slug, page, project_id)
 
+            if getattr(view, "action", None) in {"lock", "unlock", "archive", "unarchive", "destroy"}:
+                return role == ADMIN or can_manage_native_access(request.user, slug, project_id)
+
         # Handle public page access
+        if role == MEMBER and can_manage_native_access(request.user, slug, project_id):
+            role = ADMIN
         return self._has_public_page_action_access(request, role)
 
     def _check_project_member_access(self, request, slug, project_id):

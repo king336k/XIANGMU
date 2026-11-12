@@ -168,9 +168,16 @@ export const UnifiedMembers = observer(function UnifiedMembers({
                   <td>{memberAccessLabel(person, !!projectId)}</td>
                   <td>{person.is_administrator ? "管理员" : "—"}</td>
                   <td className="p-3">
-                    <button className="text-accent-primary" onClick={() => setEditing(person)}>
-                      编辑权限
-                    </button>
+                    {canAdmin ||
+                    canRoles ||
+                    currentWorkspaceRole === 20 ||
+                    (currentProjectRole === 20 && person.id !== user?.id && person.workspaceMembership?.role !== 20) ? (
+                      <button className="text-accent-primary" onClick={() => setEditing(person)}>
+                        编辑权限
+                      </button>
+                    ) : (
+                      <span className="text-secondary">只读</span>
+                    )}
                   </td>
                 </tr>
               ))}

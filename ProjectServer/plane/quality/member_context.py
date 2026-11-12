@@ -6,11 +6,12 @@ from plane.app.views.base import BaseAPIView
 from plane.db.models import ProjectMember, WorkspaceMember
 from .models import BusinessRole
 from .permissions import ROLE_NAMES
+from .native_permissions import can_manage_native_access
 
 
 class WorkspaceMemberContext(BaseAPIView):
     def get(self, request, slug):
-        if not WorkspaceMember.objects.filter(
+        if not can_manage_native_access(request.user, slug) and not WorkspaceMember.objects.filter(
             workspace__slug=slug, member=request.user, role=20, is_active=True
         ).exists():
             raise PermissionDenied("只有管理员或工作空间负责人可以核对成员账号。")

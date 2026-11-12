@@ -128,7 +128,7 @@ export class ProjectPage extends BasePage implements TProjectPage {
   get canCurrentUserLockPage() {
     if (!this.can_write) return false;
     const highestRole = this.getHighestRoleAcrossProjects();
-    return this.isCurrentUserOwner || highestRole === EUserPermissions.ADMIN;
+    return this.can_manage === true || this.isCurrentUserOwner || highestRole === EUserPermissions.ADMIN;
   }
 
   /**
@@ -146,7 +146,7 @@ export class ProjectPage extends BasePage implements TProjectPage {
   get canCurrentUserArchivePage() {
     if (!this.can_write) return false;
     const highestRole = this.getHighestRoleAcrossProjects();
-    return this.isCurrentUserOwner || highestRole === EUserPermissions.ADMIN;
+    return this.can_manage === true || this.isCurrentUserOwner || highestRole === EUserPermissions.ADMIN;
   }
 
   /**
@@ -155,7 +155,7 @@ export class ProjectPage extends BasePage implements TProjectPage {
   get canCurrentUserDeletePage() {
     if (!this.can_write) return false;
     const highestRole = this.getHighestRoleAcrossProjects();
-    return this.isCurrentUserOwner || highestRole === EUserPermissions.ADMIN;
+    return this.can_manage === true || this.isCurrentUserOwner || highestRole === EUserPermissions.ADMIN;
   }
 
   /**

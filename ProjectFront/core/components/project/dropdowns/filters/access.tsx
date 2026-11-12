@@ -27,12 +27,14 @@ export const FilterAccess = observer(function FilterAccess(props: Props) {
   const { t } = useTranslation();
 
   const appliedFiltersCount = appliedFilters?.length ?? 0;
-  const filteredOptions = NETWORK_CHOICES.filter((a) => a.i18n_label.includes(searchQuery.toLowerCase()));
+  const filteredOptions = NETWORK_CHOICES.filter((a) =>
+    t(a.i18n_label).toLowerCase().includes(searchQuery.trim().toLowerCase())
+  );
 
   return (
     <>
       <FilterHeader
-        title={`Access${appliedFiltersCount > 0 ? ` (${appliedFiltersCount})` : ""}`}
+        title={`可见范围${appliedFiltersCount > 0 ? ` (${appliedFiltersCount})` : ""}`}
         isPreviewEnabled={previewEnabled}
         handleIsPreviewEnabled={() => setPreviewEnabled(!previewEnabled)}
       />
@@ -42,7 +44,7 @@ export const FilterAccess = observer(function FilterAccess(props: Props) {
             filteredOptions.map((access) => (
               <FilterOption
                 key={access.key}
-                isChecked={appliedFilters?.includes(`${access.key}`) ? true : false}
+                isChecked={Boolean(appliedFilters?.includes(`${access.key}`))}
                 onClick={() => handleUpdate(`${access.key}`)}
                 icon={<ProjectNetworkIcon iconKey={access.iconKey} />}
                 title={t(access.i18n_label)}

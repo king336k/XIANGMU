@@ -1,27 +1,27 @@
 {
   "stickies": {
-    "title": "您的便签",
+    "title": "我的便签",
     "placeholder": "点击此处输入",
     "all": "所有便签",
     "no-data": "还没有便签",
-    "add": "添加便签",
+    "add": "新建便签",
     "search_placeholder": "按标题搜索",
     "delete": "删除便签",
-    "delete_confirmation": "您确定要删除此便签吗？",
+    "delete_confirmation": "删除后无法恢复，确定删除这条便签吗？",
     "empty_state": {
       "simple": "还没有便签",
       "general": {
-        "title": "便签是您随手记下的快速笔记和待办事项。",
-        "description": "记录个人待办和备忘。",
+        "title": "还没有便签",
+        "description": "把临时想法、待办和备忘记在这里，输入内容后会自动保存。",
         "primary_button": {
-          "text": "添加便签"
+          "text": "新建便签"
         }
       },
       "search": {
-        "title": "这与您的任何便签都不匹配。",
-        "description": "尝试使用不同的术语，或如果您确定\n搜索是正确的，请告诉我们。",
+        "title": "没有找到相关便签",
+        "description": "换个关键词试试，也可以新建一条便签。",
         "primary_button": {
-          "text": "添加便签"
+          "text": "新建便签"
         }
       }
     },
@@ -47,12 +47,12 @@
         "message": "无法更新便签"
       },
       "removed": {
-        "title": "便签已移除",
-        "message": "便签已成功移除"
+        "title": "便签已删除",
+        "message": "这条便签已删除。"
       },
       "not_removed": {
-        "title": "便签未移除",
-        "message": "无法移除便签"
+        "title": "删除失败",
+        "message": "便签未删除，请重试。"
       }
     }
   }
