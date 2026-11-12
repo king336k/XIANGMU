@@ -64,3 +64,14 @@ def test_multiple_status_exclusions_keep_intersection(session_client, drilldown)
         base + "defects/?view=assigned_to_me&exclude_status=closed&exclude_status=open&device=robot"
     )
     assert response.status_code == 200 and response.data["count"] == 2, response.data
+
+
+def test_closed_quick_view_matches_statistics_and_preserves_other_filters(session_client, drilldown):
+    base, _ = drilldown
+    filters = {"view": "closed", "device": "robot", "severity": "major"}
+    detail = session_client.get(base + "defects/", filters)
+    stats = session_client.get(base + "defect-statistics/", filters)
+    assert detail.status_code == stats.status_code == 200
+    assert detail.data["count"] == stats.data["total"] == 1
+    assert detail.data["results"][0]["status"] == "closed"
+    assert session_client.get(base + "defects/", {**filters, "status": "open"}).data["count"] == 0

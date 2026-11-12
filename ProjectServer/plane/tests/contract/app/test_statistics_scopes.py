@@ -96,6 +96,11 @@ def test_overview_separates_manual_current_round_from_history_and_active_library
     assert data["manual_execution_count"] == 3 and data["execution_count"] == 2
     assert data["plan_count"] == 1 and data["historical_plan_count"] == 2
     assert data["case_count"] == 1 and data["open_defects"] == 0
+    assert data["closed_defects"] == 1
+    for result in ["passed", "failed", "blocked", "inconclusive", "skipped", "pending"]:
+        filtered = session_client.get(base + f"verification-results/?current_only=true&mode=manual&result={result}")
+        assert filtered.status_code == 200
+        assert filtered.data["count"] == data["manual_verification"][result]
     manual = session_client.get(base + "verification-results/?current_only=true&mode=manual")
     assert manual.status_code == 200 and manual.data["count"] == data["manual_verification"]["total"] == 1
     assert manual.data["results"][0]["current"]["id"] == str(current.id)
@@ -347,3 +352,41 @@ def test_current_drilldowns_match_summary_and_default_execution_history_stays_co
         assert response.status_code == 200 and response.data["count"] == summary[result]
     assert session_client.get(base + "executions/").data["count"] == 5
     assert session_client.get(base + "plans/").data["count"] == 3
+
+
+def test_manual_result_drilldowns_use_latest_result_and_include_accepted_closed(session_client, scope):
+    project, base, actor = scope
+    for index, result in enumerate(["passed", "failed", "blocked", "inconclusive", "skipped", "pending"]):
+        defect = Defect.objects.create(
+            project=project,
+            title=result,
+            status="closed" if result == "passed" else "resolved",
+            fixed_build="v2",
+            resolved_at=timezone.now(),
+        )
+        row = verification(project, actor, defect, 1, status="accepted" if result == "passed" else "testing")
+        if result != "pending":
+            for outcome in ["failed", result]:
+                DefectVerificationResult.objects.create(
+                    project=project,
+                    verification=row,
+                    created_by=actor,
+                    request_id=uuid4(),
+                    request_hash="x",
+                    result=outcome,
+                    actual_result="实测",
+                )
+    report = session_client.get(base + "report/").data
+    assert report["closed_defects"] == 1
+    assert report["manual_verification"]["total"] == 6
+    for result in ["passed", "failed", "blocked", "inconclusive", "skipped", "pending"]:
+        response = session_client.get(base + f"verification-results/?current_only=true&mode=manual&result={result}")
+        assert response.status_code == 200
+        assert response.data["count"] == report["manual_verification"][result] == 1
+        assert response.data["results"][0]["title"] == result
+    closed = session_client.get(base + "defects/?status=closed")
+    assert closed.status_code == 200 and closed.data["count"] == report["closed_defects"]
+    assert (
+        session_client.get(base + "verification-results/?current_only=true&mode=manual&result=invalid").status_code
+        == 400
+    )

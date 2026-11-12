@@ -513,6 +513,7 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
                           {[
                             { key: "", name: "全部" },
                             { key: "unclosed", name: "未关闭" },
+                            { key: "closed", name: "已关闭" },
                             { key: "assigned_to_me", name: "指派给我" },
                             { key: "created_by_me", name: "由我创建" },
                             { key: "awaiting_regression", name: "待回归" },

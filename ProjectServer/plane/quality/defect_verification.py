@@ -4,7 +4,7 @@ import hashlib
 import json
 
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import F, Q, OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -514,6 +514,21 @@ class DefectVerificationResults(QualityView):
                 if mode not in {"manual", "cases"}:
                     raise ValidationError({"mode": "请选择人工或用例验证。"})
                 current = current.filter(mode=mode)
+            if request.query_params.get("result"):
+                result = serializers.ChoiceField(choices=[*RESULTS, "pending"]).run_validation(
+                    request.query_params["result"]
+                )
+                latest_result = ManualResult.objects.filter(verification_id=OuterRef("pk")).order_by(
+                    "-created_at", "-id"
+                )
+                current = current.filter(mode="manual").annotate(
+                    latest_result=Subquery(latest_result.values("result")[:1])
+                )
+                current = (
+                    current.filter(latest_result__isnull=True)
+                    if result == "pending"
+                    else current.filter(latest_result=result)
+                )
             defects = defects.filter(pk__in=current.values("defect_id"))
         search = request.query_params.get("search", "").strip()
         if search:

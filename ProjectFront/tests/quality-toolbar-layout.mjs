@@ -137,3 +137,14 @@ test("测试三个入口当前页与子页采用蓝色选中态并保留唯一ar
     }
   }
 });
+
+test("已关闭快捷视图保留筛选并重置分页", () => {
+  const { tree, updates } = render();
+  const nav = descendants(tree).find((n) => n.type === "nav" && n.props["aria-label"] === "缺陷快捷视图");
+  const closed = descendants(nav).find((n) => n.type === "button" && n.props.children === "已关闭");
+  assert.ok(closed);
+  closed.props.onClick();
+  assert.equal(updates[0].get("view"), "closed");
+  assert.equal(updates[0].get("severity"), "major");
+  assert.ok(!updates[0].has("page"));
+});

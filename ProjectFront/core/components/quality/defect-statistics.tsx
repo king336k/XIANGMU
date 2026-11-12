@@ -10,10 +10,10 @@ import { defectReport } from "./defect-report";
 import type { DefectStatisticsData } from "./defect-report";
 
 const statusColors: Record<string, string> = {
-  open: "#d99a27",
-  in_progress: "#4b86c6",
-  resolved: "#9673c5",
-  closed: "#379b76",
+  open: "var(--text-color-warning-primary)",
+  in_progress: "var(--text-color-accent-primary)",
+  resolved: "var(--text-color-warning-primary)",
+  closed: "var(--text-color-success-primary)",
 };
 const categoryNames: Record<string, string> = {
   UploadError: "上传异常",
@@ -26,10 +26,10 @@ const categoryNames: Record<string, string> = {
   manual: "平台新建",
 };
 const severityColors: Record<string, string> = {
-  critical: "#c94c5c",
-  major: "#db8650",
-  minor: "#5c8fbe",
-  trivial: "#8b9ba8",
+  critical: "var(--text-color-danger-primary)",
+  major: "var(--text-color-warning-primary)",
+  minor: "var(--text-color-accent-primary)",
+  trivial: "var(--text-color-secondary)",
 };
 
 export function DefectStatistics({
@@ -92,9 +92,9 @@ export function DefectStatistics({
               count: report.awaitingRegression,
             },
             {
-              title: "关闭率",
-              value: `${report.closedPercent}%`,
-              caption: `${report.closed} 条已关闭 / ${data.total} 条`,
+              title: "已关闭",
+              value: report.closed,
+              caption: `关闭率 ${report.closedPercent}%`,
               filters: { status: "closed" },
               count: report.closed,
             },
@@ -112,7 +112,7 @@ export function DefectStatistics({
             aria-label={`查看${item.title}明细`}
             onClick={() =>
               setDetail({
-                title: item.title === "关闭率" ? "已关闭" : item.title,
+                title: item.title,
                 filters: item.filters,
                 expectedCount: item.count,
               })
@@ -120,7 +120,11 @@ export function DefectStatistics({
             className="focus-visible:outline-accent-primary rounded-md border border-subtle px-4 py-3 text-left hover:bg-layer-1 focus-visible:outline-2"
           >
             <p className="text-12 text-secondary">{item.title}</p>
-            <p className="my-2 text-24 font-semibold text-accent-primary tabular-nums">{item.value}</p>
+            <p
+              className={`my-2 text-24 font-semibold tabular-nums ${item.title === "已关闭" ? "text-success-primary" : item.title === "未关闭" || item.title === "待回归" ? "text-warning-primary" : "text-accent-primary"}`}
+            >
+              {item.value}
+            </p>
             <p className="text-11 text-tertiary">{item.caption}</p>
           </button>
         ))}
@@ -166,7 +170,12 @@ export function DefectStatistics({
             key: row.value,
             name: categoryNames[row.value] || "其他上报",
             count: row.count,
-            color: ["#4b86c6", "#379b76", "#d99a27", "#9673c5"][index % 4],
+            color: [
+              "var(--text-color-accent-primary)",
+              "var(--text-color-success-primary)",
+              "var(--text-color-warning-primary)",
+              "var(--text-color-warning-primary)",
+            ][index % 4],
           }))}
           onSelect={(value) =>
             setDetail({
@@ -203,7 +212,7 @@ export function DefectStatistics({
       <TrendChart
         title={`近30天新增 · ${report.recentTotal} 条 · 按创建日期（北京时间）`}
         data={report.trend.map((row) => ({ key: row.date, date: row.date, name: row.name, count: row.count }))}
-        series={[{ key: "count", label: "新增缺陷", color: "#4b86c6" }]}
+        series={[{ key: "count", label: "新增缺陷", color: "var(--text-color-accent-primary)" }]}
         onSelect={(date) =>
           setDetail({
             title: `${date} 新增`,

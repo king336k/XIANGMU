@@ -59,7 +59,10 @@ export async function loadOverviewDetails(
   }
   const query = new URLSearchParams({ page: String(page), per_page: "20", search });
   if (selection.kind === "plans") query.set("current_only", "true");
-  if (selection.kind === "defects") query.set("exclude_status", "closed");
+  if (selection.kind === "defects") {
+    if (selection.result === "closed") query.set("status", "closed");
+    else query.set("exclude_status", "closed");
+  }
   if (selection.kind === "executions" && selection.result) {
     query.set("current_only", "true");
     query.set("result", selection.result);
@@ -67,6 +70,7 @@ export async function loadOverviewDetails(
   if (selection.kind === "manual") {
     query.set("current_only", "true");
     query.set("mode", "manual");
+    if (selection.result) query.set("result", selection.result);
   }
   const endpoint = selection.kind === "manual" ? "verification-results" : selection.kind;
   const data = await qualityApi.read<

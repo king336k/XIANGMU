@@ -720,6 +720,7 @@ def quality_report(project):
         "open_defects": Defect.objects.filter(project=project, archived_at__isnull=True)
         .exclude(status="closed")
         .count(),
+        "closed_defects": Defect.objects.filter(project=project, archived_at__isnull=True, status="closed").count(),
         "requirement_linked_cases": cases.filter(requirement__isnull=False).count(),
         "definitions": {
             "scope": (

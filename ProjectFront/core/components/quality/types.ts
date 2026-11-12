@@ -172,6 +172,7 @@ export type Report = {
   plan_count: number;
   execution_count: number;
   open_defects: number;
+  closed_defects?: number;
   requirement_linked_cases: number;
   definitions: Record<string, string>;
 };

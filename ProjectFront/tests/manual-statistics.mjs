@@ -27,11 +27,20 @@ test("人工验证单独统计，不冒充用例执行总数，且可进入对�
           ? { ...React, useState: (v) => [v, () => {}] }
           : id === "react/jsx-runtime"
             ? require(id)
-            : id === "./shared"
-              ? { Badge: ({ label }) => React.createElement("span", null, label) }
-              : id === "./types"
-                ? { resultNames: { passed: "通过", failed: "失败", pending: "未执行" } }
-                : new Proxy({}, { get: () => () => null }),
+            : id === "./statistics-display"
+              ? {
+                  Distribution: ({ rows }) =>
+                    React.createElement(
+                      "div",
+                      null,
+                      rows.map((row) => React.createElement("span", { key: row.key }, `${row.name} ${row.count}`))
+                    ),
+                }
+              : id === "./shared"
+                ? { Badge: ({ label }) => React.createElement("span", null, label) }
+                : id === "./types"
+                  ? { resultNames: { passed: "通过", failed: "失败", pending: "未执行" } }
+                  : new Proxy({}, { get: () => () => null }),
     e
   );
   const report = {

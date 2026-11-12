@@ -178,3 +178,15 @@ test("卡片选择传对应交集条件和统计数，点击零值也可查看�
     assert.deepEqual(selected, { title, filters, expectedCount: count });
   }
 });
+
+test("已关闭卡片直接展示数量和绿色状态，关闭率作为补充", () => {
+  const { DefectStatistics } = load("defect-statistics", common);
+  const tree = DefectStatistics({ base: "/q/", params: new URLSearchParams() });
+  const card = walk(tree).find((n) => n.type === "button" && n.props["aria-label"] === "查看已关闭明细");
+  assert.ok(card);
+  assert.ok(
+    walk(card).some(
+      (n) => n.type === "p" && n.props.children === 1 && n.props.className.includes("text-success-primary")
+    )
+  );
+});

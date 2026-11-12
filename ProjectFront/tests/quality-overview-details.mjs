@@ -26,6 +26,7 @@ function nodes(tree) {
       : [tree, ...nodes(tree.props?.children)];
 }
 const OverviewDetails = () => null;
+const Distribution = () => null;
 test("概览卡片打开本地明细弹窗而不切换tab，关闭保留原概览", () => {
   let selection = null,
     navigations = 0;
@@ -151,4 +152,63 @@ test("明细打开计划只通知覆盖详情，不关闭原明细或重置筛�
   assert.deepEqual(opened, { kind: "plan", id: "plan-id" });
   assert.equal(closed, 0);
   assert.equal(nodes(tree).find((n) => n.type === "input").props.value, "已有搜索");
+});
+
+test("已关闭缺陷和人工结果按对应条件查询明细", async () => {
+  const urls = [];
+  const source = load("quality-overview-details", {
+    "./api": {
+      qualityApi: {
+        read: async (url) => {
+          urls.push(url);
+          return { count: 0, results: [] };
+        },
+      },
+    },
+  });
+  await source.loadOverviewDetails("/q/", { kind: "defects", title: "已关闭缺陷", result: "closed" }, 1, "");
+  await source.loadOverviewDetails("/q/", { kind: "manual", title: "人工验证 · 失败", result: "failed" }, 1, "");
+  assert.equal(new URL(urls[0], "https://test").searchParams.get("status"), "closed");
+  assert.ok(!urls[0].includes("exclude_status"));
+  assert.equal(new URL(urls[1], "https://test").searchParams.get("result"), "failed");
+  assert.ok(urls[1].includes("mode=manual") && urls[1].includes("current_only=true"));
+});
+
+test("已关闭缺陷卡片和人工结果分布均打开统一明细弹窗", () => {
+  let selection = null;
+  const source = load("quality-summary", {
+    react: {
+      useState: () => [
+        null,
+        (next) => {
+          selection = next;
+        },
+      ],
+    },
+    "./statistics-display": { Distribution },
+    "./types": { resultNames: { passed: "通过", failed: "失败" } },
+  });
+  const tree = source.QualitySummary({
+    base: "/q/",
+    report: {
+      summary: {},
+      definitions: {},
+      case_count: 0,
+      plan_count: 0,
+      execution_count: 0,
+      open_defects: 1,
+      closed_defects: 2,
+      manual_verification: { total: 2, passed: 1, failed: 1 },
+    },
+  });
+  const closed = nodes(tree).find(
+    (n) => n.type === "button" && nodes(n).some((c) => c.props?.children === "已关闭缺陷")
+  );
+  assert.ok(closed);
+  closed.props.onClick();
+  assert.deepEqual(selection, { kind: "defects", title: "已关闭缺陷", result: "closed" });
+  const manual = nodes(tree).find((n) => n.type === Distribution && n.props.title === "人工验证结果");
+  assert.ok(manual && manual.props.showStatus);
+  manual.props.onSelect("failed");
+  assert.deepEqual(selection, { kind: "manual", title: "人工验证 · 失败", result: "failed" });
 });

@@ -187,7 +187,7 @@ def filter_records(queryset, params, user):
         if "assignee_id" in spec:
             allowed += ["assigned_to_me", "unassigned"]
         if queryset.model._meta.model_name == "defect":
-            allowed += ["unclosed", "awaiting_regression"]
+            allowed += ["unclosed", "closed", "awaiting_regression"]
         choice(" ".join(allowed)).run_validation(view)
         if view == "created_by_me":
             queryset = queryset.filter(created_by=user)
@@ -197,6 +197,8 @@ def filter_records(queryset, params, user):
             queryset = queryset.filter(assignee__isnull=True)
         elif view == "unclosed":
             queryset = queryset.exclude(status="closed")
+        elif view == "closed":
+            queryset = queryset.filter(status="closed")
         elif view == "awaiting_regression":
             queryset = queryset.filter(status="resolved")
     ordering = params.get("ordering", "-created_at")

@@ -29,22 +29,29 @@ export function QualitySummary({
   };
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         {[
           ["测试用例", report.case_count, "cases"],
           ["有效测试计划", report.plan_count, "plans"],
           ["执行记录", report.execution_count, "executions"],
           ["未关闭缺陷", report.open_defects, "defects"],
+          ["已关闭缺陷", report.closed_defects || 0, "defects"],
         ].map(([label, number, tab]) => (
           <button
             type="button"
             key={label}
             disabled={!base && !onNavigate}
-            onClick={() => open(tab as OverviewSelection["kind"], String(label))}
+            onClick={() =>
+              open(tab as OverviewSelection["kind"], String(label), label === "已关闭缺陷" ? "closed" : undefined)
+            }
             className="focus-visible:ring-accent-primary rounded-md border border-subtle bg-surface-1 p-4 text-left hover:bg-layer-1 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default"
           >
             <p className="text-12 text-secondary">{label}</p>
-            <p className="mt-2 text-24 font-semibold text-accent-primary">{number}</p>
+            <p
+              className={`mt-2 text-24 font-semibold ${label === "已关闭缺陷" ? "text-success-primary" : label === "未关闭缺陷" ? "text-warning-primary" : "text-accent-primary"}`}
+            >
+              {number}
+            </p>
           </button>
         ))}
       </div>
@@ -95,20 +102,38 @@ export function QualitySummary({
         <section className="space-y-3 rounded-md border border-subtle p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-14 font-semibold">人工验证</h2>
-            <button type="button" className="text-12 text-accent-primary" onClick={() => open("manual", "人工验证")}>
+            <button
+              type="button"
+              disabled={!base && !onNavigate}
+              className="focus-visible:ring-accent-primary rounded text-12 text-accent-primary hover:underline focus-visible:ring-2 focus-visible:outline-none disabled:text-secondary"
+              onClick={() => open("manual", "人工验证")}
+            >
               查看缺陷验证
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge value="neutral" label={`当前 ${report.manual_verification.total} 轮`} />
-            {["passed", "failed", "blocked", "inconclusive", "skipped", "pending"].map((key) => (
-              <Badge
-                key={key}
-                value={report.manual_verification?.[key as keyof typeof report.manual_verification] ? key : "neutral"}
-                label={`${resultNames[key]} ${report.manual_verification?.[key as keyof typeof report.manual_verification] || 0}`}
-              />
-            ))}
+            <Badge value="passed" label={`通过率 ${report.manual_verification.pass_rate || 0}%`} />
           </div>
+          <Distribution
+            title="人工验证结果"
+            showStatus
+            onSelect={
+              base || onNavigate ? (value) => open("manual", `人工验证 · ${resultNames[value]}`, value) : undefined
+            }
+            rows={["passed", "failed", "blocked", "inconclusive", "skipped", "pending"].map((key) => ({
+              key,
+              name: resultNames[key],
+              count: Number(report.manual_verification?.[key as keyof typeof report.manual_verification]) || 0,
+              color:
+                {
+                  passed: "var(--text-color-success-primary)",
+                  failed: "var(--text-color-danger-primary)",
+                  blocked: "var(--text-color-danger-primary)",
+                  inconclusive: "var(--text-color-warning-primary)",
+                }[key] || "var(--text-color-secondary)",
+            }))}
+          />
           <p className="text-12 text-secondary">
             历史实测 {report.manual_execution_count || 0} 次 · 当前每个缺陷取最新有效轮次
           </p>
