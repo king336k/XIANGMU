@@ -13,17 +13,37 @@ from .history import event_page
 
 
 def stage_states(stages, current, transitions):
-    """Only departures actually recorded in this round count as completed."""
-    keys = {key for key, _ in stages}
+    """Distinguish recorded completion, forward skips and work reopened by a return."""
+    keys = [key for key, _ in stages]
     completed = set()
+    skipped = set()
     first = stages[0][0] if stages else None
     for previous, status in transitions:
         if status == first and previous and previous != first:
             completed.clear()
+            skipped.clear()
             continue
-        if previous != status and previous in keys and status not in {"paused", "cancelled", "returned", "failed"}:
+        if previous == status or previous not in keys or status not in keys:
+            continue
+        if status in {"paused", "cancelled", "returned", "failed", "archived"}:
+            continue
+        source, target = keys.index(previous), keys.index(status)
+        if target < source:
+            completed.difference_update(keys[target:])
+            skipped.difference_update(keys[target:])
+        else:
             completed.add(previous)
-    return {key: "current" if key == current else "completed" if key in completed else "pending" for key in keys}
+            skipped.update(key for key in keys[source + 1 : target] if key not in completed)
+    return {
+        key: "current"
+        if key == current
+        else "completed"
+        if key in completed
+        else "skipped"
+        if key in skipped
+        else "pending"
+        for key in keys
+    }
 
 
 def defect_event_display(event, labels, note):

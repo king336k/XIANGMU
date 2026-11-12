@@ -13,7 +13,7 @@ import { useCollectionPagination } from "./use-collection-pagination";
 type Event = { id: string; label: string; actor: string; date: string; note?: string; tone?: string };
 type Data = {
   schedule: { id: string; name: string; start: string | null; target: string | null; status: string; path: string }[];
-  stages: { key: string; name: string; state?: "current" | "completed" | "pending" }[];
+  stages: { key: string; name: string; state?: "current" | "completed" | "pending" | "skipped" }[];
   current: string;
   events: Event[];
   event_pagination: { count: number; page: number; per_page: number };
@@ -114,8 +114,7 @@ export function RecordProgress({
           {data && mode === "stages" && (
             <ol aria-label="业务阶段图" className="m-0 flex list-none flex-wrap gap-3 p-0">
               {data.stages.map((stage, index) => {
-                const state =
-                  stage.key === data.current ? "current" : stage.state === "completed" ? "completed" : "pending";
+                const state = stage.key === data.current ? "current" : stage.state || "pending";
                 return (
                   <li key={stage.key} data-stage={stage.key} data-state={state} className="flex items-center gap-3">
                     <div
@@ -124,7 +123,15 @@ export function RecordProgress({
                       <p className="text-13 font-medium">{stage.name}</p>
                       <Badge
                         value={state === "current" ? "running" : state === "completed" ? "passed" : "neutral"}
-                        label={state === "current" ? "当前阶段" : state === "completed" ? "已完成" : "未开始"}
+                        label={
+                          state === "current"
+                            ? "当前阶段"
+                            : state === "completed"
+                              ? "已完成"
+                              : state === "skipped"
+                                ? "已跳过"
+                                : "未开始"
+                        }
                         variant="plain"
                       />
                     </div>

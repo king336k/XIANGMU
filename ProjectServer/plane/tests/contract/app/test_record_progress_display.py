@@ -27,7 +27,7 @@ def test_skipped_stages_are_not_marked_complete_and_state_ignores_history_pagina
     response = session_client.get(url)
     assert response.status_code == 200, response.content
     state = {stage["key"]: stage["state"] for stage in response.data["stages"]}
-    assert state == {"open": "completed", "in_progress": "pending", "resolved": "current", "closed": "pending"}
+    assert state == {"open": "completed", "in_progress": "skipped", "resolved": "current", "closed": "pending"}
     # Completion facts must not change when the visible history page changes.
     for _ in range(24):
         DefectEvent.objects.create(
@@ -85,3 +85,28 @@ def test_completed_stage_is_actual_departure_and_cancel_is_not_completion():
     assert state["review"] == "current" and state["completed"] == "pending"
     cancelled = stage_states(stages, "cancelled", [("pending", "cancelled")])
     assert cancelled["pending"] == "pending" and cancelled["cancelled"] == "current"
+
+
+def test_closed_forward_jump_marks_skipped_and_backward_reopens_work():
+    from plane.quality.record_progress import stage_states
+
+    stages = [("open", "待处理"), ("in_progress", "处理中"), ("resolved", "待回归"), ("closed", "已关闭")]
+    history = [("", "open"), ("open", "resolved"), ("resolved", "closed")]
+    assert stage_states(stages, "closed", history) == {
+        "open": "completed",
+        "in_progress": "skipped",
+        "resolved": "completed",
+        "closed": "current",
+    }
+    assert stage_states(stages, "in_progress", history + [("closed", "in_progress")]) == {
+        "open": "completed",
+        "in_progress": "current",
+        "resolved": "pending",
+        "closed": "pending",
+    }
+    assert stage_states(stages, "open", history + [("closed", "open")]) == {
+        "open": "current",
+        "in_progress": "pending",
+        "resolved": "pending",
+        "closed": "pending",
+    }

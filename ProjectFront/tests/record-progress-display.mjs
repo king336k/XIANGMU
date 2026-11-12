@@ -212,3 +212,20 @@ test("已完成阶段只使用API事实，关闭弹窗回原页面而不触发�
   assert.ok(!nodes(tree).some((n) => n.type === Modal));
   assert.equal(h.requests.at(-1), null);
 });
+
+test("已关闭时真实跳过的处理中显示已跳过，不能显示未开始或冒充已完成", () => {
+  const closed = {
+    ...data,
+    current: "closed",
+    stages: data.stages.map((s) => ({
+      key: s.key,
+      name: s.name,
+      state: s.key === "closed" ? "current" : s.key === "in_progress" ? "skipped" : "completed",
+    })),
+  };
+  const tree = component("stages", closed).render();
+  const stage = nodes(tree).find((n) => n.props?.["data-stage"] === "in_progress");
+  assert.equal(stage.props["data-state"], "skipped");
+  assert.ok(nodes(stage).some((n) => n.type === Badge && n.props.label === "已跳过" && n.props.value === "neutral"));
+  assert.ok(!nodes(stage).some((n) => n.props?.label === "未开始" || n.props?.label === "已完成"));
+});
