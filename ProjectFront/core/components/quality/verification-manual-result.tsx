@@ -44,8 +44,8 @@ export function VerificationManualResult({
             expected_version: round.version,
             request_id: requestId,
             result: form.get("result"),
-            actual_result: form.get("actual_result"),
-            evidence: form.get("evidence"),
+            actual_result: form.get("actual_result") || "",
+            evidence: form.get("evidence") || "",
             reason_category: needsReason ? form.get("reason_category") : "",
             next_action: needsReason ? form.get("next_action") : "",
             step_results: round.steps.map((_, index) => ({
@@ -140,27 +140,6 @@ export function VerificationManualResult({
           </Field>
         </>
       )}
-      <Field label="结果说明">
-        <textarea
-          required
-          name="actual_result"
-          defaultValue={previous?.actual_result || ""}
-          maxLength={4000}
-          rows={2}
-          className={fieldClass}
-        />
-      </Field>
-      <Field label="验证证据">
-        <textarea
-          required
-          name="evidence"
-          defaultValue={previous?.evidence || ""}
-          maxLength={4000}
-          rows={2}
-          className={fieldClass}
-          placeholder="日志、截图链接或现场记录"
-        />
-      </Field>
     </Modal>
   );
 }

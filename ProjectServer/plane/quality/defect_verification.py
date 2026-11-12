@@ -391,8 +391,6 @@ class DefectVerificationResult(QualityView):
 
 
 def validate_actual(data, steps):
-    if not data["actual_result"].strip() or not data["evidence"].strip():
-        raise ValidationError({"actual_result": "请记录实际结果和验证依据。"})
     if len(data["step_results"]) != len(steps) or any(not step["actual"].strip() for step in data["step_results"]):
         raise ValidationError({"step_results": "请逐步填写实际结果。"})
     if data["result"] == "passed" and any(s["result"] != "passed" for s in data["step_results"]):

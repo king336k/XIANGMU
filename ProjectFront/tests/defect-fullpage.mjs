@@ -105,3 +105,30 @@ test("page dialog保留native top layer和返回/ESC关闭，普通modal保留�
   assert.ok(!ordinary.props.className.includes("defect-page"));
   assert.ok(walk(ordinary).some((node) => node.type === "Button" && node.props.children === "关闭"));
 });
+
+test("缺陷整页顶部仅返回列表，宽度随窗口展开", () => {
+  globalThis.document = { body: {} };
+  const api = load("shared", {
+    react: {
+      ...React,
+      useState: (value) => [value, () => {}],
+      useRef: () => ({ current: { showModal() {} } }),
+      useId: () => "title",
+      useEffect: (fn) => fn(),
+    },
+    "react-dom": { createPortal: (node) => node },
+    "@plane/ui": { Button: "Button" },
+    "./pagination": {},
+  });
+  const tree = api.Modal({
+    title: "缺陷",
+    presentation: "page",
+    breadcrumb: "遥操DAQ联调测试",
+    onClose() {},
+    children: "body",
+  });
+  assert.ok(!walk(tree).some((n) => n.props?.className === "defect-page-topbar"));
+  assert.ok(walk(tree).some((n) => n.type === "button" && n.props.children?.includes?.("返回缺陷列表")));
+  const css = readFileSync(new URL("../styles/globals.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /\.defect-page-card\s*\{[^}]*max-width:\s*1152px/);
+});

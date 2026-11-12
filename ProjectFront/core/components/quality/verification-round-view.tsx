@@ -18,11 +18,15 @@ function ManualResultContent({
   return (
     <div className="space-y-3">
       <VerificationStepsTable steps={round.steps} results={result.step_results} onResultChange={onResultChange} />
-      <div className="flex flex-wrap items-start gap-x-4 gap-y-2 rounded-md border border-subtle px-3 py-3 text-12">
-        <span className="text-secondary">验证证据</span>
-        <p className="min-w-0 flex-1 break-words whitespace-pre-wrap">{result.evidence || "未记录"}</p>
-      </div>
-      <p className="text-13 break-words whitespace-pre-wrap">{result.actual_result}</p>
+      {result.evidence && (
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-2 rounded-md border border-subtle px-3 py-3 text-12">
+          <span className="text-secondary">验证证据</span>
+          <p className="min-w-0 flex-1 break-words whitespace-pre-wrap">{result.evidence}</p>
+        </div>
+      )}
+      {result.actual_result !== result.step_results.map((step, index) => `${index + 1}. ${step.actual}`).join("\n") && (
+        <p className="text-13 break-words whitespace-pre-wrap">{result.actual_result}</p>
+      )}
       {result.next_action && <p className="text-12 text-secondary">下一步：{result.next_action}</p>}
     </div>
   );
@@ -50,9 +54,6 @@ export function VerificationRoundView({
         </span>
         <span>
           验证版本 <strong className="ml-1.5 font-medium text-primary">{round.fixed_build}</strong>
-        </span>
-        <span>
-          环境 <strong className="ml-1.5 font-medium text-primary">{round.environment}</strong>
         </span>
         {showStatus && (
           <Badge
@@ -145,10 +146,17 @@ export function VerificationRoundView({
                 />
                 {item.latest_execution && (
                   <div className="space-y-2 text-12">
-                    <p className="break-words whitespace-pre-wrap">{item.latest_execution.actual_result}</p>
-                    <p className="break-words whitespace-pre-wrap text-secondary">
-                      证据：{item.latest_execution.evidence || "未记录"}
-                    </p>
+                    {item.latest_execution.actual_result !==
+                      item.latest_execution.step_results
+                        .map((step, index) => `${index + 1}. ${step.actual}`)
+                        .join("\n") && (
+                      <p className="break-words whitespace-pre-wrap">{item.latest_execution.actual_result}</p>
+                    )}
+                    {item.latest_execution.evidence && (
+                      <p className="break-words whitespace-pre-wrap text-secondary">
+                        证据：{item.latest_execution.evidence}
+                      </p>
+                    )}
                     <p className="text-secondary">
                       {item.latest_execution.executor} · {renderNumericDateTime(item.latest_execution.created_at)}
                     </p>

@@ -12,12 +12,12 @@ export function ExecutionForm({
   item,
   onClose,
   onSaved,
-  requireEvidence = false,
+  stepResultsOnly = false,
   initialStepIndex,
   initialResult,
   initialExecution,
 }: {
-  requireEvidence?: boolean;
+  stepResultsOnly?: boolean;
   initialStepIndex?: number;
   initialResult?: string;
   initialExecution?: import("./types").Execution | null;
@@ -58,8 +58,8 @@ export function ExecutionForm({
           result,
           reason_category: needsReason ? form.get("reason_category") : "",
           next_action: needsReason ? form.get("next_action") : "",
-          actual_result: form.get("actual_result"),
-          evidence: form.get("evidence"),
+          actual_result: form.get("actual_result") || "",
+          evidence: form.get("evidence") || "",
           step_results: steps,
         });
         await onSaved();
@@ -100,7 +100,7 @@ export function ExecutionForm({
                 <Field label={`步骤 ${index + 1} 实际表现`}>
                   <input
                     className={fieldClass}
-                    required={requireEvidence}
+                    required={stepResultsOnly}
                     value={steps[index].actual}
                     onChange={(e) =>
                       setSteps(steps.map((s, i) => (i === index ? { result: s.result, actual: e.target.value } : s)))
@@ -156,26 +156,30 @@ export function ExecutionForm({
           </Field>
         </div>
       )}
-      <Field label={needsReason ? "实际结果 / 无法判定说明 *" : "实际结果 / 问题说明"}>
-        <textarea
-          name="actual_result"
-          defaultValue={initialExecution?.actual_result || ""}
-          required={needsReason || requireEvidence}
-          rows={3}
-          className={fieldClass}
-          placeholder="失败时请写清实际表现，提交缺陷时会自动带入"
-        />
-      </Field>
-      <Field label="证据备注 / 链接">
-        <textarea
-          name="evidence"
-          defaultValue={initialExecution?.evidence || ""}
-          required={requireEvidence}
-          rows={2}
-          className={fieldClass}
-          placeholder="日志摘要、截图或报告链接"
-        />
-      </Field>
+      {!stepResultsOnly && (
+        <>
+          <Field label={needsReason ? "实际结果 / 无法判定说明 *" : "实际结果 / 问题说明"}>
+            <textarea
+              name="actual_result"
+              defaultValue={initialExecution?.actual_result || ""}
+              required={needsReason || stepResultsOnly}
+              rows={3}
+              className={fieldClass}
+              placeholder="失败时请写清实际表现，提交缺陷时会自动带入"
+            />
+          </Field>
+          <Field label="证据备注 / 链接">
+            <textarea
+              name="evidence"
+              defaultValue={initialExecution?.evidence || ""}
+              required={stepResultsOnly}
+              rows={2}
+              className={fieldClass}
+              placeholder="日志摘要、截图或报告链接"
+            />
+          </Field>
+        </>
+      )}
       <p className="text-12 text-secondary">本次执行会独立保存。重新执行会追加记录，不会覆盖此前结果。</p>
     </Modal>
   );

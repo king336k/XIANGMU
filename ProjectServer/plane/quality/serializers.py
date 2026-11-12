@@ -48,6 +48,12 @@ class ExecutionInput(serializers.Serializer):
     next_action = serializers.CharField(max_length=4000, allow_blank=True, default="")
 
     def validate(self, attrs):
+        if not attrs["actual_result"].strip() and attrs["step_results"]:
+            attrs["actual_result"] = "\n".join(
+                f"{index + 1}. {step['actual']}"
+                for index, step in enumerate(attrs["step_results"])
+                if step["actual"].strip()
+            )[:20000]
         if attrs["result"] == "inconclusive" or any(step["result"] == "inconclusive" for step in attrs["step_results"]):
             errors = {}
             if not attrs["reason_category"]:

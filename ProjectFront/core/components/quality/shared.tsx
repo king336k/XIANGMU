@@ -26,7 +26,6 @@ export function Modal({
   submitLabel = "保存",
   width = "standard",
   presentation = "dialog",
-  breadcrumb,
 }: {
   title: string;
   children: ReactNode;
@@ -77,15 +76,6 @@ export function Modal({
     >
       {presentation === "page" ? (
         <>
-          <header className="defect-page-topbar">
-            <span className="defect-page-brand">
-              TransEngram <span>项目管理平台</span>
-            </span>
-            <span className="defect-page-breadcrumb">
-              {breadcrumb || "项目"}
-              <span aria-hidden="true">/</span>缺陷
-            </span>
-          </header>
           <div className="defect-page-navigation">
             <button type="button" onClick={onClose}>
               <ChevronLeft aria-hidden="true" className="size-4" />

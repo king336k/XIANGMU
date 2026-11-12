@@ -231,7 +231,7 @@ export function DefectVerificationScope({
       {executing && round && (
         <ExecutionForm
           base={base}
-          requireEvidence
+          stepResultsOnly
           initialExecution={executing.item.latest_execution}
           initialStepIndex={executing.stepIndex}
           initialResult={executing.result}

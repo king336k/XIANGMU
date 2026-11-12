@@ -334,3 +334,34 @@ def test_concurrent_manual_result_has_one_winner(session_client, verification):
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert sorted(pool.map(submit, range(2))) == [201, 409]
     assert DefectVerificationResult.objects.filter(verification__defect=defect).count() == 1
+
+
+def test_manual_and_case_steps_need_no_duplicate_summary_or_evidence(session_client, verification):
+    base, cases, defects, tester, manager = verification
+    manual = configure(session_client, base, defects[0]).data["current"]
+    response = session_client.post(
+        base + f"defects/{defects[0].id}/verification/result/",
+        {
+            "expected_version": manual["version"],
+            "request_id": str(uuid4()),
+            "result": "passed",
+            "step_results": [{"result": "passed", "actual": "逐步验证正常"}],
+        },
+        format="json",
+    )
+    assert response.status_code == 201, response.data
+    current = workflow(session_client, base, defects[0], response.data["current"], "submit").data["current"]
+    assert workflow(session_client, base, defects[0], current, "accept").status_code == 200
+    selected = configure(session_client, base, defects[1], cases).data["current"]
+    response = session_client.post(
+        base + f"items/{selected['items'][0]['item_id']}/executions/",
+        {"request_id": str(uuid4()), "result": "passed", "step_results": [{"result": "passed", "actual": "正常"}]},
+        format="json",
+    )
+    assert response.status_code == 201, response.data
+    incomplete = session_client.post(
+        base + f"items/{selected['items'][1]['item_id']}/executions/",
+        {"request_id": str(uuid4()), "result": "passed", "step_results": [{"result": "passed", "actual": ""}]},
+        format="json",
+    )
+    assert incomplete.status_code == 400

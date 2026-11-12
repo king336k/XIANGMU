@@ -234,3 +234,9 @@ test("结果列选择绑定当前步骤并打开原轮次实测表单，历史�
   const historical = VerificationRoundView({ round: { ...cases, can_record: false } });
   assert.equal(descendants(historical).find((node) => node.type === Table).props.onResultChange, undefined);
 });
+
+test("验证结果详情不显示环境等重复信息", () => {
+  const html = renderRound();
+  assert.doesNotMatch(html, />环境/);
+  assert.doesNotMatch(html, />本地</);
+});

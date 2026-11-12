@@ -702,8 +702,8 @@ dialog.defect-page::backdrop {
   color: #7a8b9d;
 }
 .defect-page-navigation {
-  max-width: 1152px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0 24px;
   padding: 26px 0;
 }
 .defect-page-navigation button {
@@ -713,8 +713,8 @@ dialog.defect-page::backdrop {
   color: #7a8b9d;
 }
 .defect-page-card {
-  max-width: 1152px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0 24px;
   overflow: hidden;
   border: 1px solid #dbe3ec;
   border-radius: 8px;

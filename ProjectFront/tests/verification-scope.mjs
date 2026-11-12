@@ -267,3 +267,26 @@ test("人工实测挂载后收到新轮次也只提交原版本，旧草稿不�
   assert.ok(text.has("v2"));
   assert.ok(!text.has("v3"));
 });
+
+test("人工记录只填步骤实测与结论，不再填写重复说明和证据", async () => {
+  const h = harness("verification-manual-result", "VerificationManualResult", {
+    base: "/q/",
+    defectId: "d",
+    round: { version: 2, fixed_build: "v2", environment: "旧环境", steps: [{ action: "启动", expected: "正常" }] },
+  });
+  const tree = h.render(),
+    all = nodes(tree);
+  assert.equal(
+    all.some((n) => ["actual_result", "evidence"].includes(n.props?.name)),
+    false
+  );
+  await tree.props.onSubmit(
+    new Map([
+      ["result", "passed"],
+      ["actual_0", "正常"],
+      ["result_0", "passed"],
+    ])
+  );
+  assert.equal(h.writes[0][1].evidence, "");
+  assert.deepEqual(h.writes[0][1].step_results, [{ result: "passed", actual: "正常" }]);
+});
