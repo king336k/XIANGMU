@@ -52,6 +52,7 @@ function setup(file, name, initialMode) {
   const mocks = {
     react,
     "@plane/ui": { CustomMenu: Menu },
+    "lodash-es": { sortBy: (rows, key) => rows.toSorted((a, b) => key(a) - key(b)) },
     "lucide-react": new Proxy({}, { get: () => Icon }),
     "./use-collection-pagination": { useCollectionPagination },
     "./shared": { Paging },
