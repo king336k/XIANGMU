@@ -8,20 +8,30 @@ import type { VerificationData, VerificationRound } from "./verification-types";
 export function VerificationManualResult({
   base,
   defectId,
-  round,
+  round: currentRound,
+  initialStepIndex,
+  initialResult,
   onSaved,
   onClose,
 }: {
   base: string;
   defectId: string;
   round: VerificationRound;
+  initialStepIndex?: number;
+  initialResult?: string;
   onSaved: (data: VerificationData) => Promise<void>;
   onClose: () => void;
 }) {
+  const [round] = useState(currentRound);
+  const previous = round.manual_results?.[0];
   const [requestId] = useState<string>(() => uuidv4());
   const [stepRows] = useState(() => round.steps.map((step) => ({ step, key: uuidv4() })));
-  const [result, setResult] = useState("");
-  const [stepResults, setStepResults] = useState<string[]>(round.steps.map(() => ""));
+  const [result, setResult] = useState(initialResult || "");
+  const [stepResults, setStepResults] = useState<string[]>(
+    round.steps.map((_, index) =>
+      index === initialStepIndex ? initialResult || "" : previous?.step_results[index]?.result || ""
+    )
+  );
   const needsReason = result === "inconclusive" || stepResults.includes("inconclusive");
   return (
     <Modal
@@ -56,7 +66,14 @@ export function VerificationManualResult({
           </p>
           <p className="text-12 text-secondary">预期：{step.expected}</p>
           <Field label="实际结果">
-            <textarea required name={`actual_${index}`} maxLength={4000} rows={2} className={fieldClass} />
+            <textarea
+              required
+              name={`actual_${index}`}
+              maxLength={4000}
+              rows={2}
+              className={fieldClass}
+              defaultValue={previous?.step_results[index]?.actual || ""}
+            />
           </Field>
           <Field label="步骤结果">
             <select
@@ -124,12 +141,20 @@ export function VerificationManualResult({
         </>
       )}
       <Field label="结果说明">
-        <textarea required name="actual_result" maxLength={4000} rows={2} className={fieldClass} />
+        <textarea
+          required
+          name="actual_result"
+          defaultValue={previous?.actual_result || ""}
+          maxLength={4000}
+          rows={2}
+          className={fieldClass}
+        />
       </Field>
       <Field label="验证证据">
         <textarea
           required
           name="evidence"
+          defaultValue={previous?.evidence || ""}
           maxLength={4000}
           rows={2}
           className={fieldClass}

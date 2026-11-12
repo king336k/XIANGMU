@@ -123,3 +123,17 @@ for (const tab of ["cases", "plans"])
       0
     );
   });
+
+test("测试三个入口当前页与子页采用蓝色选中态并保留唯一aria-current", () => {
+  for (const tab of ["plans", "executions", "cases", "suites", "reports", "report"]) {
+    const { tree } = render({ tab });
+    for (const label of ["测试工作区", "当前工作区内容"]) {
+      const nav = descendants(tree).find((n) => n.type === "nav" && n.props["aria-label"] === label);
+      assert.ok(nav, `${tab}: ${label}`);
+      const active = descendants(nav).filter((n) => n.type === "button" && n.props["aria-current"] === "page");
+      assert.equal(active.length, 1, `${tab}: ${label}`);
+      assert.match(active[0].props.className, /bg-accent-subtle/);
+      assert.match(active[0].props.className, /text-accent-primary/);
+    }
+  }
+});

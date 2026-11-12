@@ -179,9 +179,17 @@ export function PlanList({ rows, onSelect }: { rows: Plan[]; onSelect: (value: P
             </p>
             <p className="mt-1 text-11 text-secondary">创建人：{p.created_by_name || "未记录"}</p>
           </div>
-          <span className="text-12 text-secondary">
-            {p.summary.executed}/{p.summary.total} 已执行 · {p.summary.failed} 失败 · {p.summary.inconclusive || 0}{" "}
-            无法判定
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-12 text-secondary">
+            <span>
+              {p.summary.executed}/{p.summary.total} 已执行
+            </span>
+            <Badge variant="plain" value={p.summary.passed ? "passed" : "neutral"} label={`通过 ${p.summary.passed}`} />
+            <Badge variant="plain" value={p.summary.failed ? "failed" : "neutral"} label={`失败 ${p.summary.failed}`} />
+            <Badge
+              variant="plain"
+              value={p.summary.inconclusive ? "inconclusive" : "neutral"}
+              label={`无法判定 ${p.summary.inconclusive || 0}`}
+            />
           </span>
           <span className="text-12 text-accent-primary">
             {p.status === "completed"

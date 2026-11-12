@@ -167,8 +167,9 @@ def serialize(row, view):
                 "next_action": r.next_action,
                 "created_at": r.created_at,
                 "created_by_id": str(r.created_by_id) if r.created_by_id else None,
+                "created_by_name": (r.created_by.display_name or r.created_by.username) if r.created_by_id else "",
             }
-            for r in row.manual_results.all()
+            for r in row.manual_results.select_related("created_by").all()
         ],
         "events": [
             {

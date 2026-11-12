@@ -144,7 +144,7 @@ for (const state of ["archived_at", "trashed_at"])
     });
     const text = new Set(
       nodes(tree)
-        .map((n) => n.props?.children)
+        .flatMap((n) => (n.type === component("Badge") ? [n.props?.children, n.props.label] : [n.props?.children]))
         .filter((value) => typeof value === "string")
     );
     assert.ok(!text.has("编辑草稿"));
@@ -163,7 +163,7 @@ for (const state of ["archived_at", "trashed_at"])
     assert.ok(nodes(modal).some((n) => n.type === component("RecordLifecycleActions")));
     const labels = new Set(
       nodes(modal)
-        .map((n) => n.props?.children)
+        .flatMap((n) => (n.type === component("Badge") ? [n.props?.children, n.props.label] : [n.props?.children]))
         .filter((value) => typeof value === "string")
     );
     assert.ok(!labels.has("编辑草稿"));

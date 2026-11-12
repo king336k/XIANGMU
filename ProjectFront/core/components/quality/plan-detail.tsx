@@ -12,7 +12,7 @@ import { PlanActions } from "./plan-actions";
 import { PlanPreflight } from "./test-resources-panel";
 import { ExecutionForm } from "./execution-form";
 import { Badge, Empty, Modal } from "./shared";
-import { reasonNames } from "./types";
+import { reasonNames, resultNames } from "./types";
 import type { Context, Execution, Plan, PlanItem } from "./types";
 
 export function PlanDetail({
@@ -92,12 +92,14 @@ export function PlanDetail({
       </div>
       <div className="flex flex-wrap gap-3 rounded border border-subtle bg-layer-1 p-3 text-12">
         <span>共 {plan.summary.total} 条</span>
-        <span>通过 {plan.summary.passed}</span>
-        <span>失败 {plan.summary.failed}</span>
-        <span>阻塞 {plan.summary.blocked}</span>
-        <span>无法判定 {plan.summary.inconclusive || 0}</span>
-        <span>跳过 {plan.summary.skipped}</span>
-        <span>未执行 {plan.summary.pending}</span>
+        {["passed", "failed", "blocked", "inconclusive", "skipped", "pending"].map((key) => (
+          <Badge
+            key={key}
+            variant="plain"
+            value={plan.summary[key as keyof typeof plan.summary] ? key : "neutral"}
+            label={`${resultNames[key]} ${plan.summary[key as keyof typeof plan.summary] || 0}`}
+          />
+        ))}
       </div>
       {error && (
         <p role="alert" className="text-danger-primary">
@@ -150,7 +152,7 @@ export function PlanDetail({
             type="button"
             aria-pressed={resultFilter === filter.value}
             onClick={() => setResultFilter(filter.value)}
-            className={`rounded border px-3 py-1.5 text-12 ${resultFilter === filter.value ? "border-accent-primary text-accent-primary" : "border-subtle text-secondary"}`}
+            className={`rounded border px-3 py-1.5 text-12 ${resultFilter === filter.value ? "border-accent-subtle bg-accent-subtle font-semibold text-accent-primary" : "border-subtle text-secondary hover:bg-layer-1"}`}
           >
             {filter.label} {filter.count}
           </button>

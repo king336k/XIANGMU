@@ -154,6 +154,9 @@ def test_manual_results_retest_reopen_and_actor_audit(session_client, verificati
     defect.refresh_from_db()
     assert defect.status == "open"
     assert reopened.data["history"][0]["manual_results"][0]["created_by_id"] == str(tester.id)
+    assert reopened.data["history"][0]["manual_results"][0]["created_by_name"] == (
+        tester.display_name or tester.username
+    )
     assert defect.events.filter(created_by=manager, note__contains="发现遗漏").exists()
 
 

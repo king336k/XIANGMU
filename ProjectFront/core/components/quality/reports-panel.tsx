@@ -113,6 +113,18 @@ export function ReportsPanel({ base, context }: { base: string; context: Context
               {item.code && <span className="mr-2 text-11 text-secondary">{item.code}</span>}
               {item.name}
             </p>
+            <span className="mt-1.5 inline-flex">
+              <Badge
+                value={item.conclusion?.result || "review"}
+                label={
+                  item.conclusion
+                    ? { passed: "通过", failed: "不通过", blocked: "阻塞", inconclusive: "无法判定" }[
+                        item.conclusion.result
+                      ] || item.conclusion.result
+                    : "待验收"
+                }
+              />
+            </span>
             <p className="mt-1 text-12 text-secondary">
               {renderNumericDateTime(item.created_at)} · {item.plan_id ? "单计划报告" : "项目汇总"}
             </p>
@@ -211,11 +223,14 @@ export function ReportsPanel({ base, context }: { base: string; context: Context
                 <section className="space-y-2 rounded-md border border-subtle p-3 text-13">
                   <h3 className="font-medium">
                     经理最终结论 ·{" "}
-                    {
-                      { passed: "通过", failed: "不通过", blocked: "阻塞", inconclusive: "无法判定" }[
-                        detail.conclusion.result
-                      ]
-                    }
+                    <Badge
+                      value={detail.conclusion.result}
+                      label={
+                        { passed: "通过", failed: "不通过", blocked: "阻塞", inconclusive: "无法判定" }[
+                          detail.conclusion.result
+                        ]
+                      }
+                    />
                   </h3>
                   <p className="whitespace-pre-wrap">{detail.conclusion.summary}</p>
                   {detail.conclusion.risks && (
@@ -237,10 +252,18 @@ export function ReportsPanel({ base, context }: { base: string; context: Context
               <p className="text-13">
                 {detail.snapshot.project_name} · {renderNumericDateTime(detail.created_at)}
               </p>
-              <p className="text-13">
-                执行率 {detail.snapshot.summary.execution_rate}% · 通过率 {detail.snapshot.summary.pass_rate}% · 未执行{" "}
-                {detail.snapshot.summary.pending} 条 · 无法判定 {detail.snapshot.summary.inconclusive || 0} 条
-              </p>
+              <div className="flex flex-wrap items-center gap-3 text-12">
+                <span>执行率 {detail.snapshot.summary.execution_rate}%</span>
+                <span className={detail.snapshot.summary.pass_rate ? "text-success-primary" : "text-secondary"}>
+                  通过率 {detail.snapshot.summary.pass_rate}%
+                </span>
+                <Badge value="pending" variant="plain" label={`未执行 ${detail.snapshot.summary.pending} 条`} />
+                <Badge
+                  value={detail.snapshot.summary.inconclusive ? "inconclusive" : "neutral"}
+                  variant="plain"
+                  label={`无法判定 ${detail.snapshot.summary.inconclusive || 0} 条`}
+                />
+              </div>
               {detail.snapshot.plans.map((plan) => (
                 <div key={plan.id} className="space-y-2 rounded-md border border-subtle p-3 text-13">
                   <h3 className="font-medium">

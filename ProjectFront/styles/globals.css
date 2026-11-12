@@ -641,3 +641,171 @@ a:focus-visible .platform-record-link {
   outline: 2px solid var(--txt-accent-primary);
   outline-offset: 2px;
 }
+
+/* Defect detail uses a page canvas while remaining in the native dialog top layer. */
+dialog.defect-page {
+  --txt-accent-primary: #0086a9;
+  --text-color-accent-primary: #0086a9;
+  --bg-accent-subtle: #edf8fb;
+  --border-subtle: #dbe3ec;
+  --txt-success-primary: #25804c;
+  --text-color-success-primary: #25804c;
+  --bg-success-subtle: #eef8f1;
+  --border-success-subtle: #cce8d6;
+  --txt-danger-primary: #ba3c45;
+  --text-color-danger-primary: #ba3c45;
+  --bg-danger-subtle: #fff1f2;
+  --border-danger-subtle: #f0cdd0;
+  --txt-warning-primary: #9e7112;
+  --text-color-warning-primary: #9e7112;
+  --bg-warning-subtle: #fff9e9;
+  --border-warning-subtle: #eddfb7;
+  --bg-accent-primary: #087fa6;
+  --background-color-accent-primary: #087fa6;
+  inset: 0;
+  margin: 0;
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 0;
+  padding: 0 0 48px;
+  background: #ecf1f6;
+  color: #263f52;
+  font-size: 14px;
+}
+dialog.defect-page::backdrop {
+  background: #ecf1f6;
+}
+.defect-page-topbar {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 36px;
+  border-bottom: 1px solid #dbe3ec;
+  background: #fff;
+}
+.defect-page-brand {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.defect-page-breadcrumb {
+  display: inline-flex;
+  gap: 20px;
+  color: #7a8b9d;
+}
+.defect-page-navigation {
+  max-width: 1152px;
+  margin: 0 auto;
+  padding: 26px 0;
+}
+.defect-page-navigation button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #7a8b9d;
+}
+.defect-page-card {
+  max-width: 1152px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  background: #fff;
+}
+.defect-page-heading {
+  padding: 28px 30px 20px;
+}
+.defect-page .record-detail-heading h3 {
+  margin-top: 10px;
+  color: #263f52;
+  font-size: 24px;
+  line-height: 1.5;
+}
+.defect-page .record-detail-heading > :last-child {
+  margin-top: 0;
+}
+.defect-page-content > .defect-page-tabs[role="tablist"] {
+  gap: 30px;
+  margin: 8px 0 0;
+  padding: 0 30px;
+  border: 0;
+  border-bottom: 1px solid #dbe3ec;
+  border-radius: 0;
+  background: #fff;
+}
+.defect-page .defect-page-tabs [role="tab"] {
+  padding: 14px 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  color: #7a8b9d;
+  background: transparent;
+  font-size: 14px;
+}
+.defect-page .defect-page-tabs [role="tab"][aria-selected="true"] {
+  border-bottom-color: #0086a9;
+  color: #0086a9;
+  background: transparent;
+}
+.defect-page-regression,
+.defect-page-panels {
+  padding: 28px 30px 30px;
+}
+.defect-page .defect-page-verification {
+  width: 100%;
+  min-width: 0;
+}
+.defect-page-content .inline-flex.rounded-full.border {
+  border-radius: 4px;
+}
+.defect-page-status .inline-flex.rounded-full.border {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+.defect-page button:focus-visible {
+  outline: 2px solid #0086a9;
+  outline-offset: 3px;
+}
+@media (max-width: 1216px) {
+  .defect-page-card,
+  .defect-page-navigation {
+    margin-right: 24px;
+    margin-left: 24px;
+  }
+}
+@media (max-width: 640px) {
+  .defect-page-topbar {
+    min-height: 56px;
+    padding: 14px 16px;
+  }
+  .defect-page-breadcrumb {
+    gap: 8px;
+    font-size: 12px;
+  }
+  .defect-page-brand {
+    gap: 6px;
+    font-size: 13px;
+  }
+  .defect-page-card,
+  .defect-page-navigation {
+    margin-right: 12px;
+    margin-left: 12px;
+  }
+  .defect-page-heading,
+  .defect-page-regression,
+  .defect-page-panels {
+    padding: 20px 16px;
+  }
+  .defect-page-content > .defect-page-tabs[role="tablist"] {
+    gap: 24px;
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+}

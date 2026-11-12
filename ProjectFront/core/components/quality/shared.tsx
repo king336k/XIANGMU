@@ -25,6 +25,8 @@ export function Modal({
   onSubmit,
   submitLabel = "保存",
   width = "standard",
+  presentation = "dialog",
+  breadcrumb,
 }: {
   title: string;
   children: ReactNode;
@@ -32,6 +34,8 @@ export function Modal({
   onSubmit?: (data: FormData) => Promise<void>;
   submitLabel?: string;
   width?: "standard" | "wide" | "compact";
+  presentation?: "dialog" | "page";
+  breadcrumb?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -65,18 +69,51 @@ export function Modal({
         else onClose();
       }}
       aria-labelledby={titleId}
-      className={`record-detail-modal shadow-lg m-auto max-h-[90vh] w-[calc(100%-2rem)] ${width === "wide" ? "max-w-5xl" : width === "compact" ? "max-w-md" : "max-w-3xl"} overflow-y-auto rounded-lg border border-subtle bg-surface-1 p-0 text-primary backdrop:bg-black/40`}
+      className={
+        presentation === "page"
+          ? "record-detail-modal defect-page"
+          : `record-detail-modal shadow-lg m-auto max-h-[90vh] w-[calc(100%-2rem)] ${width === "wide" ? "max-w-5xl" : width === "compact" ? "max-w-md" : "max-w-3xl"} overflow-y-auto rounded-lg border border-subtle bg-surface-1 p-0 text-primary backdrop:bg-black/40`
+      }
     >
-      <div className="sticky top-0 z-10 flex min-w-0 items-center justify-between gap-3 border-b border-subtle bg-surface-1 px-4 py-4 sm:px-6">
-        <h2 id={titleId} className="min-w-0 text-16 font-semibold break-words">
-          {title}
-        </h2>
-        <button className="shrink-0" disabled={busy} aria-label="关闭弹窗" onClick={onClose}>
-          <X className="size-5" />
-        </button>
-      </div>
-      <form onSubmit={submit}>
-        <div className="record-detail-body min-w-0 space-y-5 p-4 sm:p-6">
+      {presentation === "page" ? (
+        <>
+          <header className="defect-page-topbar">
+            <span className="defect-page-brand">
+              TransEngram <span>项目管理平台</span>
+            </span>
+            <span className="defect-page-breadcrumb">
+              {breadcrumb || "项目"}
+              <span aria-hidden="true">/</span>缺陷
+            </span>
+          </header>
+          <div className="defect-page-navigation">
+            <button type="button" onClick={onClose}>
+              <ChevronLeft aria-hidden="true" className="size-4" />
+              返回缺陷列表
+            </button>
+          </div>
+          <h2 id={titleId} className="sr-only">
+            {title}
+          </h2>
+        </>
+      ) : (
+        <div className="sticky top-0 z-10 flex min-w-0 items-center justify-between gap-3 border-b border-subtle bg-surface-1 px-4 py-4 sm:px-6">
+          <h2 id={titleId} className="min-w-0 text-16 font-semibold break-words">
+            {title}
+          </h2>
+          <button className="shrink-0" disabled={busy} aria-label="关闭弹窗" onClick={onClose}>
+            <X className="size-5" />
+          </button>
+        </div>
+      )}
+      <form onSubmit={submit} className={presentation === "page" ? "defect-page-card" : undefined}>
+        <div
+          className={
+            presentation === "page"
+              ? "record-detail-body defect-page-content"
+              : "record-detail-body min-w-0 space-y-5 p-4 sm:p-6"
+          }
+        >
           {children}
           {error && (
             <p
@@ -87,16 +124,18 @@ export function Modal({
             </p>
           )}
         </div>
-        <div className="sticky bottom-0 z-10 flex flex-wrap justify-end gap-3 border-t border-subtle bg-surface-1 px-4 py-4 sm:px-6">
-          <Button variant="neutral-primary" disabled={busy} onClick={onClose}>
-            {onSubmit ? "取消" : "关闭"}
-          </Button>
-          {onSubmit && (
-            <Button type="submit" disabled={busy}>
-              {busy ? "正在保存…" : submitLabel}
+        {presentation !== "page" && (
+          <div className="sticky bottom-0 z-10 flex flex-wrap justify-end gap-3 border-t border-subtle bg-surface-1 px-4 py-4 sm:px-6">
+            <Button variant="neutral-primary" disabled={busy} onClick={onClose}>
+              {onSubmit ? "取消" : "关闭"}
             </Button>
-          )}
-        </div>
+            {onSubmit && (
+              <Button type="submit" disabled={busy}>
+                {busy ? "正在保存…" : submitLabel}
+              </Button>
+            )}
+          </div>
+        )}
       </form>
     </dialog>,
     document.body

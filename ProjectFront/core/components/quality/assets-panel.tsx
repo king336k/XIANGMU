@@ -7,7 +7,7 @@ import { useState } from "react";
 import useSWR from "swr";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
-import { Empty, Field, fieldClass, Modal } from "./shared";
+import { Badge, Empty, Field, fieldClass, Modal } from "./shared";
 import type { Context, Plan, Revision } from "./types";
 import { CasePicker } from "./case-picker";
 import type { CaseOption } from "./case-selection";
@@ -137,12 +137,23 @@ export function AssetsPanel({
             title: row.name,
             code: row.code,
             subtitle: `创建人：${row.created_by_name || "未记录"}`,
-            status: "published" in row ? (row.published ? "published" : "draft") : row.status,
+            status:
+              "published" in row
+                ? row.trashed_at || row.archived_at
+                  ? "archived"
+                  : row.published
+                    ? "published"
+                    : "draft"
+                : row.status,
             statusName:
               "published" in row
-                ? row.published
-                  ? "已发布"
-                  : "草稿"
+                ? row.trashed_at
+                  ? "已删除"
+                  : row.archived_at
+                    ? "已归档"
+                    : row.published
+                      ? "已发布"
+                      : "草稿"
                 : row.status === "admitted"
                   ? "检查通过"
                   : "待检查",
@@ -163,11 +174,32 @@ export function AssetsPanel({
                   <h2 className="text-14 font-medium">
                     {row.code && <span className="mr-2 text-11 text-secondary">{row.code}</span>}
                     {row.name}
-                    {"published" in row && (row.archived_at || row.trashed_at) && (
-                      <span className="ml-2 rounded bg-layer-1 px-2 py-0.5 text-11 text-secondary">
-                        {row.trashed_at ? "已删除" : "已归档"}
-                      </span>
-                    )}
+                    <span className="ml-2 inline-flex align-middle">
+                      <Badge
+                        value={
+                          "published" in row
+                            ? row.trashed_at || row.archived_at
+                              ? "archived"
+                              : row.published
+                                ? "published"
+                                : "draft"
+                            : row.status
+                        }
+                        label={
+                          "published" in row
+                            ? row.trashed_at
+                              ? "已删除"
+                              : row.archived_at
+                                ? "已归档"
+                                : row.published
+                                  ? "已发布"
+                                  : "草稿"
+                            : row.status === "admitted"
+                              ? "检查通过"
+                              : "待检查"
+                        }
+                      />
+                    </span>
                     {"version" in row && <span className="ml-2 text-12 text-secondary">{row.version}</span>}
                   </h2>
                   <p className="mt-1 text-12 text-secondary">

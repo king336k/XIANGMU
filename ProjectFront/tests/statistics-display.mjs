@@ -15,6 +15,7 @@ function load() {
   new Function("require", "exports", code)((id) => {
     if (id === "react") return { ...React, useState: (v) => [v, () => {}] };
     if (id === "@plane/ui") return { CustomMenu: Menu };
+    if (id === "./record-badge") return { Badge: ({ label }) => label };
     if (id.startsWith("@plane/propel/charts/")) return {};
     return require(id);
   }, exports);

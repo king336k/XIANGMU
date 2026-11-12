@@ -16,13 +16,16 @@ const colors: Record<string, string> = {
   major: "border-warning-subtle bg-warning-subtle text-warning-primary",
   minor: "border-accent-subtle-1 bg-accent-subtle text-accent-primary",
   trivial: "border-subtle bg-layer-1 text-secondary",
-  pending: "border-warning-subtle bg-warning-subtle text-warning-primary",
+  pending: "border-subtle bg-layer-1 text-secondary",
+  published: "border-accent-subtle bg-accent-subtle text-accent-primary",
+  admitted: "border-success-subtle bg-success-subtle text-success-primary",
+  neutral: "border-subtle bg-layer-1 text-secondary",
   review: "border-warning-subtle bg-warning-subtle text-warning-primary",
   ready: "border-accent-subtle-1 bg-accent-subtle text-accent-primary",
   running: "border-accent-subtle-1 bg-accent-subtle text-accent-primary",
   approved: "border-accent-subtle-1 bg-accent-subtle text-accent-primary",
   completed: "border-success-subtle bg-success-subtle text-success-primary",
-  returned: "border-warning-subtle bg-warning-subtle text-warning-primary",
+  returned: "border-danger-subtle bg-danger-subtle text-danger-primary",
 };
 export function Badge({
   value,

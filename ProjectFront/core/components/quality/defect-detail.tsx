@@ -1,5 +1,4 @@
 import { ProjectRouteLink as Link } from "@/components/common/project-route-link";
-import { RecordResponsibility } from "./record-responsibility";
 import { renderNumericDateTime } from "@plane/utils";
 import { useState } from "react";
 import { DefectReportEdit } from "./defect-report-edit";
@@ -106,8 +105,8 @@ export function DefectDetail({
   const displayTitle = sourcePrefix ? value.title.slice(sourcePrefix[0].length) : value.title;
   return (
     <>
-      <Modal title="缺陷详情" width="wide" onClose={onClose}>
-        <div className="space-y-4 border-b border-subtle pb-4">
+      <Modal title="缺陷详情" presentation="page" breadcrumb={context.project_name} onClose={onClose}>
+        <div className="defect-page-heading">
           <div className="record-detail-heading flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 flex-1 space-y-2">
               {sourcePrefix && (
@@ -118,8 +117,8 @@ export function DefectDetail({
               {value.code && <p className="text-12 font-medium text-accent-primary">{value.code}</p>}
               <h3 className="max-w-3xl text-18 leading-7 font-semibold break-words">{displayTitle}</h3>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {canEditReport && !canEdit && (
+            <div className="defect-page-status flex flex-wrap items-center gap-2">
+              {activeTab !== "regression" && canEditReport && !canEdit && (
                 <button
                   type="button"
                   onClick={() => setEditingReport(true)}
@@ -136,7 +135,7 @@ export function DefectDetail({
               ) : (
                 <Badge value={value.status} />
               )}
-              {canEdit && (
+              {activeTab !== "regression" && canEdit && (
                 <button
                   type="button"
                   onClick={() => onEdit("details")}
@@ -148,7 +147,7 @@ export function DefectDetail({
                   编辑缺陷
                 </button>
               )}
-              {canEdit && (
+              {activeTab !== "regression" && canEdit && (
                 <button
                   type="button"
                   onClick={updateStatus}
@@ -163,49 +162,31 @@ export function DefectDetail({
               )}
             </div>
           </div>
-          <div
-            aria-label="缺陷来源与创建信息"
-            className="flex flex-wrap items-center gap-x-4 gap-y-1 text-12 text-secondary"
-          >
-            <span className="whitespace-nowrap">
-              {value.source_kind === "daq" ? "DAQ 上报" : value.source_kind === "test" ? "测试提报" : "平台新建"}
-            </span>
-            <span className="whitespace-nowrap">
-              {value.source_kind === "daq" ? "采集员" : "创建人"}：{value.created_by_name || "未记录"}
-            </span>
-            {value.created_at && (
-              <time dateTime={value.created_at} className="whitespace-nowrap">
-                {renderNumericDateTime(value.created_at)}
-              </time>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <RecordResponsibility
-              context={context}
-              kind="缺陷"
-              assigneeId={value.assignee_id}
-              authorId={value.created_by_id}
-              collaboratorIds={value.collaborators.map((row) => row.user_id)}
-            />
-            <RecordProgress base={base} kind="defect" id={value.id} projectUrl={projectUrl} />
-          </div>
-          <details className="text-12 text-secondary">
-            <summary className="cursor-pointer">更多处理</summary>
-            <div className="mt-2">
-              <DefectDispositionPanel base={base} value={value} context={context} onChanged={onChanged} />
+          {activeTab !== "regression" && (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-12 text-secondary">
+              <span>
+                {value.source_kind === "daq" ? "DAQ 上报" : value.source_kind === "test" ? "测试提报" : "平台新建"} ·{" "}
+                {value.created_by_name || "未记录"}
+                {value.created_at ? ` · ${renderNumericDateTime(value.created_at)}` : ""}
+              </span>
+              <RecordProgress base={base} kind="defect" id={value.id} projectUrl={projectUrl} />
             </div>
-          </details>
+          )}
+          {activeTab !== "regression" && (
+            <details className="text-12 text-secondary">
+              <summary className="cursor-pointer">更多处理</summary>
+              <div className="mt-2">
+                <DefectDispositionPanel base={base} value={value} context={context} onChanged={onChanged} />
+              </div>
+            </details>
+          )}
           {value.duplicate_of_id && (
             <Link className="text-12 text-accent-primary" to={`${projectUrl}/defects?defect=${value.duplicate_of_id}`}>
               查看归并的主缺陷 →
             </Link>
           )}
         </div>
-        <nav
-          aria-label="缺陷详情内容"
-          className="platform-record-tabs flex gap-1 overflow-x-auto rounded-lg bg-layer-1 p-1"
-          role="tablist"
-        >
+        <nav aria-label="缺陷详情内容" className="defect-page-tabs" role="tablist">
           {[
             ["overview", "概况"],
             ["diagnosis", "诊断"],
@@ -225,7 +206,9 @@ export function DefectDetail({
             </button>
           ))}
         </nav>
-        <div className="record-detail-grid">
+        <div
+          className={activeTab === "regression" ? "defect-page-regression" : "record-detail-grid defect-page-panels"}
+        >
           <div className="min-w-0 space-y-6">
             <div hidden={activeTab !== "overview"} className="space-y-5">
               <DefectDescription description={value.description} />
@@ -245,7 +228,7 @@ export function DefectDetail({
               <DefectTeam base={base} value={value} context={context} onChanged={onChanged} />
               <SolutionPanel base={base} defectId={value.id} context={context} />
             </div>
-            <div hidden={activeTab !== "regression"} className="platform-detail-panel">
+            <div hidden={activeTab !== "regression"} className="defect-page-verification">
               <DefectVerificationScope
                 projectUrl={projectUrl}
                 base={base}
@@ -258,108 +241,110 @@ export function DefectDetail({
               <CollaborationPanel base={base} value={value} context={context} onChanged={onChanged} />
             </div>
           </div>
-          <aside aria-label="缺陷属性" className="space-y-4 border-subtle">
-            {[
-              {
-                label: "严重程度",
-                text: severityNames[value.severity],
-                field: "severity",
-                action: "调整严重程度",
-                editable: true,
-              },
-              {
-                label: "处理分类",
-                text: resolutionNames[value.resolution_kind] || "按修复回归处理",
-                field: "disposition",
-                action: "更改处理分类",
-                editable: context.is_manager,
-              },
-              {
-                label: "技术负责人",
-                text: assignee || value.assignee_name || "未分派",
-                field: "assignee",
-                action: value.assignee_id ? "转派技术负责人" : "指派技术负责人",
-                editable: context.is_manager,
-              },
-              {
-                label: "影响版本",
-                text: value.affected_build || "未填写",
-                field: "affected_build",
-                action: "编辑影响版本",
-                editable: true,
-              },
-              {
-                label: "修复版本",
-                text: value.fixed_build || (value.resolution_kind !== "fixed" ? "分类处理，无修复版本" : "待修复"),
-                field: "fixed_build",
-                action: "编辑修复版本",
-                editable: true,
-              },
-              {
-                label: "关联用例",
-                text: value.case_title || "尚未关联",
-                field: "case",
-                action: "关联测试用例",
-                editable: !value.source_execution,
-              },
-            ].map((item) => (
-              <div key={item.field}>
-                <h4 className="px-2 text-11 text-secondary">{item.label}</h4>
-                {canEditProperties && item.editable ? (
-                  item.field === "disposition" ? (
-                    <DefectDispositionPanel
-                      base={base}
-                      value={value}
-                      context={context}
-                      onChanged={onChanged}
-                      trigger={<span className="min-w-0 break-words">{item.text}</span>}
-                    />
+          {activeTab !== "regression" && (
+            <aside aria-label="缺陷属性" className="space-y-4 border-subtle">
+              {[
+                {
+                  label: "严重程度",
+                  text: severityNames[value.severity],
+                  field: "severity",
+                  action: "调整严重程度",
+                  editable: true,
+                },
+                {
+                  label: "处理分类",
+                  text: resolutionNames[value.resolution_kind] || "按修复回归处理",
+                  field: "disposition",
+                  action: "更改处理分类",
+                  editable: context.is_manager,
+                },
+                {
+                  label: "技术负责人",
+                  text: assignee || value.assignee_name || "未分派",
+                  field: "assignee",
+                  action: value.assignee_id ? "转派技术负责人" : "指派技术负责人",
+                  editable: context.is_manager,
+                },
+                {
+                  label: "影响版本",
+                  text: value.affected_build || "未填写",
+                  field: "affected_build",
+                  action: "编辑影响版本",
+                  editable: true,
+                },
+                {
+                  label: "修复版本",
+                  text: value.fixed_build || (value.resolution_kind !== "fixed" ? "分类处理，无修复版本" : "待修复"),
+                  field: "fixed_build",
+                  action: "编辑修复版本",
+                  editable: true,
+                },
+                {
+                  label: "关联用例",
+                  text: value.case_title || "尚未关联",
+                  field: "case",
+                  action: "关联测试用例",
+                  editable: !value.source_execution,
+                },
+              ].map((item) => (
+                <div key={item.field}>
+                  <h4 className="px-2 text-11 text-secondary">{item.label}</h4>
+                  {canEditProperties && item.editable ? (
+                    item.field === "disposition" ? (
+                      <DefectDispositionPanel
+                        base={base}
+                        value={value}
+                        context={context}
+                        onChanged={onChanged}
+                        trigger={<span className="min-w-0 break-words">{item.text}</span>}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={item.action}
+                        onClick={() => setProperty(item.field as DefectQuickField)}
+                        className="group focus-visible:ring-accent-primary mt-1 inline-flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-13 hover:bg-layer-1 focus-visible:ring-2"
+                      >
+                        <span className="min-w-0 break-words">{item.text}</span>
+                        <Pencil aria-hidden="true" className="size-3 shrink-0 text-accent-primary" />
+                      </button>
+                    )
                   ) : (
-                    <button
-                      type="button"
-                      aria-label={item.action}
-                      onClick={() => setProperty(item.field as DefectQuickField)}
-                      className="group focus-visible:ring-accent-primary mt-1 inline-flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-13 hover:bg-layer-1 focus-visible:ring-2"
-                    >
-                      <span className="min-w-0 break-words">{item.text}</span>
-                      <Pencil aria-hidden="true" className="size-3 shrink-0 text-accent-primary" />
-                    </button>
-                  )
-                ) : (
-                  <p className="mt-1.5 px-2 text-13 break-words">{item.text}</p>
-                )}
-                {item.field === "case" && value.source_execution && (
-                  <p className="mt-1 px-2 text-11 text-secondary">来自测试执行，保留来源用例</p>
-                )}
-              </div>
-            ))}
-            {value.defer_until && (
-              <div>
-                <h4 className="px-2 text-11 text-secondary">计划重新处理</h4>
-                <p className="mt-1.5 px-2 text-13">{value.defer_until}</p>
-              </div>
-            )}
-            {value.repair_issue_id && (
-              <div>
-                <h4 className="text-11 text-secondary">修复任务</h4>
-                <Link
-                  className="mt-1.5 block text-13 text-accent-primary"
-                  to={`${projectUrl}/issues/${value.repair_issue_id}`}
-                >
-                  {value.repair_issue_name || "打开修复任务"} ↗
-                </Link>
-              </div>
-            )}
-            {value.source_execution && (
-              <div className="space-y-2">
-                <h4 className="text-11 text-secondary">来源测试</h4>
-                <p className="text-12">
-                  {value.source_execution.plan_name} · {value.source_execution.build}
-                </p>
-                <Badge value={value.source_execution.result} />
-              </div>
-            )}
-          </aside>
+                    <p className="mt-1.5 px-2 text-13 break-words">{item.text}</p>
+                  )}
+                  {item.field === "case" && value.source_execution && (
+                    <p className="mt-1 px-2 text-11 text-secondary">来自测试执行，保留来源用例</p>
+                  )}
+                </div>
+              ))}
+              {value.defer_until && (
+                <div>
+                  <h4 className="px-2 text-11 text-secondary">计划重新处理</h4>
+                  <p className="mt-1.5 px-2 text-13">{value.defer_until}</p>
+                </div>
+              )}
+              {value.repair_issue_id && (
+                <div>
+                  <h4 className="text-11 text-secondary">修复任务</h4>
+                  <Link
+                    className="mt-1.5 block text-13 text-accent-primary"
+                    to={`${projectUrl}/issues/${value.repair_issue_id}`}
+                  >
+                    {value.repair_issue_name || "打开修复任务"} ↗
+                  </Link>
+                </div>
+              )}
+              {value.source_execution && (
+                <div className="space-y-2">
+                  <h4 className="text-11 text-secondary">来源测试</h4>
+                  <p className="text-12">
+                    {value.source_execution.plan_name} · {value.source_execution.build}
+                  </p>
+                  <Badge value={value.source_execution.result} />
+                </div>
+              )}
+            </aside>
+          )}
         </div>
       </Modal>
       {property && (

@@ -33,7 +33,10 @@ export function QualitySummary({
       <section className="space-y-4">
         <h2 className="text-16 font-semibold">计划执行概况</h2>
         <p className="text-13">
-          执行率 {report.summary.execution_rate}% · 通过率 {report.summary.pass_rate}%
+          执行率 {report.summary.execution_rate}% ·{" "}
+          <span className={report.summary.pass_rate ? "text-success-primary" : "text-secondary"}>
+            通过率 {report.summary.pass_rate}%
+          </span>
         </p>
         <div className="h-2 overflow-hidden rounded bg-layer-1">
           <div className="h-full bg-accent-primary" style={{ width: `${report.summary.execution_rate}%` }} />
@@ -46,11 +49,20 @@ export function QualitySummary({
                   onNavigate(value === "pending" ? "plans" : "executions", value === "pending" ? undefined : value)
               : undefined
           }
-          rows={["passed", "failed", "blocked", "inconclusive", "skipped", "pending"].map((key, index) => ({
+          showStatus
+          rows={["passed", "failed", "blocked", "inconclusive", "skipped", "pending"].map((key) => ({
             key,
             name: resultNames[key],
             count: Number(report.summary[key as keyof typeof report.summary]) || 0,
-            color: ["#379b76", "#c94c5c", "#db8650", "#b6a05c", "#8b9ba8", "#98acc0"][index],
+            color:
+              {
+                passed: "var(--text-color-success-primary)",
+                failed: "var(--text-color-danger-primary)",
+                blocked: "var(--text-color-danger-primary)",
+                inconclusive: "var(--text-color-warning-primary)",
+                skipped: "var(--text-color-secondary)",
+                pending: "var(--text-color-secondary)",
+              }[key] || "var(--text-color-secondary)",
           }))}
         />
         <p className="text-13">

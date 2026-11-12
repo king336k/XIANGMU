@@ -59,7 +59,7 @@ export function RecordPresentation({
         <ChevronDown aria-hidden="true" className="size-3 text-secondary" />
       </button>
     ) : (
-      <Badge value={row.status} label={row.statusName} />
+      <Badge value={kind === "cases" ? "neutral" : row.status} label={row.statusName} />
     );
   const fieldLabel = (row: Row, field: "severity" | "assignee") => {
     const label = field === "severity" ? "调整严重程度" : "指派负责人";
@@ -125,7 +125,7 @@ export function RecordPresentation({
           {groups.map(([status, name]) => (
             <section key={status} className="w-72 shrink-0 space-y-3 rounded-md bg-layer-1 p-3">
               <h2 className="flex items-center justify-between text-13 font-medium">
-                <Badge value={status} label={name} />
+                <Badge value={kind === "cases" ? "neutral" : status} label={name} />
                 <span className="text-11 text-secondary">{rows.filter((row) => row.status === status).length}</span>
               </h2>
               {rows

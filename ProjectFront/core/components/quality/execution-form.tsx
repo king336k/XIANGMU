@@ -13,8 +13,14 @@ export function ExecutionForm({
   onClose,
   onSaved,
   requireEvidence = false,
+  initialStepIndex,
+  initialResult,
+  initialExecution,
 }: {
   requireEvidence?: boolean;
+  initialStepIndex?: number;
+  initialResult?: string;
+  initialExecution?: import("./types").Execution | null;
   base: string;
   plan: Pick<Plan, "name" | "build" | "environment">;
   item: Pick<PlanItem, "id"> & {
@@ -30,10 +36,15 @@ export function ExecutionForm({
     () => item.revision.snapshot.steps.map((step) => ({ step, key: uuidv4() })),
     [item.revision.snapshot.steps]
   );
-  const [result, setResult] = useState<Result>("passed");
+  const [result, setResult] = useState<Result>((initialResult || initialExecution?.result || "passed") as Result);
   const [requestId] = useState(() => uuidv4());
   const [steps, setSteps] = useState(
-    item.revision.snapshot.steps.map(() => ({ result: "passed" as Result, actual: "" }))
+    item.revision.snapshot.steps.map((_, index) => ({
+      result: (index === initialStepIndex
+        ? initialResult || "passed"
+        : initialExecution?.step_results[index]?.result || "passed") as Result,
+      actual: initialExecution?.step_results[index]?.actual || "",
+    }))
   );
   const needsReason = result === "inconclusive" || steps.some((step) => step.result === "inconclusive");
   return (
@@ -148,6 +159,7 @@ export function ExecutionForm({
       <Field label={needsReason ? "实际结果 / 无法判定说明 *" : "实际结果 / 问题说明"}>
         <textarea
           name="actual_result"
+          defaultValue={initialExecution?.actual_result || ""}
           required={needsReason || requireEvidence}
           rows={3}
           className={fieldClass}
@@ -157,6 +169,7 @@ export function ExecutionForm({
       <Field label="证据备注 / 链接">
         <textarea
           name="evidence"
+          defaultValue={initialExecution?.evidence || ""}
           required={requireEvidence}
           rows={2}
           className={fieldClass}

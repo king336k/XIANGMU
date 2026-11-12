@@ -28,6 +28,8 @@ export type VerificationRound = {
     id: string;
     result: string;
     actual_result: string;
+    created_by_id?: string | null;
+    created_by_name?: string;
     evidence: string;
     created_at: string;
     step_results: { result: string; actual: string }[];
@@ -58,4 +60,14 @@ export const verificationStatus: Record<string, string> = {
   returned_repair: "退回修复",
   reopened: "已重新打开",
   superseded: "已调整",
+};
+
+export const verificationStatusTone: Record<string, string> = {
+  testing: "running",
+  review: "review",
+  accepted: "passed",
+  returned_test: "failed",
+  returned_repair: "failed",
+  reopened: "running",
+  superseded: "neutral",
 };

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useState } from "react";
+import { Badge } from "./record-badge";
 import { BarChart3, ChartPie, Table2, ChevronDown, Check, ChartNoAxesCombined } from "lucide-react";
 import { CustomMenu } from "@plane/ui";
 import { PieChart } from "@plane/propel/charts/pie-chart";
@@ -52,9 +53,11 @@ export function Distribution({
   title,
   rows,
   onSelect,
+  showStatus = false,
 }: {
   title: string;
   rows: StatisticRow[];
+  showStatus?: boolean;
   onSelect?: (key: string) => void;
 }) {
   const [mode, setMode] = useState<StatisticsMode>("bar");
@@ -98,10 +101,19 @@ export function Distribution({
                       onClick={() => onSelect?.(row.key)}
                       className="hover:text-accent-primary"
                     >
-                      {row.name}
+                      {showStatus ? (
+                        <Badge value={row.count ? row.key : "neutral"} label={row.name} variant="plain" />
+                      ) : (
+                        row.name
+                      )}
                     </button>
                   </td>
-                  <td className="text-right tabular-nums">{row.count}</td>
+                  <td
+                    className="text-right tabular-nums"
+                    style={showStatus ? { color: row.count ? row.color : "var(--text-color-secondary)" } : undefined}
+                  >
+                    {row.count}
+                  </td>
                   <td className="text-right tabular-nums">{total ? Math.round((row.count / total) * 100) : 0}%</td>
                 </tr>
               ))}
@@ -119,9 +131,22 @@ export function Distribution({
               className="block w-full rounded text-left hover:bg-layer-1"
             >
               <span className="flex items-center gap-2 text-12">
-                <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: row.color }} />
-                <span className="flex-1">{row.name}</span>
-                <strong className="tabular-nums">{row.count}</strong>
+                {!showStatus && (
+                  <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: row.color }} />
+                )}
+                <span className="flex-1">
+                  {showStatus ? (
+                    <Badge value={row.count ? row.key : "neutral"} label={row.name} variant="plain" />
+                  ) : (
+                    row.name
+                  )}
+                </span>
+                <strong
+                  className="tabular-nums"
+                  style={showStatus ? { color: row.count ? row.color : "var(--text-color-secondary)" } : undefined}
+                >
+                  {row.count}
+                </strong>
                 <span className="w-10 text-right text-secondary">
                   {total ? Math.round((row.count / total) * 100) : 0}%
                 </span>

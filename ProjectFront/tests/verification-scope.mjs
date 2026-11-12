@@ -67,6 +67,7 @@ function harness(file, name, props) {
     stub,
     render(overrides = {}) {
       at = 0;
+      if (props.round) props = { ...props, round: { manual_results: [], ...props.round } };
       return api[name]({
         ...props,
         ...overrides,
@@ -222,3 +223,47 @@ for (const inconclusiveAt of ["result", "result_0"]) {
     assert.equal(h.writes[0][1].expected_version, 5);
   });
 }
+
+test("人工实测挂载后收到新轮次也只提交原版本，旧草稿不能归入新轮", async () => {
+  const old = {
+    id: "round-old",
+    version: 2,
+    fixed_build: "v2",
+    environment: "环境A",
+    steps: [{ action: "旧操作", expected: "旧预期" }],
+  };
+  const h = harness("verification-manual-result", "VerificationManualResult", {
+    base: "/q/",
+    defectId: "d",
+    round: old,
+  });
+  h.render();
+  const tree = h.render({
+    round: {
+      ...old,
+      id: "round-new",
+      version: 3,
+      fixed_build: "v3",
+      environment: "环境B",
+      steps: [{ action: "新操作", expected: "新预期" }],
+    },
+  });
+  await tree.props.onSubmit(
+    new Map([
+      ["result", "passed"],
+      ["result_0", "passed"],
+      ["actual_0", "旧操作成功"],
+      ["actual_result", "仅验证旧版本"],
+      ["evidence", "旧版本截图"],
+    ])
+  );
+  assert.equal(h.writes[0][1].expected_version, 2);
+  assert.equal(h.writes[0][1].evidence, "旧版本截图");
+  const text = new Set(
+    nodes(tree)
+      .flatMap((n) => (Array.isArray(n.props?.children) ? n.props.children : [n.props?.children]))
+      .filter((value) => typeof value === "string")
+  );
+  assert.ok(text.has("v2"));
+  assert.ok(!text.has("v3"));
+});

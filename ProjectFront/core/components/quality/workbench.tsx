@@ -156,7 +156,13 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const saved = async () => {
-    await mutateCache((key) => typeof key === "string" && key.startsWith(`${base}defect-statistics/`));
+    await mutateCache(
+      (key) =>
+        typeof key === "string" &&
+        ["defects/", "defect-statistics/", "verification-results/", "record-progress/"].some((path) =>
+          key.startsWith(`${base}${path}`)
+        )
+    );
     await mutate();
     await refreshReport();
     await refreshContext();
@@ -389,7 +395,7 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
                 key={item.key}
                 aria-current={group === item.key ? "page" : undefined}
                 onClick={() => switchTab(item.tab)}
-                className={`flex shrink-0 items-center gap-2 border-b-2 py-3 text-13 ${group === item.key ? "border-accent-primary text-accent-primary" : "border-transparent text-secondary"}`}
+                className={`flex shrink-0 items-center gap-2 border-b-2 py-3 text-13 ${group === item.key ? "border-accent-primary bg-accent-subtle font-semibold text-accent-primary" : "border-transparent text-secondary hover:bg-layer-1"}`}
               >
                 <item.icon className="size-4" />
                 {item.name}
@@ -408,7 +414,7 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
                     key={item.key}
                     aria-current={tab === item.key ? "page" : undefined}
                     onClick={() => switchTab(item.key)}
-                    className={`rounded-md px-3 py-1.5 text-12 ${tab === item.key ? "bg-layer-1 font-medium text-primary" : "text-secondary hover:bg-layer-1"}`}
+                    className={`rounded-md px-3 py-1.5 text-12 ${tab === item.key ? "bg-accent-subtle font-semibold text-accent-primary" : "text-secondary hover:bg-layer-1"}`}
                   >
                     {item.name}
                   </button>
@@ -427,7 +433,7 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
               key={item.key}
               type="button"
               aria-current={(params.get("panel") || "list") === item.key ? "page" : undefined}
-              className={`border-b-2 py-3 text-13 ${(params.get("panel") || "list") === item.key ? "border-accent-primary text-accent-primary" : "border-transparent text-secondary"}`}
+              className={`border-b-2 py-3 text-13 ${(params.get("panel") || "list") === item.key ? "border-accent-primary bg-accent-subtle font-semibold text-accent-primary" : "border-transparent text-secondary hover:bg-layer-1"}`}
               onClick={() => {
                 const next = new URLSearchParams(params);
                 if (item.key === "list") next.delete("panel");
@@ -508,7 +514,7 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
                               type="button"
                               key={item.key}
                               aria-pressed={(params.get("view") || "") === item.key}
-                              className={`rounded px-3 py-1.5 text-12 ${(params.get("view") || "") === item.key ? "bg-layer-1 font-medium text-primary" : "text-secondary hover:bg-layer-1"}`}
+                              className={`rounded px-3 py-1.5 text-12 ${(params.get("view") || "") === item.key ? "bg-accent-subtle font-semibold text-accent-primary" : "text-secondary hover:bg-layer-1"}`}
                               onClick={() => {
                                 const next = new URLSearchParams(params);
                                 if (item.key) next.set("view", item.key);
