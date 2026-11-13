@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validated offline code installation. Default is read-only --check; never pulls/builds."""
 import argparse
+import importlib.util
 import fcntl
 import errno
 import hashlib
@@ -24,9 +25,9 @@ FILES = {'ProjectServer/manage.py', 'README.md', 'LICENSE', 'LICENSE.txt', 'star
 FILES.update(['AGENTS.md', 'ProjectServer/tests/RUNNING_TESTS.md', 'deploy/network/frp-bridge/README.md',
               'docs/design/agent-diagnosis/本轮实施记录.md', 'docs/design/three-platform/公网与内网部署验证.md',
               'docs/design/three-platform/本轮测试与遗留项.md', 'docs/legal/COPYRIGHT.txt', 'docs/legal/THIRD_PARTY_NOTICES.md'])
-FILES.update('deploy/release/'+s for s in ['runtime-manifest.json', 'compose.yml', 'install.py', 'launcher.py', 'seed_knowledge.py', 'nginx.web.conf', 'Caddyfile', '部署说明.md'])
+FILES.update('deploy/release/'+s for s in ['runtime-manifest.json', 'compose.yml', 'install.py', 'launcher.py', 'frp_control.py', 'seed_knowledge.py', 'nginx.web.conf', 'Caddyfile', '部署说明.md'])
 FILES.update('services/'+s for s in ['diagnostic-agent/runner.py', 'diagnostic-agent/requirements.txt', 'document-ocr/server.py', 'document-ocr/extractor.py', 'document-ocr/README.md', 'embedding-service/app.py', 'embedding-service/setup_platform.py', 'embedding-service/model-manifest.json', 'embedding-service/platform.override.yml', 'embedding-service/README.md', 'embedding-service/requirements.txt'])
-REQUIRED = {'ProjectServer/manage.py', 'ProjectServer/plane/__init__.py', 'ProjectServer/bin/docker-entrypoint-api.sh', 'ProjectFront/build/client/index.html', 'services/collaboration/dist/start.mjs', 'deploy/release/runtime-manifest.json', 'deploy/release/compose.yml', 'deploy/release/install.py', 'deploy/release/launcher.py', 'version_info.json', 'SHA256SUMS'}
+REQUIRED = {'ProjectServer/manage.py', 'ProjectServer/plane/__init__.py', 'ProjectServer/bin/docker-entrypoint-api.sh', 'ProjectFront/build/client/index.html', 'services/collaboration/dist/start.mjs', 'deploy/release/runtime-manifest.json', 'deploy/release/compose.yml', 'deploy/release/install.py', 'deploy/release/launcher.py', 'deploy/release/frp_control.py', 'version_info.json', 'SHA256SUMS'}
 REQUIRED.add('services/embedding-service/model-manifest.json')
 APPS = ['proxy', 'api', 'worker', 'beat-worker', 'diagnostic-worker', 'live', 'web', 'space', 'admin']
 BASE = ['plane-db', 'plane-redis', 'plane-mq', 'plane-minio', 'builtin-embedding', 'document-ocr']
@@ -180,7 +181,7 @@ def open_install_lock(shared):
 
 
 def wrapper_bytes(action):
-    return ('#!/bin/sh\n# EngramProject managed deployment wrapper v1\nset -eu\nroot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)\nexec python3 "$root/current/deploy/release/launcher.py" --deploy-root "$root" '+action+'\n').encode()
+    return ('#!/bin/sh\n# EngramProject managed deployment wrapper v1\nset -eu\nroot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)\nexec python3 "$root/current/deploy/release/launcher.py" --deploy-root "$root" '+action+' \"$@\"\n').encode()
 
 
 def preflight_wrappers(root, record):
@@ -431,15 +432,41 @@ def wait_health(root, release, record, values, seconds=120):
     raise ValueError('new release health failed; current pointer unchanged; no schema rollback attempted')
 
 
+
+def frp_reconcile(root, local_port, action=None, backend=None, source_config=None, python_executable=None):
+    spec = importlib.util.spec_from_file_location('engram_managed_frp', Path(__file__).with_name('frp_control.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.reconcile(root, local_port, action=action, backend=backend,
+                            source_config=source_config, python_executable=python_executable)
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--package', required=True); parser.add_argument('--deploy-root', required=True)
+    parser.add_argument('--package'); parser.add_argument('--deploy-root', required=True)
     group = parser.add_mutually_exclusive_group(); group.add_argument('--check', action='store_true'); group.add_argument('--apply', action='store_true')
     parser.add_argument('--project-name'); parser.add_argument('--profile', action='append'); parser.add_argument('--port', type=int, default=18890, help='Preferred port; new installs try the next 99 ports when occupied'); parser.add_argument('--bind', default='127.0.0.1'); parser.add_argument('--host', default='localhost', help='Public IPv4 address or DNS name, without scheme or port')
+    frp = parser.add_mutually_exclusive_group()
+    frp.add_argument('--openfrp', action='store_true', help='Enable this deployment public TCP 18886 proxy only')
+    frp.add_argument('--closefrp', action='store_true', help='Stop only the owned project FRP proxy')
+    parser.add_argument('--frp-backend', choices=['docker', 'systemd-user'])
+    parser.add_argument('--frp-source-config', help='Existing FRP TOML path; never copied into shared state')
+    parser.add_argument('--frp-python', help='Python 3.11+ executable for systemd-user fallback')
     args = parser.parse_args(argv)
     receipt = None
     try:
-        root = safe_root(args.deploy_root); checked = validate_package(Path(args.package).absolute()); record = deployment_options(root, args.project_name, args.profile)
+        root = safe_root(args.deploy_root)
+        frp_action = 'open' if args.openfrp else 'close' if args.closefrp else None
+        if not args.package:
+            if not frp_action or not args.apply: raise ValueError('FRP-only changes require --apply and an explicit switch')
+            record = deployment_options(root, args.project_name, args.profile)
+            if current_release(root) is None: raise ValueError('owned current release required')
+            with open_install_lock(root/'shared') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX|fcntl.LOCK_NB)
+                values = read_env(root/'shared/.env')
+                state = frp_reconcile(root, int(values['HTTP_PORT']), frp_action, args.frp_backend, args.frp_source_config, args.frp_python)
+            print(json.dumps({'applied':True, 'frp_enabled':state['enabled'], 'frp_backend':state.get('backend','docker')}))
+            return 0
+        checked = validate_package(Path(args.package).absolute()); record = deployment_options(root, args.project_name, args.profile)
         if not (root/'shared/deployment.json').exists() and not pristine_target(root): raise ValueError('target contains unrelated files; no deployment ownership record')
         preflight_wrappers(root, record)
         if not 1 <= args.port <= 65535 or args.bind not in {'127.0.0.1','0.0.0.0'}: raise ValueError('invalid bind/port')
@@ -478,6 +505,8 @@ def main(argv=None):
             install_wrappers(root, record); atomic_json(shared/'deployment.json', record)
             if old: set_link(root, 'previous', old)
             set_link(root, 'current', release); receipt['status'] = 'healthy'; atomic_json(shared/'last-install.json', receipt)
+            state = frp_reconcile(root, endpoint['port'], frp_action, args.frp_backend, args.frp_source_config, args.frp_python)
+            receipt['frp_enabled'] = state['enabled']; atomic_json(shared/'last-install.json', receipt)
         print(json.dumps({'checked':True, 'applied':True, 'release_id':release.name, 'health_verified':True, 'access_url':endpoint['url'], 'port':endpoint['port'], 'requested_port':args.port, 'port_changed':endpoint['port'] != args.port})); return 0
     except (ValueError, OSError, KeyError, TypeError, tarfile.TarError, subprocess.SubprocessError) as error:
         if receipt is not None:

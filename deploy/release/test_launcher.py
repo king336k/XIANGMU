@@ -34,3 +34,10 @@ def test_logs_command_only_exports_owned_container_streams(deploy,monkeypatch):
     monkeypatch.setattr(mod.runtime,'export_logs',lambda *a:calls.append(a))
     mod.execute(deploy,deploy/'releases/v1',{'project_name':'isolated-test','profiles':['helpers']},'logs','2h')
     assert calls[0][-1]=='2h' and calls[0][2]==rows
+
+def test_closefrp_only_operates_owned_proxy_and_does_not_stop_platform(deploy,monkeypatch,capsys):
+    calls=[]
+    monkeypatch.setattr(mod,'execute',lambda *a:pytest.fail('platform action must not run'))
+    monkeypatch.setattr(mod.runtime,'frp_reconcile',lambda *a:calls.append(a) or {'enabled':False})
+    assert mod.main(['--deploy-root',str(deploy),'--closefrp'])==0
+    assert calls[0][2]=='close' and 'frp_enabled' in capsys.readouterr().out

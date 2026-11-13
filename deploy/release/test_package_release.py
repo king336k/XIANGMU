@@ -25,7 +25,7 @@ def source(tmp_path):
         'ProjectServer/manage.py', 'ProjectServer/plane/__init__.py', 'ProjectServer/bin/docker-entrypoint-api.sh',
         'ProjectFront/build/client/index.html', 'services/collaboration/dist/start.mjs',
         'services/diagnostic-agent/runner.py', 'deploy/release/compose.yml', 'deploy/release/install.py',
-        'deploy/release/launcher.py', 'deploy/release/Caddyfile', 'deploy/release/nginx.web.conf', 'deploy/release/部署说明.md',
+        'deploy/release/launcher.py', 'deploy/release/frp_control.py', 'deploy/release/Caddyfile', 'deploy/release/nginx.web.conf', 'deploy/release/部署说明.md',
         'README.md', 'LICENSE.txt', 'start.sh', 'stop.sh', 'deploy/local/.env.example',
         'deploy/network/frp-bridge/bridge.py', 'deploy/network/frp-bridge/templates/frpc.toml.example',
     ]

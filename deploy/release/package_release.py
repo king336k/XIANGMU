@@ -32,10 +32,10 @@ FILES = ['ProjectServer/manage.py', 'README.md', 'LICENSE', 'LICENSE.txt', 'star
          'services/embedding-service/model-manifest.json', 'services/embedding-service/platform.override.yml',
          'services/embedding-service/README.md', 'services/embedding-service/requirements.txt',
          'deploy/release/runtime-manifest.json', 'deploy/release/compose.yml', 'deploy/release/install.py',
-         'deploy/release/seed_knowledge.py', 'deploy/release/launcher.py', 'deploy/release/Caddyfile', 'deploy/release/nginx.web.conf', 'deploy/release/部署说明.md']
+         'deploy/release/seed_knowledge.py', 'deploy/release/launcher.py', 'deploy/release/frp_control.py', 'deploy/release/Caddyfile', 'deploy/release/nginx.web.conf', 'deploy/release/部署说明.md']
 REQUIRED = ['ProjectServer/manage.py', 'ProjectServer/plane/__init__.py', 'ProjectServer/bin/docker-entrypoint-api.sh',
             'ProjectFront/build/client/index.html', 'services/collaboration/dist/start.mjs',
-            'deploy/release/runtime-manifest.json', 'deploy/release/compose.yml', 'deploy/release/install.py', 'deploy/release/launcher.py', 'deploy/release/Caddyfile']
+            'deploy/release/runtime-manifest.json', 'deploy/release/compose.yml', 'deploy/release/install.py', 'deploy/release/launcher.py', 'deploy/release/frp_control.py', 'deploy/release/Caddyfile']
 EXCLUDED = {'.git', '.ssh', 'node_modules', '__pycache__', '.pytest_cache', '.mypy_cache', '.cache', 'logs',
             'data', 'datasets', 'quality-attachments', 'uploads', 'secrets', 'secret', 'backups', 'collected-static'}
 

@@ -131,6 +131,8 @@ services:
       DEBUG: ${DEBUG:-0}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:18890}
       GUNICORN_WORKERS: 1
+      DIAGNOSTIC_TIMEOUT_SECONDS: ${DIAGNOSTIC_TIMEOUT_SECONDS:-300}
+      DIAGNOSTIC_QUEUE_WAIT_SECONDS: ${DIAGNOSTIC_QUEUE_WAIT_SECONDS:-21600}
       USE_MINIO: ${USE_MINIO:-1}
       DATABASE_URL: postgresql://${POSTGRES_USER:-engram}:${POSTGRES_PASSWORD:?请先初始化本地配置}@plane-db:5432/${POSTGRES_DB:-engramproject}
       SECRET_KEY: ${SECRET_KEY:?请先运行 python3 scripts/init_local_config.py}
@@ -635,12 +637,14 @@ services:
       PYTHONDONTWRITEBYTECODE: '1'
       DIAGNOSTIC_AGENT_PYTHON: /opt/diagnostic-agent/bin/python
       DIAGNOSTIC_AGENT_SCRIPT: /release-agent/runner.py
+      DIAGNOSTIC_TIMEOUT_SECONDS: ${DIAGNOSTIC_TIMEOUT_SECONDS:-300}
+      DIAGNOSTIC_QUEUE_WAIT_SECONDS: ${DIAGNOSTIC_QUEUE_WAIT_SECONDS:-21600}
     depends_on:
     - api
     - plane-db
     - plane-redis
     - plane-mq
-    stop_grace_period: 190s
+    stop_grace_period: 700s
     logging:
       driver: json-file
       options:

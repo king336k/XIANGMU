@@ -32,8 +32,14 @@ def execute(root, release, record, action, since):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--deploy-root', required=True)
-    parser.add_argument('action', choices=['start', 'stop', 'logs', 'status'])
+    parser.add_argument('action', nargs='?', choices=['start', 'stop', 'logs', 'status'], default='status')
     parser.add_argument('--since', default='24h')
+    frp = parser.add_mutually_exclusive_group()
+    frp.add_argument('--openfrp', action='store_true')
+    frp.add_argument('--closefrp', action='store_true')
+    parser.add_argument('--frp-backend', choices=['docker', 'systemd-user'])
+    parser.add_argument('--frp-source-config')
+    parser.add_argument('--frp-python')
     args = parser.parse_args(argv)
     try:
         if not re.fullmatch(r'[1-9][0-9]{0,5}[smh]', args.since): raise ValueError('invalid bounded log window')
@@ -45,7 +51,15 @@ def main(argv=None):
         if not env.is_file() or env.stat().st_mode & 0o077: raise ValueError('private shared environment required')
         values = runtime.read_env(env)
         if not values.get('BUILTIN_EMBEDDING_KEY') or not values.get('DOCUMENT_OCR_KEY'): raise ValueError('helper configuration missing')
-        execute(root, release, record, args.action, args.since)
+        if args.openfrp or args.closefrp:
+            with runtime.open_install_lock(root/'shared') as lock:
+                import fcntl
+                fcntl.flock(lock, fcntl.LOCK_EX|fcntl.LOCK_NB)
+                state = runtime.frp_reconcile(root, int(values['HTTP_PORT']), 'open' if args.openfrp else 'close',
+                                              args.frp_backend, args.frp_source_config, args.frp_python)
+            print(json.dumps({'frp_enabled':state['enabled'], 'frp_backend':state.get('backend','docker')}))
+        else:
+            execute(root, release, record, args.action, args.since)
         print(json.dumps({'action':args.action, 'release_id':release.name, 'completed':True}, ensure_ascii=False))
         return 0
     except (ValueError, OSError, KeyError, TypeError):

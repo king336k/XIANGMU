@@ -14,7 +14,7 @@ if Path(spec.origin).exists():spec.loader.exec_module(mod)
 def package(tmp_path, mutation=None, entries=None):
     image={'service':'api','ref':'example/runtime:v1','id':'sha256:'+'a'*64,'platform':'linux/amd64','dependency_sha256':'b'*64}
     manifest={'schema_version':1,'project_key':'engram_project','runtime_set_version':'v1','platform':'linux/amd64','images':[image]}
-    files={'ProjectServer/manage.py':b'pass\n','ProjectServer/plane/__init__.py':b'', 'ProjectServer/bin/docker-entrypoint-api.sh':b'exit 0\n','ProjectFront/build/client/index.html':b'html','services/collaboration/dist/start.mjs':b'export {};','deploy/release/compose.yml':b'services: {}\n','deploy/release/install.py':b'# install','deploy/release/launcher.py':b'# launcher','deploy/release/runtime-manifest.json':json.dumps(manifest).encode()}
+    files={'ProjectServer/manage.py':b'pass\n','ProjectServer/plane/__init__.py':b'', 'ProjectServer/bin/docker-entrypoint-api.sh':b'exit 0\n','ProjectFront/build/client/index.html':b'html','services/collaboration/dist/start.mjs':b'export {};','deploy/release/compose.yml':b'services: {}\n','deploy/release/install.py':b'# install','deploy/release/launcher.py':b'# launcher','deploy/release/frp_control.py':b'# frp manager','deploy/release/runtime-manifest.json':json.dumps(manifest).encode()}
     files['services/embedding-service/model-manifest.json']=b'{"model":"bge-small-zh-v1.5","files":[]}'
     tree=hashlib.sha256(json.dumps({p:hashlib.sha256(v).hexdigest() for p,v in files.items()},sort_keys=True,separators=(',',':')).encode()).hexdigest()
     info={'schema_version':1,'project_key':'engram_project','package_type':'code','version':'v1','release_id':'v1','platform':'linux/amd64','runtime_set_version':'v1','required_images':[image],'runtime_manifest_sha256':hashlib.sha256(files['deploy/release/runtime-manifest.json']).hexdigest(),'source_tree_sha256':tree,'git':{'available':False,'head':None},'autostart':False}
@@ -314,7 +314,7 @@ def test_owned_deployment_wrappers_quote_spaces_and_use_current_launcher(tmp_pat
     for action in ['start','stop']:
         path=root/(action+'.sh');text=path.read_text()
         assert path.stat().st_mode&0o777==0o755
-        assert '"$root/current/deploy/release/launcher.py"' in text and '--deploy-root "$root"' in text and text.rstrip().endswith(action)
+        assert '"$root/current/deploy/release/launcher.py"' in text and '--deploy-root "$root"' in text and text.rstrip().endswith(action + ' "$@"')
         assert 'docker' not in text
     original=(root/'start.sh').read_bytes();mod.install_wrappers(root,record)
     assert (root/'start.sh').read_bytes()==original
@@ -412,3 +412,16 @@ def test_port_search_is_bounded_and_does_not_write_config(tmp_path, monkeypatch)
         mod.deployment_endpoint(tmp_path / "shared", 8886, "0.0.0.0", "10.10.10.4")
     assert len(attempts) == 100 and attempts[0][1] == 8886 and attempts[-1][1] == 8985
     assert not (tmp_path / "shared").exists()
+
+def test_frp_only_installer_switch_requires_existing_owned_release_and_apply(tmp_path,monkeypatch):
+    root=tmp_path/'installed';(root/'shared').mkdir(parents=True);release=root/'releases/v1';release.mkdir(parents=True);(root/'current').symlink_to('releases/v1')
+    (root/'shared/.env').write_text('HTTP_PORT=8886\n');(root/'shared/.env').chmod(0o600)
+    (root/'shared/deployment.json').write_text(json.dumps({'schema_version':1,'deploy_root':str(root),'project_name':'platform','profiles':['helpers']}))
+    calls=[];monkeypatch.setattr(mod,'frp_reconcile',lambda *a:calls.append(a) or {'enabled':False})
+    assert mod.main(['--deploy-root',str(root),'--closefrp'])==1
+    assert not calls
+    assert mod.main(['--apply','--deploy-root',str(root),'--closefrp'])==0
+    assert calls[0][1:3]==(8886,'close')
+
+def test_managed_start_wrapper_forwards_explicit_frp_switch():
+    assert b'start "$@"\n' in mod.wrapper_bytes('start')
