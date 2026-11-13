@@ -1,4 +1,3 @@
-import { useParams } from "next/navigation";
 /**
  * Copyright (c) 2023-present Plane Software, Inc. and contributors
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -18,16 +17,24 @@ import { LogoSpinner } from "@/components/common/logo-spinner";
 import { useAppRouter } from "@/hooks/use-app-router";
 // services
 import { IssueService } from "@/services/issue/issue.service";
+import { ProjectService } from "@/services/project/project.service";
 // types
 import type { Route } from "./+types/page";
 
 const issueService = new IssueService();
+const projectService = new ProjectService();
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
-  const { workspaceSlug, projectId, issueId } = useParams() as typeof params;
+  const { workspaceSlug, projectId, issueId } = params;
 
   try {
-    const data = await issueService.getIssueMetaFromURL(workspaceSlug, projectId, issueId);
+    const resolvedProjectId = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(projectId)
+      ? projectId
+      : (await projectService.getProjectsLite(workspaceSlug)).find(
+          (project) => project.identifier.toLowerCase() === projectId.toLowerCase()
+        )?.id;
+    if (!resolvedProjectId) return { error: true, workspaceSlug };
+    const data = await issueService.getIssueMetaFromURL(workspaceSlug, resolvedProjectId, issueId);
 
     if (data) {
       throw redirect(`/${workspaceSlug}/browse/${data.project_identifier}-${data.sequence_id}`);
