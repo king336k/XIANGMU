@@ -265,7 +265,7 @@ def permission_for(view, request):
         )
     if name == "DataRegressionList":
         return "manage_test_plan" if capable(view.project_id, request.user.id, "manage_test_plan") else "manage_defect"
-    if name in {"DefectDiscussion", "DiscussionFiles", "DiscussionFile"}:
+    if name in {"DefectDiscussion", "DiscussionReplies", "DiscussionFiles", "DiscussionFile"}:
         return "comment"
     if name == "DefectCollaboration":
         return (

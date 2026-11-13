@@ -124,6 +124,7 @@ urlpatterns = [
     path("source-defects/", sources.SourceDefect.as_view()),
     path("defects/<uuid:pk>/collaboration/", sources.DefectCollaboration.as_view()),
     path("defects/<uuid:pk>/comments/", discussion.DefectDiscussion.as_view()),
+    path("defects/<uuid:pk>/comments/<uuid:comment_id>/replies/", discussion.DiscussionReplies.as_view()),
     path("defects/<uuid:pk>/comments/files/", discussion.DiscussionFiles.as_view()),
     path("defects/<uuid:pk>/comments/files/<uuid:file_id>/download/", discussion.DiscussionFile.as_view()),
     path(

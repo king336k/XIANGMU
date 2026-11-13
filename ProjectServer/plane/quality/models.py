@@ -340,6 +340,9 @@ class DefectComment(QualityRecord):
     request_id = models.UUIDField(null=True, blank=True)
     request_hash = models.CharField(max_length=64, blank=True)
     reply_to = models.ForeignKey("self", on_delete=models.PROTECT, null=True, blank=True, related_name="replies")
+    thread_root = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="thread_replies"
+    )
 
     class Meta(QualityRecord.Meta):
         constraints = [

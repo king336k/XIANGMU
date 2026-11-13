@@ -10,6 +10,7 @@ import uuid
 from bs4 import BeautifulSoup
 import nh3
 from django.db import transaction
+from django.db.models import Count, Q
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
@@ -72,6 +73,10 @@ def attachment_data(row):
 
 def comment_data(row):
     parent = row.reply_to
+    if parent and (
+        parent.defect_id != row.defect_id or parent.project_id != row.project_id or parent.visibility != "internal"
+    ):
+        parent = None
     return {
         "id": str(row.id),
         "content": row.content,
@@ -80,10 +85,12 @@ def comment_data(row):
         "actor": actor(row.created_by),
         "created_by_id": str(row.created_by_id) if row.created_by_id else None,
         "created_at": row.created_at,
+        "thread_id": str(row.thread_root_id or row.id),
         "reply_to": {"id": str(parent.id), "actor": actor(parent.created_by), "content": parent.content[:300]}
         if parent
         else None,
         "attachments": [attachment_data(file) for file in row.attachments.all()],
+        "reply_count": getattr(row, "reply_count", 0),
     }
 
 
@@ -109,6 +116,18 @@ class DiscussionView(QualityView):
         return defect
 
 
+def filtered_comments(comments, request):
+    search = serializers.CharField(max_length=200, allow_blank=True).run_validation(
+        request.query_params.get("search", "")
+    )
+    if search:
+        comments = comments.filter(content__icontains=search)
+    if request.query_params.get("author"):
+        author = serializers.UUIDField().run_validation(request.query_params["author"])
+        comments = comments.filter(created_by_id=author)
+    return comments
+
+
 class DefectDiscussion(DiscussionView):
     def get(self, request, pk, **kwargs):
         defect = self.scoped_defect(pk)
@@ -127,18 +146,31 @@ class DefectDiscussion(DiscussionView):
             .values("created_by_id", "created_by__display_name", "created_by__username")
             .distinct()
         ]
-        search = serializers.CharField(max_length=200, allow_blank=True).run_validation(
-            request.query_params.get("search", "")
+        view = serializers.ChoiceField(choices=["flat", "threads"]).run_validation(
+            request.query_params.get("view", "flat")
         )
-        if search:
-            comments = comments.filter(content__icontains=search)
-        if request.query_params.get("author"):
-            author = serializers.UUIDField().run_validation(request.query_params["author"])
-            comments = comments.filter(created_by_id=author)
+        matching = filtered_comments(comments, request)
+        if view == "threads":
+            comments = (
+                comments.filter(thread_root__isnull=True)
+                .filter(
+                    Q(pk__in=matching.order_by().values("pk"))
+                    | Q(pk__in=matching.filter(thread_root__isnull=False).order_by().values("thread_root_id"))
+                )
+                .annotate(
+                    reply_count=Count(
+                        "thread_replies", filter=Q(thread_replies__defect=defect, thread_replies__visibility="internal")
+                    )
+                )
+            )
+        else:
+            comments = matching
         paginator = QualityPagination()
         rows = paginator.paginate_queryset(comments.order_by("-created_at", "-id"), request)
         response = paginator.get_paginated_response([comment_data(row) for row in rows])
         response.data["participants"] = sorted(participants, key=lambda item: item["name"])
+        if view == "threads":
+            response.data["comment_count"] = matching.count()
         return response
 
     @transaction.atomic
@@ -169,10 +201,18 @@ class DefectDiscussion(DiscussionView):
         if not plain and not data["attachment_ids"]:
             raise ValidationError({"content_html": "请填写评论或添加附件。"})
         parent = None
+        thread_root = None
         if data["reply_to"]:
             parent = DefectComment.objects.filter(pk=data["reply_to"], defect=defect, visibility="internal").first()
             if not parent:
                 raise ValidationError({"reply_to": "只能回复本缺陷的内部评论。"})
+            thread_root = parent
+            if parent.thread_root_id:
+                thread_root = DefectComment.objects.filter(
+                    pk=parent.thread_root_id, defect=defect, visibility="internal", thread_root__isnull=True
+                ).first()
+                if not thread_root:
+                    raise ValidationError({"reply_to": "评论线程已变化，请刷新后再回复。"})
         files = list(
             CommentAttachment.objects.select_for_update().filter(
                 id__in=data["attachment_ids"], defect=defect, created_by=request.user, comment__isnull=True
@@ -192,6 +232,7 @@ class DefectDiscussion(DiscussionView):
             request_id=data["request_id"],
             request_hash=digest,
             reply_to=parent,
+            thread_root=thread_root,
         )
         CommentAttachment.objects.filter(id__in=[file.id for file in files]).update(comment=row)
         row = (
@@ -200,6 +241,34 @@ class DefectDiscussion(DiscussionView):
             .get(pk=row.pk)
         )
         return Response(comment_data(row), status=201)
+
+
+class DiscussionReplies(DiscussionView):
+    def get(self, request, pk, comment_id, **kwargs):
+        defect = self.scoped_defect(pk)
+        selected = get_object_or_404(DefectComment, pk=comment_id, defect=defect, visibility="internal")
+        root = (
+            selected
+            if selected.thread_root_id is None
+            else get_object_or_404(
+                DefectComment,
+                pk=selected.thread_root_id,
+                defect=defect,
+                visibility="internal",
+                thread_root__isnull=True,
+            )
+        )
+        replies = (
+            defect.comments.filter(visibility="internal", thread_root=root)
+            .select_related("created_by", "reply_to__created_by")
+            .prefetch_related("attachments")
+        )
+        total = replies.count()
+        paginator = QualityPagination()
+        rows = paginator.paginate_queryset(filtered_comments(replies, request).order_by("-created_at", "-id"), request)
+        response = paginator.get_paginated_response([comment_data(row) for row in rows])
+        response.data.update({"thread_id": str(root.id), "reply_count": total})
+        return response
 
 
 class DiscussionFiles(DiscussionView):
