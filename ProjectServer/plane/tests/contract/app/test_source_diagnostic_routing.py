@@ -7,6 +7,57 @@ from plane.tests.contract.app.test_module_owners import routing as routing
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 MATRIX = [
     {
+        "id": "forced_stop_source_warning",
+        "line": "WARN 录制已强制停止，本段数据可能不完整：fixture backend stop failure",
+        "expected_modules": ["daq"],
+    },
+    {
+        "id": "upload_deferred_source_message",
+        "line": "ERROR UploadDeferred: 存储节点分片上传暂不可用，将自动重试：fixture unavailable",
+        "expected_modules": ["daq"],
+    },
+    {
+        "id": "generic_http_unavailable_is_not_daq_evidence",
+        "line": "WARN HTTP 503 unavailable",
+        "expected_modules": [],
+    },
+    {
+        "id": "monitor_pending_confirmation_recovers",
+        "line": (
+            'WARN channel_status=ERROR message="freq low (confirming 1/3)"\n'
+            "INFO next_channel_status=OK consecutive_error_cycles=0 module_error_bit=false"
+        ),
+        "description": "问题范围：遥操",
+        "expected_modules": [],
+    },
+    {
+        "id": "monitor_pending_confirmation_not_active_failure",
+        "line": '[TopicMonitor] WARN channel_status=ERROR message="freq low (confirming 2/4)"',
+        "description": "问题范围：遥操",
+        "expected_modules": [],
+    },
+    {
+        "id": "monitor_confirmed_failure",
+        "line": 'ERROR channel_status=ERROR message="freq low (confirming 3/3)" module_error_bit=true',
+        "description": "问题范围：遥操",
+        "expected_modules": ["teleop"],
+    },
+    {
+        "id": "monitor_pending_does_not_hide_separate_failure",
+        "line": (
+            'WARN channel_status=ERROR message="freq low (confirming 1/3)"\n'
+            "ERROR Error in dual hand retargeting loop"
+        ),
+        "description": "问题范围：遥操",
+        "expected_modules": ["teleop"],
+    },
+    {
+        "id": "monitor_confirmation_explicit_active_bit",
+        "line": 'WARN channel_status=ERROR message="freq low (confirming 1/3)" module_error_bit=true',
+        "description": "问题范围：遥操",
+        "expected_modules": ["teleop"],
+    },
+    {
         "id": "topic_low",
         "line": "ERROR code=topic_rate_too_low actual_hz=12",
         "expected_modules": ["daq"],
@@ -152,3 +203,16 @@ def test_verified_source_code_routing_never_uses_model_text_or_generic_scope(rou
         job.result["sources"][0]["sha256"] = "wrong"
     got, _ = evidence_modules(job, job.defect)
     assert got == set(item["expected_modules"]), (item["id"], got)
+
+
+@pytest.mark.parametrize("cycle", ["0/3", "4/3", "1/0", "-1/3", "1/x", "1/"])
+def test_malformed_confirmation_does_not_suppress_failure(cycle):
+    from plane.quality.module_routing import log_failure
+
+    assert log_failure(f'ERROR channel_status=ERROR message="freq low (confirming {cycle})"')
+
+
+def test_confirmation_does_not_hide_an_independent_error_on_the_same_line():
+    from plane.quality.module_routing import log_failure
+
+    assert log_failure('WARN channel_status=ERROR message="freq low (confirming 1/3)" ERROR MCAP write failed')

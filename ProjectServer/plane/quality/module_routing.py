@@ -17,6 +17,22 @@ FIELD = re.compile(
 def log_failure(line):
     if re.search(r"\bno errors?\b|\berrors?\s*[:=]\s*(?:0|none|null|false)\b", line, re.I):
         return False
+    confirmation = re.search(r"\bfreq low\s*\(confirming ([0-9]{1,6})/([0-9]{1,6})\)", line, re.I)
+    if (
+        confirmation
+        and re.search(r"\bchannel_status=ERROR\b", line)
+        and 0 < int(confirmation[1]) < int(confirmation[2])
+        and not re.search(r"\bmodule_error_bit=true\b", line, re.I)
+        and not FAILURE.search(
+            re.sub(
+                r"^(?:SIMULATED\s+)?(?:\[TopicMonitor\]\s+)?WARN(?:ING)?\s+",
+                "",
+                re.sub(r"\bchannel_status=ERROR\b", "", line),
+                flags=re.I,
+            )
+        )
+    ):
+        return False
     return bool(FAILURE.search(line))
 
 
@@ -182,6 +198,7 @@ SOURCE_DAQ_PHRASES = (
     "timestamp count mismatch: sidecar=",
     "depth source mapping digest or record count mismatch",
     "上传会话分片参数不完整",
+    "存储节点分片上传暂不可用，将自动重试：",
 )
 SOURCE_TELEOP_PHRASES = (
     "Retarget error (left)",
@@ -254,6 +271,8 @@ def source_fault_modules(line, structured=None):
     if failed and any(value.casefold() in line.casefold() for value in SOURCE_TELEOP_PHRASES):
         result.add("teleop")
     if re.search(r"\bWARN(?:ING)?\b", line, re.I):
+        if "录制已强制停止，本段数据可能不完整：" in line:
+            result.add("daq")
         if "MCAP queue full" in line and re.search(r"\bqueue_drops=[1-9][0-9]*\b", line):
             result.add("daq")
         if any(tag in line for tag in SOURCE_TELEOP_WARN_TAGS):
