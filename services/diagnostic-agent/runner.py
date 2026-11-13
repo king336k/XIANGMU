@@ -111,6 +111,15 @@ class EvidenceTraceModel(WrapperModel):
         return response
 
 
+REFERENCE_HINTS = {
+    "citation_not_in_current_allowlist": "citations 只能使用本任务材料清单中的编号；删除清单外引用，不编造替代编号。",
+    "confidence_not_in_final_citations": "confidence_references 必须全部列入最终 citations，并且属于本任务材料清单。",
+    "severity_reference_not_allowed": "severity_assessment.evidence 只能引用本任务材料清单中的 FILE 材料，不得编造引用或逐字引文。",
+    "severity_reference_not_cited": "severity_assessment.evidence 中每个引用必须列入最终 citations。",
+    "severity_reference_not_file": "影响等级 evidence 只能使用本任务 FILE 材料的真实逐字引文；PLATFORM 回执可用于 answer 和 citations 解释接收情况，不能证明影响等级。影响不明时 severity 留空且 evidence 设为空数组，不编造影响或引文。",
+}
+
+
 def register_reference_validator(agent, payload):
     allowed = {"DESCRIPTION"}
     allowed.update(row["reference"] for row in payload["evidence"] + payload["references"])
@@ -118,13 +127,18 @@ def register_reference_validator(agent, payload):
     @agent.output_validator
     def task_reference_contract(report: Report) -> Report:
         citations = set(report.citations)
-        invalid = not citations.issubset(allowed) or not set(report.confidence_references).issubset(citations)
-        invalid |= any(
-            row.reference not in allowed or row.reference not in citations or not row.reference.startswith("FILE-")
-            for row in report.severity_assessment.evidence
-        )
-        if invalid:
-            raise ModelRetry("引用校验未通过：请仅使用本任务材料清单中的编号，修正citations及其关联引用后重新提交。")
+        checks = {
+            "citation_not_in_current_allowlist": not citations.issubset(allowed),
+            "confidence_not_in_final_citations": not set(report.confidence_references).issubset(citations),
+            "severity_reference_not_allowed": any(row.reference not in allowed for row in report.severity_assessment.evidence),
+            "severity_reference_not_cited": any(row.reference not in citations for row in report.severity_assessment.evidence),
+            "severity_reference_not_file": any(not row.reference.startswith("FILE-") for row in report.severity_assessment.evidence),
+        }
+        categories = tuple(key for key, invalid in checks.items() if invalid)
+        if categories:
+            error = ModelRetry("引用校验未通过：" + " ".join(REFERENCE_HINTS[key] for key in categories))
+            error.reference_categories = categories
+            raise error
         return report
 
 
@@ -408,6 +422,26 @@ def output_validation_failure(error):
     return validated
 
 
+def finalizer_failure(error):
+    """Classify the actual bounded exception chain, never its message or model values."""
+    seen, cause, classes = set(), error, []
+    while cause is not None and id(cause) not in seen and len(seen) < 8:
+        seen.add(id(cause))
+        classes.append(cause)
+        cause = cause.__cause__ or cause.__context__
+    if any(isinstance(cause, UsageLimitExceeded) for cause in classes):
+        reason = "usage_limit"
+    elif any(isinstance(cause, (TimeoutError, ModelTimeoutError)) for cause in classes):
+        reason = "model_timeout"
+    elif any(isinstance(cause, ModelRetry) for cause in classes):
+        reason = "output_reference_invalid"
+    elif any(isinstance(cause, ValidationError) for cause in classes):
+        reason = "output_schema_invalid"
+    else:
+        reason = "unknown"
+    return {"reason": reason, "validation_categories": safe_failure(error).get("validation_categories", [])}
+
+
 async def _analyze(payload, client, budget):
     config = payload["config"]
     finalizer_timeout = min(60, budget // 3)
@@ -469,6 +503,7 @@ async def _analyze(payload, client, budget):
         )
         trace["finalizer"] = {
             "used": True,
+            **finalizer_failure(error),
             "prompt_bytes": len(final_prompt.encode()),
             "prompt_sha256": hashlib.sha256(final_prompt.encode()).hexdigest(),
             "read_indices": [row["trace_index"] for row in payload.get("_read_pages", [])],
@@ -504,6 +539,7 @@ def safe_failure(error):
         info["status_code"] = status
     chain, seen, cause = [], set(), error
     validation = []
+    categories = []
     fields = {"answer", "suggested_actions", "verification_steps", "citations", "model_confidence",
               "evidence_assessment", "confidence_basis", "confidence_references", "severity_assessment",
               "severity", "basis", "evidence", "reference", "quote"}
@@ -523,11 +559,20 @@ def safe_failure(error):
                                            for part in row.get("loc", ())[:8]]})
         elif isinstance(cause, ModelRetry):
             entry["validation_category"] = "output_validator_retry"
+            raw_categories = getattr(cause, "reference_categories", ())
+            if isinstance(raw_categories, (tuple, list)):
+                known = [key for key in REFERENCE_HINTS
+                         if any(type(value) is str and value == key for value in raw_categories[:5])]
+                if known:
+                    entry["reference_categories"] = known
+                    categories.extend(key for key in known if key not in categories)
         chain.append(entry)
         cause = cause.__cause__ or cause.__context__
     info["error_chain"] = chain
     if validation:
         info["validation_errors"] = validation[:20]
+    if categories:
+        info["validation_categories"] = categories[:5]
     return info
 
 

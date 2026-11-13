@@ -16,9 +16,25 @@ from .diagnostic_limits import timeout_seconds
 
 
 class DiagnosticOutputFailure(ValueError):
-    def __init__(self, details):
+    def __init__(self, details, categories=None):
         super().__init__("AGENT_INVALID_OUTPUT")
         self.validation_details = safe_validation_details(details)
+        self.validation_categories = safe_validation_categories(categories)
+
+
+def safe_validation_categories(value):
+    allowed = {
+        "citation_not_in_current_allowlist",
+        "confidence_not_in_final_citations",
+        "severity_reference_not_allowed",
+        "severity_reference_not_cited",
+        "severity_reference_not_file",
+    }
+    return (
+        list(dict.fromkeys(item for item in value[:5] if isinstance(item, str) and item in allowed))
+        if isinstance(value, (list, tuple))
+        else []
+    )
 
 
 def safe_validation_details(details):
@@ -223,7 +239,9 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
                 if status in {408, 429} or isinstance(status, int) and status >= 500:
                     raise ValueError("AGENT_PROVIDER_UNAVAILABLE") from error
                 if diagnostic.get("error_type") in {"UnexpectedModelBehavior", "ModelRetry", "ValidationError"}:
-                    raise DiagnosticOutputFailure(diagnostic.get("validation_errors")) from error
+                    raise DiagnosticOutputFailure(
+                        diagnostic.get("validation_errors"), diagnostic.get("validation_categories")
+                    ) from error
             raise ValueError("AGENT_FAILED") from error
         content = process.stdout
     else:
@@ -396,6 +414,13 @@ def validated_evidence_trace(value, allowed):
     if not isinstance(finalizer, dict) or type(finalizer.get("used")) is not bool:
         return None
     safe_finalizer = {"used": finalizer["used"]}
+    reasons = {"output_reference_invalid", "output_schema_invalid", "usage_limit", "model_timeout", "unknown"}
+    if finalizer["used"] and isinstance(finalizer.get("reason"), str) and finalizer["reason"] in reasons:
+        safe_finalizer["reason"] = finalizer["reason"]
+    if finalizer["used"]:
+        categories = safe_validation_categories(finalizer.get("validation_categories"))
+        if categories:
+            safe_finalizer["validation_categories"] = categories
     if finalizer["used"]:
         indices = finalizer.get("read_indices")
         if (

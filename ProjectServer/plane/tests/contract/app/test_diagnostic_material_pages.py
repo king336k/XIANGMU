@@ -385,3 +385,26 @@ def test_trace_preserves_duplicate_read_attempts_without_private_page_content():
     assert "PRIVATE" not in json.dumps(safe)
     trace["read_attempts"][1]["sha256"] = "c" * 64
     assert validated_evidence_trace(trace, {"FILE-local": {}}) is None
+
+
+def test_successful_finalizer_keeps_only_fixed_reason_metadata():
+    from plane.quality.diagnostic_model import validated_evidence_trace
+
+    trace = {
+        "version": 1,
+        "initial_prompt": {"bytes": 10, "sha256": "a" * 64},
+        "reads": [],
+        "finalizer": {
+            "used": True,
+            "reason": "output_reference_invalid",
+            "validation_categories": ["severity_reference_not_file", "PRIVATE_ERROR_BODY"],
+            "prompt_bytes": 10,
+            "prompt_sha256": "b" * 64,
+            "read_indices": [],
+        },
+    }
+    safe = validated_evidence_trace(trace, {})
+    assert safe["finalizer"]["reason"] == "output_reference_invalid"
+    assert safe["finalizer"]["validation_categories"] == ["severity_reference_not_file"]
+    trace["finalizer"]["reason"] = "PRIVATE_ERROR_BODY"
+    assert "PRIVATE" not in json.dumps(validated_evidence_trace(trace, {}))

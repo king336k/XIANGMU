@@ -179,6 +179,7 @@ def test_invalid_output_retains_only_safe_validation_fields(mocker, monkeypatch)
     details = {
         "error_type": "UnexpectedModelBehavior",
         "error_chain": [{"error_type": "ValidationError"}],
+        "validation_categories": ["severity_reference_not_file", "PRIVATE_CATEGORY"],
         "validation_errors": [
             {"type": "value_error", "loc": ["model_confidence"], "input": "PRIVATE-VALUE", "msg": "PRIVATE-MESSAGE"},
             {"type": "PRIVATE-TYPE", "loc": ["PRIVATE-LOCATION"]},
@@ -195,6 +196,7 @@ def test_invalid_output_retains_only_safe_validation_fields(mocker, monkeypatch)
             [{"file_id": "local", "name": "log", "read_bytes": 10, "excerpt": "neutral"}],
             [],
         )
+    assert caught.value.validation_categories == ["severity_reference_not_file"]
     safe = caught.value.validation_details
     assert safe == [
         {"type": "value_error", "loc": ["model_confidence"]},

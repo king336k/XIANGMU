@@ -180,6 +180,11 @@ def run_diagnostic(job_id):
                         details = safe_validation_details(getattr(error, "validation_details", []))
                         if details:
                             result["validation_errors"] = details
+                        from .diagnostic_model import safe_validation_categories
+
+                        categories = safe_validation_categories(getattr(error, "validation_categories", []))
+                        if categories:
+                            result["validation_categories"] = categories
     except Exception:
         status, code = "failed", "DIAGNOSTIC_FAILED"
     result["duration_ms"] = round((time.monotonic() - started) * 1000)
