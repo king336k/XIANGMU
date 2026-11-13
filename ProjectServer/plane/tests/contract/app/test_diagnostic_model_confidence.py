@@ -120,7 +120,24 @@ def test_result_records_safe_model_and_instruction_provenance(mocker, monkeypatc
         [],
     )
     assert result["model_info"]["model"] == "actual-provider-model"
-    assert result["model_info"]["instruction_version"] == "diagnostic-evidence-impact-v3"
+    assert result["model_info"]["instruction_version"] == "diagnostic-evidence-impact-v4"
     assert len(result["model_info"]["boundary_code_sha256"]) == 64
     assert result["confidence_references"][0]["reference"] == "FILE-local"
     assert "fixture-private-key" not in json.dumps(result)
+
+
+def test_agent_connection_failure_is_a_provider_error_without_exposing_message(mocker, monkeypatch):
+    import subprocess
+
+    monkeypatch.setenv("DIAGNOSTIC_AGENT_PYTHON", "fixture-python")
+    mocker.patch(
+        "plane.quality.diagnostic_model.subprocess.run",
+        side_effect=subprocess.CalledProcessError(
+            1, ["runner"], stderr=json.dumps({"error_type": "ModelConnectionError"})
+        ),
+    )
+    with pytest.raises(ValueError, match="^AGENT_PROVIDER_UNAVAILABLE$"):
+        analyze_diagnostic(
+            {"api_key": "fixture-private-key", "base_url": "https://api.openai.com/v1", "model": "fixture"},
+            "neutral", [{"file_id": "local", "name": "log", "read_bytes": 10, "excerpt": "Connection refused"}], [],
+        )

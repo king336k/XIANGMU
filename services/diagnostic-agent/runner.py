@@ -123,6 +123,7 @@ def create_agent(model, payload):
             "区分事实、可能原因、待验证项；描述中出现连接失败不代表已确认硬件损坏。诊断面向技术员直接处理：answer明确故障环节、已确认根因或待验证假设及关键证据；suggested_actions给出最小修复步骤、适用前提和风险，verification_steps给出对应通过标准。可由现有材料确定的事实直接摘出，不要求技术员重复翻整份日志。不能定位时只列最少必要补证；不得编造路径、参数或修复已执行。涉及运动、初始化、停服务、删数据的操作须明确需现场授权。不得仅因显示字符数与文件字节数不同而判材料损坏；只有同文件同口径明确差异值才报告不一致。"
             "模拟标记限定事实来源，但不能代替机制分析；仍应依据已给知识列出有效配置来源、同事件账本、原始来源和恢复前提中与本异常相关的最小核查。区分当前运行配置与默认文件，原始完成与派生失败分别判断。确需多个模块人工分诊时交项目经理或管理员，不擅自合并根因。输入解析只收集结构类别、字段类型、错误位置和计数；不得建议保存完整状态载荷、运动数值、标定值或完整原始JSON，脱敏也不能代替最小化。"
             "另给severity_assessment对象：severity为critical/major/minor/trivial或空字符串，basis为影响依据，evidence为本次FILE引用与逐字quote对象数组。致命须直接安全危险或不可恢复损失；严重须核心功能阻断或实际数据损失；一般为局部可恢复影响；轻微为有限显示问题或明确恢复。仅ERROR、标题、知识推测不构成等级证据；影响不明留空。评估模拟材料的限定影响，不把模拟故障宣布真实事故。"
+            "人工回放只限定事实来源：仍应在假设观测成立的范围内，根据已提供知识给出条件式技术排查、修复前提及恢复标准；不要只建议修改回放输入、编写测试断言或重复声明未实机测试。严重程度同样按材料所述功能阻断、数据完整性或局部影响判断，不因synthetic标记就统一降级或留空；明确仅为场景影响建议，不宣称现场事故或实际恢复。"
             "缺陷标题和测试函数名不是根因证据，不得据此反推。异常栈同一行有多个调用时，不能确定失败调用或执行阶段。"
             "根因须由本次同一事件的观测支持；新时刻或新端口的补充观测不可追溯证明旧事件。证据不足就保留未定位。"
             "先依据已提供摘要分析；异常正文不完整时使用find_evidence字面查找，或按材料error_offsets、offset/length分页读相关上下文。一次批量最多6份；next_offset可继续取下一页，不重复读取同范围。"
@@ -352,6 +353,7 @@ async def _analyze(payload, client, budget):
             "诊断面向技术员直接处理：answer明确故障环节、已确认根因或待验证假设及关键证据；suggested_actions给出最小修复步骤、适用前提和风险，verification_steps给出对应通过标准。可由现有材料确定的事实直接摘出，不要求技术员重复翻整份日志。不能定位时只列最少必要补证；不得编造路径、参数或修复已执行。涉及运动、初始化、停服务、删数据的操作须明确需现场授权。不得仅因显示字符数与文件字节数不同而判材料损坏；只有同文件同口径明确差异值才报告不一致。摘要最多350中文字符，建议与验证各最多3条；无法判断根因时明确说明缺什么。"
             "模拟标记限定事实来源，但不能代替机制分析；仍应依据已给知识列出有效配置来源、同事件账本、原始来源和恢复前提中与本异常相关的最小核查。区分当前运行配置与默认文件，原始完成与派生失败分别判断。确需多个模块人工分诊时交项目经理或管理员，不擅自合并根因。输入解析只收集结构类别、字段类型、错误位置和计数；不得建议保存完整状态载荷、运动数值、标定值或完整原始JSON，脱敏也不能代替最小化。"
             "另给severity_assessment对象：severity为critical/major/minor/trivial或空字符串，basis为影响依据，evidence为本次FILE引用与逐字quote对象数组。致命须直接安全危险或不可恢复损失；严重须核心功能阻断或实际数据损失；一般为局部可恢复影响；轻微为有限显示问题或明确恢复。仅ERROR、标题、知识推测不构成等级证据；影响不明留空。评估模拟材料的限定影响，不把模拟故障宣布真实事故。"
+            "人工回放只限定事实来源：仍应在假设观测成立的范围内，根据已提供知识给出条件式技术排查、修复前提及恢复标准；不要只建议修改回放输入、编写测试断言或重复声明未实机测试。严重程度同样按材料所述功能阻断、数据完整性或局部影响判断，不因synthetic标记就统一降级或留空；明确仅为场景影响建议，不宣称现场事故或实际恢复。"
             "给出model_confidence（0到1或null）模型自评而非正确概率；若有分值，必须同时填写"
             "evidence_assessment(supported/partial/insufficient)、confidence_basis和confidence_references。",
         )
@@ -386,6 +388,25 @@ async def _analyze(payload, client, budget):
             for key in ["requests", "input_tokens", "output_tokens"]
         },
     }
+
+
+def safe_failure(error):
+    """Bounded exception types and HTTP statuses; never persist exception text."""
+    info = {"error_type": type(error).__name__}
+    status = getattr(error, "status_code", None)
+    if type(status) is int:
+        info["status_code"] = status
+    chain, seen, cause = [], set(), error
+    while cause is not None and id(cause) not in seen and len(chain) < 8:
+        seen.add(id(cause))
+        entry = {"error_type": type(cause).__name__}
+        code = getattr(cause, "status_code", None)
+        if type(code) is int:
+            entry["status_code"] = code
+        chain.append(entry)
+        cause = cause.__cause__ or cause.__context__
+    info["error_chain"] = chain
+    return info
 
 
 if __name__ == "__main__":
@@ -423,9 +444,5 @@ if __name__ == "__main__":
         raise SystemExit(2)
     except Exception as error:
         # Only a class name is logged, never credentials, prompts or provider output.
-        info = {"error_type": type(error).__name__}
-        status = getattr(error, "status_code", None)
-        if type(status) is int:
-            info["status_code"] = status
-        print(json.dumps(info), file=sys.stderr)
+        print(json.dumps(safe_failure(error)), file=sys.stderr)
         raise SystemExit(1)

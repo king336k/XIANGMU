@@ -139,6 +139,8 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
                     continue
                 if diagnostic.get("error_type") in types:
                     raise TimeoutError("AGENT_PROVIDER_TIMEOUT") from error
+                if diagnostic.get("error_type") in {"ModelConnectionError", "APIConnectionError"}:
+                    raise ValueError("AGENT_PROVIDER_UNAVAILABLE") from error
                 status = diagnostic.get("status_code")
                 if status in {401, 403}:
                     raise ValueError("AGENT_PROVIDER_AUTH") from error
@@ -163,6 +165,7 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
                             "区分已观察事实、可能原因和待验证项；没有证据时说明缺少什么，不能确认硬件损坏。诊断面向技术员直接处理：answer明确故障环节、已确认根因或待验证假设及关键证据；suggested_actions给出最小修复步骤、适用前提和风险，verification_steps给出对应通过标准。可由现有材料确定的事实直接摘出，不要求技术员重复翻整份日志。不能定位时只列最少必要补证；不得编造路径、参数或修复已执行。涉及运动、初始化、停服务、删数据的操作须明确需现场授权。不得仅因显示字符数与文件字节数不同而判材料损坏；只有同文件同口径明确差异值才报告不一致。"
                             "模拟标记限定事实来源，但不能代替机制分析；仍应依据已给知识列出有效配置来源、同事件账本、原始来源和恢复前提中与本异常相关的最小核查。区分当前运行配置与默认文件，原始完成与派生失败分别判断。确需多个模块人工分诊时交项目经理或管理员，不擅自合并根因。输入解析只收集结构类别、字段类型、错误位置和计数；不得建议保存完整状态载荷、运动数值、标定值或完整原始JSON，脱敏也不能代替最小化。"
                             "另给severity_assessment对象：severity为critical/major/minor/trivial或空字符串，basis为影响依据，evidence为本次FILE引用与逐字quote对象数组。致命须直接安全危险或不可恢复损失；严重须核心功能阻断或实际数据损失；一般为局部可恢复影响；轻微为有限显示问题或明确恢复。仅ERROR、标题、知识推测不构成等级证据；影响不明留空。评估模拟材料的限定影响，不把模拟故障宣布真实事故。"
+                            "人工回放只限定事实来源：仍应在假设观测成立的范围内，根据已提供知识给出条件式技术排查、修复前提及恢复标准；不要只建议修改回放输入、编写测试断言或重复声明未实机测试。严重程度同样按材料所述功能阻断、数据完整性或局部影响判断，不因synthetic标记就统一降级或留空；明确仅为场景影响建议，不宣称现场事故或实际恢复。"
                             "标题和测试函数名不是根因证据；异常栈一行包含多个调用时，不能唯一确定失败调用或阶段。"
                             "不同时间或端口的观测不可追溯证明旧事件，根因必须由当前同一事件证据支持。"
                             "输出JSON：answer字符串、suggested_actions数组、verification_steps数组、citations引用编号数组。"
@@ -221,7 +224,7 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
         "model": model_name,
         "model_source": model_source,
         "engine": result["engine"],
-        "instruction_version": "diagnostic-evidence-impact-v3",
+        "instruction_version": "diagnostic-evidence-impact-v4",
         "boundary_code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "agent_code_sha256": agent_sha256,
     }
