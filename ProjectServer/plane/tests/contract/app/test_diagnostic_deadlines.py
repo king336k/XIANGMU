@@ -20,7 +20,7 @@ pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 
 
 @pytest.mark.parametrize(
-    "status,age,error", [("running", 200, "DIAGNOSTIC_TIMEOUT"), ("queued", 901, "QUEUE_WAIT_TIMEOUT")]
+    "status,age,error", [("running", 900, "DIAGNOSTIC_TIMEOUT"), ("queued", 86401, "QUEUE_WAIT_TIMEOUT")]
 )
 def test_report_only_polling_expires_stalled_diagnosis(report_scope, status, age, error):
     project, user, payload, _ = report_scope

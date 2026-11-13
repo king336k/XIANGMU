@@ -144,7 +144,8 @@ def test_model_failure_keeps_rules_and_safe_error_only(current, mocker, error, c
     mocker.patch("plane.knowledge.assistant.provider_config", return_value={"configured": True})
     mocker.patch("plane.quality.tasks.analyze_diagnostic", side_effect=error)
     job = run(job)
-    assert job.status == "completed" and job.result["method"] == "rules"
+    assert job.status == ("queued" if code == "MODEL_TIMEOUT" else "completed")
+    assert job.result["method"] == "rules"
     assert job.result["model_error_code"] == code
     assert "private provider response" not in json.dumps(job.result)
 
@@ -159,7 +160,7 @@ def test_queue_and_running_deadlines_are_distinct(current):
     expire_stale(Defect.objects.get(pk=report_id))
     job.refresh_from_db()
     assert job.status == "queued"
-    DiagnosticJob.objects.filter(pk=job.id).update(status="running", started_at=timezone.now() - timedelta(minutes=4))
+    DiagnosticJob.objects.filter(pk=job.id).update(status="running", started_at=timezone.now() - timedelta(minutes=8))
     expire_stale(Defect.objects.get(pk=report_id))
     job = run(job)
     assert job.status == "failed" and job.error_code == "DIAGNOSTIC_TIMEOUT"

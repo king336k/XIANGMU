@@ -151,7 +151,7 @@ def test_agent_payload_filters_forged_materials_redacts_and_never_persists_fullt
     assert "FILE-foreign" not in sent["materials"]
     assert result["citations"][0]["content"] == "safe summary"
     assert "PermissionError tail" not in json.dumps(result)
-    assert child.call_args.kwargs["timeout"] == 125
+    assert child.call_args.kwargs["timeout"] == 310
 
 
 def test_trace_validation_rejects_unknown_refs_and_strips_text(mocker):
@@ -214,3 +214,34 @@ def test_trace_never_persists_revocable_knowledge_identifiers_and_remaps_pages()
     assert result["finalizer"]["read_indices"] == [0]
     assert result["model_requests"][0]["read_indices"] == [0]
     assert "KN-private-revision" not in json.dumps(result)
+
+
+def test_invalid_utf8_preview_budget_keeps_terminal_fault_for_plain_and_zip(material_case):
+    from plane.quality.diagnostic_materials import inspect
+    import io
+    import zipfile
+
+    add, job = material_case
+    raw = b"\xff" * 240000 + b"\nERROR E-UTF8-TAIL retained\n"
+    plain = add(raw, "invalid.log")
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("logs/invalid.log", raw)
+    zipped = add(stream.getvalue(), "invalid.zip")
+    _, sources, _ = inspect(job([plain.id, zipped.id]))
+    assert len(sources) == 2
+    for source in sources:
+        assert source["scanned_bytes"] == len(raw)
+        assert "E-UTF8-TAIL" in source["excerpt"]
+        assert source["read_bytes"] <= 256 * 1024
+
+
+def test_unicode_byte_budget_preserves_error_tail_and_handles_tiny_budget():
+    from plane.quality.diagnostic_materials import bounded_preview
+
+    text = "\ufffd" * 240000 + "\nERROR E-UTF8-BUDGET-TAIL\n"
+    preview = bounded_preview(text, 256 * 1024)
+    assert len(preview) <= 256 * 1024
+    assert b"E-UTF8-BUDGET-TAIL" in preview
+    assert len(bounded_preview("中文", 1)) <= 1
+    assert bounded_preview(text, 0) == b""

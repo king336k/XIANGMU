@@ -19,9 +19,10 @@ from datetime import timedelta
 
 def enqueue(job_id):
     from .tasks import run_diagnostic
+    from .diagnostic_limits import queue_wait_seconds
 
     try:
-        run_diagnostic.apply_async(args=[str(job_id)], queue="diagnostics", expires=900)
+        run_diagnostic.apply_async(args=[str(job_id)], queue="diagnostics", expires=queue_wait_seconds())
     except Exception:
         DiagnosticJob.objects.filter(pk=job_id, status="queued").update(
             status="failed", error_code="QUEUE_UNAVAILABLE", completed_at=timezone.now()
@@ -123,9 +124,10 @@ def schedule_automatic(defect, actor, trigger, context=None):
 
 
 def expire_stale(defect):
+    from .diagnostic_limits import task_limits, queue_wait_seconds
     stale = defect.diagnostics.filter(
-        Q(status="running", started_at__lt=timezone.now() - timedelta(seconds=190))
-        | Q(status="queued", created_at__lt=timezone.now() - timedelta(minutes=15))
+        Q(status="running", started_at__lt=timezone.now() - timedelta(seconds=task_limits()[1] + 10))
+        | Q(status="queued", created_at__lt=timezone.now() - timedelta(seconds=queue_wait_seconds()))
     )
     for job in stale:
         result = {**job.result, "model_status": "timeout" if job.status == "running" else "not_requested"}
@@ -167,6 +169,25 @@ class DiagnosticSerializer(serializers.ModelSerializer):
                     }
                 )
         data["result"].pop("input", None)
+        from .reference_names import readable_references
+
+        def readable(value):
+            return readable_references(value, instance.project_id, instance.defect_id, self.context)
+
+        result = data["result"]
+        for field in ("answer", "confidence_basis"):
+            if field in result:
+                result[field] = readable_references(
+                    result[field], instance.project_id, instance.defect_id, self.context, markdown=field == "answer"
+                )
+        for field in ("suggested_actions", "verification_steps"):
+            if isinstance(result.get(field), list):
+                result[field] = [readable(value) for value in result[field]]
+        if isinstance(result.get("assignment"), dict):
+            result["assignment"]["reason"] = readable(result["assignment"].get("reason", ""))
+        for citation in result.get("citations", []):
+            if isinstance(citation, dict) and str(citation.get("reference", "")).startswith("FILE-"):
+                citation["title"] = readable(citation["reference"])
         return data
 
     class Meta:
@@ -188,6 +209,7 @@ class DiagnosticSerializer(serializers.ModelSerializer):
 
 def writable(view, defect):
     from .permissions import is_administrator
+
     if is_administrator(view.request.user):
         return
     if not manager(view.project_id, view.request.user) and defect.assignee_id != view.request.user.id:
@@ -219,6 +241,10 @@ class DiagnosticList(QualityView):
             serialized = DiagnosticSerializer(latest).data
         response.data["current_report"] = serialized
         response.data["latest_attempt"] = DiagnosticSerializer(latest).data if latest else None
+        if latest and latest.status == "queued":
+            response.data["project_queue_position"] = DiagnosticJob.objects.filter(
+                project_id=self.project_id, status="queued", created_at__lte=latest.created_at
+            ).count()
         return response
 
     @transaction.atomic
@@ -234,6 +260,9 @@ class DiagnosticList(QualityView):
             if existing.defect_id != defect.id or existing.mode != data["mode"]:
                 raise Conflict()
             return Response(DiagnosticSerializer(existing).data)
+        DiagnosticJob.objects.filter(defect=defect, status="queued", result__retry__count__gte=1).update(
+            status="cancelled", completed_at=timezone.now()
+        )
         if DiagnosticJob.objects.filter(defect=defect, status__in=["queued", "running"]).exists():
             raise Conflict("当前缺陷已有诊断在运行，请等待完成或取消后重试。")
         status = (
@@ -283,8 +312,12 @@ class DiagnosticDetail(QualityView):
                 raise Conflict("仅已完成的报告可以反馈。")
             job.feedback = data["feedback"]
             job.feedback_note = data["note"]
-            job.result = {**job.result, "feedback_review": {
-                "actor_id": str(request.user.id), "at": timezone.now().isoformat(),
-            }}
+            job.result = {
+                **job.result,
+                "feedback_review": {
+                    "actor_id": str(request.user.id),
+                    "at": timezone.now().isoformat(),
+                },
+            }
         job.save()
         return Response(DiagnosticSerializer(job).data)

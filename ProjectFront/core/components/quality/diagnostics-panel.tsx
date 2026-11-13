@@ -24,6 +24,11 @@ type Job = {
     assignment?: { module: { key: string; name: string } | null; assignee: string; origin: string; reason: string };
     method?: string;
     model_status?: string;
+    model_error_code?: string;
+    timeout_seconds?: number;
+    retry?: { count: number; limit: number; next_at: string; last_error: string };
+    progress?: { stage: string; at: string };
+    fallback?: string;
     version?: number;
     trigger?: string;
     duration_ms?: number;
@@ -96,7 +101,13 @@ export function DiagnosticsPanel({
   const { data, error, mutate, isLoading } = useSWR(
     `${base}defects/${defectId}/diagnostics/?${pagination.query}`,
     (url: string) =>
-      qualityApi.read<{ results: Job[]; count: number; current_report?: Job; latest_attempt?: Job }>(url),
+      qualityApi.read<{
+        results: Job[];
+        count: number;
+        current_report?: Job;
+        latest_attempt?: Job;
+        project_queue_position?: number;
+      }>(url),
     { refreshInterval: (page) => (page?.results.some((row) => ["queued", "running"].includes(row.status)) ? 2000 : 0) }
   );
   const { data: modelStatus } = useSWR(`${base.replace("/quality/", "/knowledge/")}status/`, (url: string) =>
@@ -116,6 +127,7 @@ export function DiagnosticsPanel({
     [message, setMessage] = useState("");
   const [feedbackNotes, setFeedbackNotes] = useState<Record<string, string>>({});
   const [feedbackChoices, setFeedbackChoices] = useState<Record<string, string>>({});
+  const [showProgress, setShowProgress] = useState(false);
   const saveFeedback = async (job: Job, choice: string) => {
     setBusy(true);
     setMessage("");
@@ -219,7 +231,18 @@ export function DiagnosticsPanel({
         {["queued", "running"].includes(job.status) && (
           <p role="status" className="flex items-center gap-2 text-secondary">
             <RotateCw className="size-3.5 animate-spin motion-reduce:animate-none" />
-            {job.status === "queued" ? "排队中，尚未开始分析" : "正在读取材料并分析"}
+            {job.status === "queued" && job.result.retry
+              ? `等待重试 · ${job.result.retry.count}/${job.result.retry.limit}`
+              : job.status === "queued"
+                ? data?.project_queue_position
+                  ? `排队中 · 本项目第 ${data.project_queue_position} 条`
+                  : "排队中，尚未开始分析"
+                : "正在读取材料并分析"}
+          </p>
+        )}
+        {job.result.fallback === "rules_after_retries" && (
+          <p className="rounded-md bg-warning-subtle px-3 py-2 text-warning-primary">
+            重试已结束，按规则处理 · 可手动重新诊断
           </p>
         )}
         {job.result.model_status && !["not_requested", "completed"].includes(job.result.model_status) && (
@@ -228,7 +251,14 @@ export function DiagnosticsPanel({
               {
                 unconfigured: "模型未配置 · 已保留规则结果",
                 timeout: "模型分析超时 · 已保留规则结果",
-                failed: "模型分析失败 · 已保留规则结果",
+                failed:
+                  job.result.model_error_code === "AGENT_PROVIDER_AUTH"
+                    ? "模型认证失败 · 已保留规则结果"
+                    : job.result.model_error_code === "AGENT_PROVIDER_UNAVAILABLE"
+                      ? "模型接口暂不可用 · 可重新分析"
+                      : job.result.model_error_code === "AGENT_INVALID_OUTPUT"
+                        ? "模型返回格式异常 · 可重新分析"
+                        : "模型分析失败 · 已保留规则结果",
                 awaiting_materials: "等待日志上传完成，随后自动诊断",
                 reference_unavailable: "知识引用已失效 · 显示规则结果",
               } as Record<string, string>
@@ -376,7 +406,9 @@ export function DiagnosticsPanel({
                 className="flex min-w-0 flex-wrap items-center gap-2 rounded-md bg-layer-1 px-3 py-2"
               >
                 <FileText className="size-3.5 shrink-0 text-secondary" />
-                <span className="min-w-0 flex-1 text-11 break-all">{source.archive_entry || source.name}</span>
+                <span className="min-w-0 flex-1 text-11 break-all">
+                  {[source.name, source.archive_entry].filter(Boolean).join(" / ")}
+                </span>
                 <span className="text-11 text-secondary">
                   已读取 {source.read_bytes} 字节
                   {source.file_bytes !== undefined ? ` / 文件 ${source.file_bytes} 字节` : ""}
@@ -409,17 +441,15 @@ export function DiagnosticsPanel({
         {job.result.citations?.map((row) => (
           <p key={row.reference} className="text-secondary">
             参考：
-            {job.result.sources?.find(
-              (source) => source.archive_entry && row.reference.endsWith(`:${source.archive_entry}`)
-            )?.archive_entry || row.title}
+            {row.title}
           </p>
         ))}
         {!!job.result.context_references?.length && (
           <details className="space-y-2 text-12">
             <summary className="cursor-pointer text-secondary">
-              平台回执与历史评价参考（{job.result.context_references.length}）
+              平台记录与历史评价（{job.result.context_references.length}）
             </summary>
-            <p className="text-11 text-secondary">回执证明平台接收情况；历史评价是待复核建议，不替代本次现场证据。</p>
+            <p className="text-11 text-secondary">平台记录显示接收和验收情况；历史评价需结合本次证据复核。</p>
             {job.result.context_references.map((row) => (
               <div key={row.reference} className="rounded-md bg-layer-1 p-3">
                 <p className="font-medium">{row.title}</p>
@@ -468,6 +498,7 @@ export function DiagnosticsPanel({
     </details>
   );
   const currentReport = data?.current_report || data?.results[0];
+  const progressJob = data?.latest_attempt || currentReport;
   const reportFileIds =
     currentReport?.result.sources
       ?.filter(
@@ -496,6 +527,45 @@ export function DiagnosticsPanel({
           </div>
         )}
       </div>
+      {progressJob && (
+        <div className="text-12">
+          <button
+            type="button"
+            aria-expanded={showProgress}
+            onClick={() => setShowProgress(!showProgress)}
+            className="inline-flex items-center gap-1 rounded-md border border-subtle px-2 py-1 text-accent-primary hover:bg-layer-1"
+          >
+            <RotateCw className="size-3" />
+            诊断进度
+          </button>
+          {showProgress && (
+            <div
+              role="status"
+              className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-subtle bg-layer-1 px-3 py-2 text-secondary"
+            >
+              <span>
+                {data?.latest_attempt?.status === "queued"
+                  ? data.latest_attempt.result.retry
+                    ? `等待重试 ${data.latest_attempt.result.retry.count}/${data.latest_attempt.result.retry.limit}`
+                    : `排队中${data.project_queue_position ? ` · 本项目第 ${data.project_queue_position} 条` : ""}`
+                  : progressJob.status === "running"
+                    ? progressJob.result.progress?.stage === "model_analysis"
+                      ? "模型分析中"
+                      : "读取材料与规则检查"
+                    : progressJob.result.model_status === "completed"
+                      ? "报告已生成"
+                      : progressJob.result.model_status === "timeout"
+                        ? "分析超时"
+                        : progressJob.result.model_status === "failed"
+                          ? "模型分析失败"
+                          : names[progressJob.status]}
+              </span>
+              {!!progressJob.result.sources?.length && <span>已读取 {progressJob.result.sources.length} 份材料</span>}
+              {progressJob.result.timeout_seconds && <span>分析时限 {progressJob.result.timeout_seconds} 秒</span>}
+            </div>
+          )}
+        </div>
+      )}
       {(error || message) && (
         <p role="alert" className="text-12 text-danger-primary">
           {message || errorMessage(error)}

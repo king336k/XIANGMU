@@ -38,6 +38,38 @@ function render(rows) {
     React.createElement(api.DiagnosticsPanel, { base: "/quality/", defectId: "d", context: {} })
   );
 }
+test("材料引用同时显示原始上传包名和包内日志路径", () => {
+  const html = render([
+    {
+      id: "named",
+      status: "completed",
+      mode: "rules",
+      result: {
+        method: "rules",
+        model_status: "not_requested",
+        sources: [
+          {
+            file_id: "file",
+            name: "现场材料.zip",
+            archive_entry: "logs/采集节点.log",
+            read_bytes: 10,
+            truncated: false,
+          },
+        ],
+        citations: [{ reference: "FILE-file:logs/采集节点.log", title: "现场材料.zip / logs/采集节点.log" }],
+        assignment: {
+          module: { key: "daq", name: "DAQ" },
+          assignee: "daq_owner",
+          origin: "diagnostic",
+          reason: "引用：采集原始.log。",
+        },
+      },
+    },
+  ]);
+  assert.ok(html.includes("现场材料.zip / logs/采集节点.log"), html);
+  assert.ok(html.includes("引用：采集原始.log。"), html);
+  assert.ok(!html.includes("FILE-file"), html);
+});
 test("最新报告直接展开，超时保留规则与读取范围，不把诊断完成写成故障解决", () => {
   const html = render([
     {

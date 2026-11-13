@@ -18,6 +18,17 @@ TOTAL_BYTES = 1024 * 1024
 FILE_BYTES = 256 * 1024
 
 
+def bounded_preview(text, budget):
+    """Apply a UTF-8 byte budget before sampling so a final fault is not sliced off."""
+    limit = min(FILE_BYTES, max(0, budget))
+    if not limit:
+        return b""
+    preview = summarize(text, limit)
+    if len(preview.encode()) > limit:
+        preview = summarize(text, max(1, limit // 4))
+    return preview.encode()[:limit].decode("utf-8", errors="ignore").encode()
+
+
 def redact(text):
     text = re.sub(
         r"-----BEGIN [^-\n]*PRIVATE KEY-----.*?(?:-----END [^-\n]*PRIVATE KEY-----|\Z)",
@@ -113,9 +124,7 @@ def inspect(job, materials=None):
                             continue
                         with archive.open(entry) as stream:
                             sample, scanned, scan_incomplete = collect(stream, entry.file_size, deadline)
-                            sample = summarize(
-                                sample.decode("utf-8", errors="replace"), min(FILE_BYTES, remaining)
-                            ).encode()[: min(FILE_BYTES, remaining)]
+                            sample = bounded_preview(sample.decode("utf-8", errors="replace"), remaining)
                         clean = redact(sample.decode("utf-8", errors="replace"))
                         clean_bytes = clean.encode()
                         clean = clean_bytes[: min(FILE_BYTES, remaining)].decode("utf-8", errors="ignore")
@@ -146,9 +155,7 @@ def inspect(job, materials=None):
             else:
                 with path.open("rb") as handle:
                     sample, scanned, scan_incomplete = collect(handle, file.size, deadline)
-                    sample = summarize(sample.decode("utf-8", errors="replace"), min(FILE_BYTES, remaining)).encode()[
-                        : min(FILE_BYTES, remaining)
-                    ]
+                    sample = bounded_preview(sample.decode("utf-8", errors="replace"), remaining)
                 clean = redact(sample.decode("utf-8", errors="replace"))
                 clean_bytes = clean.encode()
                 clean = clean_bytes[: min(FILE_BYTES, remaining)].decode("utf-8", errors="ignore")

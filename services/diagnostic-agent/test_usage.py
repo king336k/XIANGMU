@@ -12,6 +12,17 @@ spec.loader.exec_module(runner)
 
 
 class UsageTests(unittest.TestCase):
+    def test_explicit_client_does_not_inherit_five_second_connection_cap(self):
+        class FakeClient:
+            async def __aenter__(self):return self
+            async def __aexit__(self,*args):return None
+        from unittest.mock import AsyncMock
+        payload={"config":{"model":"test","base_url":"http://local.invalid","api_key":"synthetic","diagnostic_timeout_seconds":300}}
+        with patch.object(runner,"AsyncOpenAI",return_value=FakeClient()), patch.object(runner,"DefaultAsyncHttpxClient") as http, patch.object(runner,"_analyze",new_callable=AsyncMock,return_value={"ok":True}):
+            result=asyncio.run(runner.analyze(payload))
+        self.assertEqual(result,{"ok":True})
+        self.assertEqual(http.call_args.kwargs["timeout"],240)
+
     def test_finalizer_includes_usage_consumed_before_timeout(self):
         class FakeAgent:
             def __init__(self, fail=False):
