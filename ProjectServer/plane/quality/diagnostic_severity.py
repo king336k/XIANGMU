@@ -408,6 +408,8 @@ def verified_sources(job, result, materials=None):
     for source in sources:
         if not isinstance(source, dict):
             return None, "source_integrity_unverified"
+        if source.get("origin") == "image_ocr" or source.get("requires_review") is True:
+            continue
         file_id = source.get("file_id")
         file = files.get(file_id) if isinstance(file_id, str) else None
         text, count, scanned, original = (
@@ -457,7 +459,7 @@ def verified_sources(job, result, materials=None):
         if len(text) > 256 * 1024 or scan_content(text):
             return None, "source_integrity_unverified"
         verified[reference] = text
-    return verified, "verified"
+    return (verified, "verified") if verified else (None, "source_integrity_unverified")
 
 
 def model_proposal(result, verified):

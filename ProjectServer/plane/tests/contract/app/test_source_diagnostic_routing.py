@@ -55,8 +55,7 @@ MATRIX = [
     {
         "id": "monitor_pending_does_not_hide_separate_failure",
         "line": (
-            'WARN channel_status=ERROR message="freq low (confirming 1/3)"\n'
-            "ERROR Error in dual hand retargeting loop"
+            'WARN channel_status=ERROR message="freq low (confirming 1/3)"\nERROR Error in dual hand retargeting loop'
         ),
         "description": "问题范围：遥操",
         "expected_modules": ["teleop"],
@@ -226,3 +225,10 @@ def test_confirmation_does_not_hide_an_independent_error_on_the_same_line():
     from plane.quality.module_routing import log_failure
 
     assert log_failure('WARN channel_status=ERROR message="freq low (confirming 1/3)" ERROR MCAP write failed')
+
+
+def test_unreviewed_image_ocr_cannot_auto_assign_a_module(routing):
+    job = ready_job(routing, "ERROR module=daq connection refused")
+    job.result["sources"][0].update(origin="image_ocr", requires_review=True)
+    modules, _ = evidence_modules(job, job.defect)
+    assert modules == set()

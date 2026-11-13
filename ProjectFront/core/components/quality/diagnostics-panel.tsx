@@ -59,10 +59,22 @@ type Job = {
       confidence?: number;
       confidence_source?: string;
     }[];
+    material_coverage?: {
+      file_id: string;
+      name: string;
+      kind: "text" | "image" | "archive" | "other";
+      status: "analyzed" | "unsupported" | "not_read";
+      reason: string;
+      verified: boolean;
+    }[];
     sources?: {
       file_id: string;
       name: string;
       archive_entry?: string;
+      origin?: "image_ocr";
+      requires_review?: boolean;
+      original_bytes_scope?: string;
+      text_bytes?: number;
       excerpt?: string;
       read_bytes: number;
       scan_incomplete?: boolean;
@@ -84,6 +96,7 @@ const names: Record<string, string> = {
   reference_unavailable: "引用已失效",
 };
 function reportLabel(job: Job) {
+  if (job.result.model_status === "materials_unsupported") return "需补文字说明";
   if (job.result.model_status === "awaiting_materials") return "等待材料";
   if (
     job.status === "completed" &&
@@ -296,6 +309,7 @@ export function DiagnosticsPanel({
                       : job.result.model_error_code === "AGENT_INVALID_OUTPUT"
                         ? "模型返回格式异常 · 可重新分析"
                         : "模型分析失败 · 已保留规则结果",
+                materials_unsupported: "附件已保存；暂无可用于诊断的文字，请补充文字或日志。",
                 awaiting_materials: "等待日志上传完成，随后自动诊断",
                 reference_unavailable: "知识引用已失效 · 显示规则结果",
               } as Record<string, string>
@@ -324,7 +338,11 @@ export function DiagnosticsPanel({
               <CircleCheck className="size-3.5" />
               {job.result.method === "hybrid" ? "规则与模型" : "规则检查"}
             </span>
-            <span>{job.result.sources?.length || 0} 份材料</span>
+            <span>
+              {job.result.material_coverage?.length
+                ? `附件 ${job.result.material_coverage.length} · 已读取 ${job.result.material_coverage.filter((file) => file.status === "analyzed").length}`
+                : `${job.result.sources?.length || 0} 份材料`}
+            </span>
             {job.result.duration_ms !== undefined && <span>执行 {(job.result.duration_ms / 1000).toFixed(1)} 秒</span>}
             {job.result.trigger && <span>{job.result.trigger === "manual" ? "手动发起" : "自动初诊"}</span>}
           </div>
@@ -420,9 +438,13 @@ export function DiagnosticsPanel({
             </ol>
           </details>
         ) : null}
-        {!!job.result.sources?.length && (
+        {(!!job.result.material_coverage?.length || !!job.result.sources?.length) && (
           <details open className="space-y-2 rounded-md border border-subtle p-3">
-            <summary className="cursor-pointer font-medium">已读取材料（{job.result.sources.length}）</summary>
+            <summary className="cursor-pointer font-medium">
+              {job.result.material_coverage?.length
+                ? `诊断材料（${job.result.material_coverage.length}）`
+                : `已读取材料（${job.result.sources?.length}）`}
+            </summary>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <Button
                 type="button"
@@ -437,7 +459,29 @@ export function DiagnosticsPanel({
                 一键打包下载
               </Button>
             </div>
-            {job.result.sources.map((source) => (
+            {job.result.material_coverage?.map((file) => (
+              <div
+                key={file.file_id}
+                className="flex min-w-0 flex-wrap items-center gap-2 rounded-md bg-layer-1 px-3 py-2 text-11"
+              >
+                <span className="min-w-0 flex-1 break-all">{file.name}</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 ${file.verified ? "bg-success-subtle text-success-primary" : "bg-layer-1 text-secondary"}`}
+                >
+                  {file.verified ? "已校验" : "未校验"}
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 ${file.status === "analyzed" ? "bg-accent-subtle text-accent-primary" : file.status === "unsupported" ? "bg-warning-subtle text-warning-primary" : "bg-layer-1 text-secondary"}`}
+                >
+                  {file.status === "analyzed" ? "已读取" : file.status === "unsupported" ? "未分析" : "未读取"}
+                </span>
+                <a className="shrink-0 text-accent-primary" href={`${base}files/${file.file_id}/download/`} download>
+                  下载
+                </a>
+                {file.reason && <p className="w-full break-words text-secondary">{file.reason}</p>}
+              </div>
+            ))}
+            {job.result.sources?.map((source) => (
               <div
                 key={`${source.file_id}:${source.archive_entry || source.name}`}
                 className="flex min-w-0 flex-wrap items-center gap-2 rounded-md bg-layer-1 px-3 py-2"
@@ -446,9 +490,15 @@ export function DiagnosticsPanel({
                 <span className="min-w-0 flex-1 text-11 break-all">
                   {[source.name, source.archive_entry].filter(Boolean).join(" / ")}
                 </span>
+                {source.origin === "image_ocr" && (
+                  <span className="rounded-full bg-warning-subtle px-2 py-0.5 text-11 text-warning-primary">
+                    图片文字·需核对原图
+                  </span>
+                )}
                 <span className="text-11 text-secondary">
-                  已读取 {source.read_bytes} 字节
-                  {source.file_bytes !== undefined ? ` / 文件 ${source.file_bytes} 字节` : ""}
+                  {source.origin === "image_ocr"
+                    ? `识别文字 ${source.text_bytes ?? source.read_bytes} 字节${source.file_bytes !== undefined ? ` · 原图 ${source.file_bytes} 字节` : ""}`
+                    : `已读取 ${source.read_bytes} 字节${source.file_bytes !== undefined ? ` / 文件 ${source.file_bytes} 字节` : ""}`}
                   {source.truncated ? " · 部分读取" : ""}
                 </span>
                 <a
@@ -595,9 +645,18 @@ export function DiagnosticsPanel({
                         ? "分析超时"
                         : progressJob.result.model_status === "failed"
                           ? "模型分析失败"
-                          : names[progressJob.status]}
+                          : progressJob.result.model_status === "materials_unsupported"
+                            ? "需补文字说明"
+                            : names[progressJob.status]}
               </span>
-              {!!progressJob.result.sources?.length && <span>已读取 {progressJob.result.sources.length} 份材料</span>}
+              {progressJob.result.material_coverage?.length ? (
+                <span>
+                  附件 {progressJob.result.material_coverage.length} · 已读取{" "}
+                  {progressJob.result.material_coverage.filter((file) => file.status === "analyzed").length}
+                </span>
+              ) : (
+                !!progressJob.result.sources?.length && <span>已读取 {progressJob.result.sources.length} 份材料</span>
+              )}
               {progressJob.result.timeout_seconds && <span>分析时限 {progressJob.result.timeout_seconds} 秒</span>}
             </div>
           )}

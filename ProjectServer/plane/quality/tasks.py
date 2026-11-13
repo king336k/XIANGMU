@@ -86,13 +86,17 @@ def run_diagnostic(job_id):
     result = dict(meta)
     try:
         materials = {}
-        text, sources, findings = inspect(job, materials) if job.mode in {"llm", "auto"} else inspect(job)
+        coverage = []
+        text, sources, findings = (
+            inspect(job, materials, coverage=coverage) if job.mode in {"llm", "auto"} else inspect(job)
+        )
         facts = meta.get("input", {}).get("context", {})
         findings = [*findings, *evaluate(facts)]
         result.update(
             method="rules",
             notice="规则检查（未调用模型）",
             sources=sources,
+            material_coverage=coverage,
             findings=findings,
             model_status="not_requested",
             timeout_seconds=timeout_seconds(),
@@ -111,7 +115,17 @@ def run_diagnostic(job_id):
         from .models import ProblemPackage
 
         incomplete_upload = ProblemPackage.objects.filter(defect=job.defect).exclude(status="files_verified").exists()
-        if incomplete_upload or (automatic and (not meta.get("input", {}).get("files") or not sources)):
+        only_unsupported = (
+            bool(coverage)
+            and not sources
+            and all(
+                row["status"] in {"unsupported", "not_read"} and row["kind"] in {"image", "other"} for row in coverage
+            )
+        )
+        if not incomplete_upload and only_unsupported:
+            result["model_status"] = "materials_unsupported"
+            result["materials_status"] = "unsupported"
+        elif incomplete_upload or (automatic and (not meta.get("input", {}).get("files") or not sources)):
             result["model_status"] = "awaiting_materials"
         elif any(row.get("scan_incomplete") for row in sources):
             result["model_status"] = "material_scan_incomplete"
@@ -119,7 +133,7 @@ def run_diagnostic(job_id):
             config = assistant.provider_config(job.project.workspace_id)
             if not config["configured"]:
                 result["model_status"] = "unconfigured"
-            elif time.monotonic() - started > 20:
+            elif time.monotonic() - started > (30 if any(row["kind"] == "image" for row in coverage) else 20):
                 result["model_status"] = "timeout"
                 result["model_error_code"] = "MODEL_TIMEOUT"
             else:
@@ -160,6 +174,12 @@ def run_diagnostic(job_id):
                         "AGENT_INVALID_OUTPUT",
                     }
                     result["model_error_code"] = str(error) if str(error) in safe_codes else "MODEL_FAILED"
+                    if result["model_error_code"] == "AGENT_INVALID_OUTPUT":
+                        from .diagnostic_model import safe_validation_details
+
+                        details = safe_validation_details(getattr(error, "validation_details", []))
+                        if details:
+                            result["validation_errors"] = details
     except Exception:
         status, code = "failed", "DIAGNOSTIC_FAILED"
     result["duration_ms"] = round((time.monotonic() - started) * 1000)

@@ -83,7 +83,7 @@ def redact(text):
     return "[疑似敏感信息已隐藏]" if scan_content(result) else result
 
 
-def inspect(job, materials=None):
+def inspect(job, materials=None, *, coverage=None):
     """Optionally retain authorized, bounded sanitized text in memory, never job.result."""
     snapshot = job.result.get("input", {})
     text = redact(snapshot.get("title", job.defect.title) + "\n" + snapshot.get("description", job.defect.description))
@@ -93,24 +93,129 @@ def inspect(job, materials=None):
     query = PackageFile.objects.filter(project=job.project, package__defect=job.defect)
     if "files" in snapshot:
         query = query.filter(pk__in=snapshot["files"])
-    for file in query.order_by("created_at")[:1000]:
+    files = list(query.order_by("created_at")[:1000])
+    entries = {}
+    if coverage is not None:
+        for file in files:
+            suffix = Path(file.name).suffix.lower()
+            kind = (
+                "text"
+                if suffix in TEXT_TYPES
+                else "archive"
+                if suffix == ".zip"
+                else "image"
+                if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+                else "other"
+            )
+            entry = {
+                "file_id": str(file.id),
+                "name": file.name,
+                "kind": kind,
+                "status": "not_read",
+                "reason": "材料尚未读取",
+                "verified": False,
+            }
+            entries[str(file.id)] = entry
+            coverage.append(entry)
+    ocr_attempts = 0
+    # Scan text first so optional OCR cannot evict a usable log from this task's budget.
+    files.sort(key=lambda file: Path(file.name).suffix.lower() == ".png")
+    for file in files:
+        coverage_entry = entries.get(str(file.id))
+        source_start = len(sources)
         if time.monotonic() >= deadline:
+            if coverage_entry is not None and coverage_entry["kind"] == "image":
+                coverage_entry.update(status="not_read", reason="图片读取预算已用完")
+                continue
             sources.append(incomplete(file, "材料扫描总时间预算耗尽"))
             break
         path = directory() / file.storage_key
         if path.parent != directory() or path.is_symlink():
             continue
         suffix = Path(file.name).suffix.lower()
-        if suffix not in TEXT_TYPES | {".zip"}:
+        if suffix not in TEXT_TYPES | {".zip"} and coverage is None:
             continue
         try:
             if path.stat().st_size != file.size or file.size > MAX_DIAGNOSTIC_BYTES:
+                if coverage_entry is not None:
+                    coverage_entry["reason"] = "材料大小校验失败"
                 sources.append(incomplete(file, "材料大小校验失败"))
                 continue
             with path.open("rb") as handle:
                 digest = digest_stream(handle)
             if digest != file.sha256:
+                if coverage_entry is not None:
+                    coverage_entry["reason"] = "材料SHA256校验失败"
                 sources.append(incomplete(file, "材料SHA256校验失败"))
+                continue
+            if coverage_entry is not None:
+                coverage_entry["verified"] = True
+            if suffix == ".png" and coverage_entry is not None:
+                from .diagnostic_image_text import extract_png
+
+                ocr_attempts += 1
+                if ocr_attempts > 3 or remaining <= 0:
+                    coverage_entry.update(status="not_read", reason="图片读取预算已用完")
+                    continue
+                with path.open("rb") as handle:
+                    extracted = extract_png(file, handle, max(0, deadline - time.monotonic()))
+                reasons = {
+                    "ocr_no_text": "未识别到图片文字",
+                    "ocr_busy": "图片文字识别繁忙",
+                    "ocr_timeout": "图片文字识别超时",
+                    "ocr_configuration": "图片文字识别暂不可用",
+                    "ocr_unavailable": "图片文字识别暂不可用",
+                    "ocr_time_budget": "图片读取预算已用完",
+                    "ocr_sensitive_text": "图片文字包含敏感内容，未用于诊断",
+                }
+                if extracted["status"] != "read":
+                    coverage_entry.update(
+                        status="not_read", reason=reasons.get(extracted["reason"], "图片文字识别未完成")
+                    )
+                    continue
+                clean = redact(extracted["text"])
+                clean = clean.encode()[: min(FILE_BYTES, remaining)].decode("utf-8", errors="ignore")
+                if not clean:
+                    coverage_entry.update(status="not_read", reason="未取得可用于诊断的图片文字")
+                    continue
+                reference = f"FILE-{file.id}"
+                remaining -= len(clean.encode())
+                if materials is not None:
+                    materials[reference] = {
+                        "content": clean,
+                        "truncated": len(clean) < len(extracted["text"]),
+                        "origin": "image_ocr",
+                        "requires_review": True,
+                    }
+                text += "\n[" + reference + "] 图片文字识别，未经人工核对，不代表已分析画面\n" + summarize(clean, 8000)
+                sources.append(
+                    {
+                        "file_id": str(file.id),
+                        "name": file.name,
+                        "sha256": file.sha256,
+                        "excerpt": summarize(clean),
+                        "read_bytes": len(clean.encode()),
+                        "text_bytes": len(clean.encode()),
+                        "file_bytes": file.size,
+                        "scanned_bytes": file.size,
+                        "original_bytes_scope": "image_ocr",
+                        "origin": "image_ocr",
+                        "requires_review": True,
+                        "scan_incomplete": False,
+                        "preview_truncated": len(clean) > 8000,
+                        "truncated": len(clean) < len(extracted["text"]),
+                    }
+                )
+                coverage_entry.update(status="analyzed", reason="已提取图片文字，需核对原图")
+                continue
+            if suffix not in TEXT_TYPES | {".zip"}:
+                if coverage_entry is not None:
+                    coverage_entry.update(
+                        status="unsupported",
+                        reason="当前诊断未读取图片内容"
+                        if coverage_entry["kind"] == "image"
+                        else "当前诊断不支持此文件格式",
+                    )
                 continue
             if suffix == ".zip":
                 with path.open("rb") as handle:
@@ -183,8 +288,22 @@ def inspect(job, materials=None):
                     }
                 )
         except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, ValidationError):
+            if coverage_entry is not None:
+                coverage_entry.update(status="not_read", reason="材料读取或ZIP校验失败")
             sources.append(incomplete(file, "材料读取或ZIP校验失败"))
             continue
+        if coverage_entry is not None:
+            read = sources[source_start:]
+            if (
+                read
+                and any(row.get("read_bytes", 0) > 0 for row in read)
+                and not any(row.get("scan_incomplete") for row in read)
+            ):
+                coverage_entry.update(status="analyzed", reason="")
+            elif not read:
+                coverage_entry.update(status="unsupported", reason="压缩包内没有可读取的文本")
+            else:
+                coverage_entry.update(status="not_read", reason="材料未完整读取")
     findings = []
     for key, title, pattern in [
         ("timeout", "超时", r"\btimeout\b(?!\s*[:=]\s*\d)|\b(?:API)?TimeoutError\b|timed out|超时"),

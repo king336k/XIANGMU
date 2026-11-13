@@ -303,3 +303,94 @@ def test_current_success_is_retained_after_failed_retry_but_not_after_changed_ma
     retry.result["input"] = {**retry.result["input"], "files": [str(uuid4())]}
     retry.save()
     assert session_client.get(path).data["current_report"]["id"] == str(retry.id)
+
+
+def test_verified_picture_without_text_is_not_waiting_upload_or_model_retry(current, mocker):
+    analyze = mocker.patch("plane.quality.tasks.analyze_diagnostic")
+    report_id, job = material(current, b"\x89PNG\r\n\x1a\nneutral", "合成图片.png")
+    job = run(job)
+    assert job.result["model_status"] == "materials_unsupported"
+    assert job.result["materials_status"] == "unsupported"
+    assert job.result["material_coverage"][0]["verified"] is True
+    assert job.result["material_coverage"][0]["status"] == "not_read"
+    assert not job.result.get("retry")
+    analyze.assert_not_called()
+
+
+def test_schema_failure_details_survive_bounded_retry_without_raw_values(current, mocker):
+    from plane.quality.diagnostic_model import DiagnosticOutputFailure
+
+    _, job = material(current)
+    mocker.patch("plane.knowledge.assistant.provider_config", return_value={"configured": True})
+    error = DiagnosticOutputFailure(
+        [{"type": "value_error", "loc": ["model_confidence"], "input": "PRIVATE-DATA", "msg": "PRIVATE-MESSAGE"}]
+    )
+    mocker.patch("plane.quality.tasks.analyze_diagnostic", side_effect=error)
+    job = run(job)
+    assert job.status == "queued" and job.result["retry"]["count"] == 1
+    assert job.result["validation_errors"] == [{"type": "value_error", "loc": ["model_confidence"]}]
+    assert "PRIVATE" not in json.dumps(job.result)
+
+
+def test_only_image_budget_exhaustion_does_not_wait_for_an_already_uploaded_file(current, mocker):
+    _, job = material(current, b"\x89PNG\r\n\x1a\nneutral", "截图.png")
+
+    def budget_limited(*args, coverage=None):
+        coverage.extend(
+            [
+                {
+                    "file_id": job.result["input"]["files"][0],
+                    "name": "截图.png",
+                    "kind": "image",
+                    "status": "not_read",
+                    "verified": False,
+                    "reason": "图片读取预算已用完",
+                }
+            ]
+        )
+        return "", [], []
+
+    mocker.patch("plane.quality.tasks.inspect", side_effect=budget_limited)
+    job = run(job)
+    assert job.result["model_status"] == "materials_unsupported"
+    assert job.result["material_coverage"][0]["verified"] is False
+    assert not job.result.get("retry")
+
+
+def test_optional_ocr_soft_deadline_does_not_timeout_complete_log_model(current, mocker):
+    _, job = material(current, b"ERROR current log", "event.log")
+    original_sources = [
+        {
+            "file_id": job.result["input"]["files"][0],
+            "name": "event.log",
+            "read_bytes": 17,
+            "scan_incomplete": False,
+            "excerpt": "ERROR current log",
+        }
+    ]
+    clock = [0.0]
+    mocker.patch("plane.quality.tasks.time.monotonic", side_effect=lambda: clock[0])
+
+    def slow_optional_ocr(*args, coverage=None):
+        coverage.append(
+            {
+                "file_id": "image",
+                "kind": "image",
+                "name": "image.png",
+                "verified": True,
+                "status": "not_read",
+                "reason": "图片文字识别超时",
+            }
+        )
+        clock[0] = 25.0
+        return "ERROR current log", original_sources, []
+
+    mocker.patch("plane.quality.tasks.inspect", side_effect=slow_optional_ocr)
+    mocker.patch("plane.knowledge.assistant.provider_config", return_value={"configured": True})
+    mocker.patch("plane.knowledge.diagnostic_retrieval.search", return_value=[])
+    model = mocker.patch(
+        "plane.quality.tasks.analyze_diagnostic", return_value={"answer": "待核对本次日志", "citations": []}
+    )
+    job = run(job)
+    model.assert_called_once()
+    assert job.result["model_status"] == "completed"

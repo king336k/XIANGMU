@@ -658,3 +658,10 @@ def test_native_local_failure_cannot_lend_authority_to_unrecognized_core_impact_
     result.pop("severity_assessment")
     got = assess(job, result)
     assert got["severity"] != "major"
+
+
+def test_unreviewed_image_ocr_is_not_raw_severity_evidence(incident):
+    job, result, _ = incident("ERROR MCAP writer failed: Input/output error", "major")
+    result["sources"][0].update(origin="image_ocr", requires_review=True)
+    assessment = assess(job, result)
+    assert assessment["severity"] == ""

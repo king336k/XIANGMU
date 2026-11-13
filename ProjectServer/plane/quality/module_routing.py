@@ -314,6 +314,8 @@ def evidence_modules(job, defect, materials=None):
     candidates = set()
     has_failure = False
     for source in sources:
+        if source.get("origin") == "image_ocr" or source.get("requires_review") is True:
+            continue
         file = files.get(str(source.get("file_id")))
         if not file or source.get("sha256") != file.sha256 or not source.get("read_bytes"):
             return set(), "诊断材料引用未通过项目和完整性校验，待人工指派。"

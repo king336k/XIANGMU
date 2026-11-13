@@ -245,3 +245,113 @@ def test_unicode_byte_budget_preserves_error_tail_and_handles_tiny_budget():
     assert b"E-UTF8-BUDGET-TAIL" in preview
     assert len(bounded_preview("中文", 1)) <= 1
     assert bounded_preview(text, 0) == b""
+
+
+def test_material_coverage_distinguishes_verified_image_from_read_text(material_case):
+    from plane.quality.diagnostic_materials import inspect
+
+    add, job = material_case
+    text = add("ERROR local service failed", name="中文日志.log")
+    image = add(b"\x89PNG\r\n\x1a\nneutral", name="合成图片.jpg")
+    coverage = []
+    _, sources, _ = inspect(job([text.id, image.id]), {}, coverage=coverage)
+    assert [row["file_id"] for row in sources] == [str(text.id)]
+    assert {row["file_id"] for row in coverage} == {str(text.id), str(image.id)}
+    picture = next(row for row in coverage if row["file_id"] == str(image.id))
+    assert picture == {
+        "file_id": str(image.id),
+        "name": "合成图片.jpg",
+        "kind": "image",
+        "status": "unsupported",
+        "reason": "当前诊断未读取图片内容",
+        "verified": True,
+    }
+    log = next(row for row in coverage if row["file_id"] == str(text.id))
+    assert log["status"] == "analyzed" and log["verified"] is True
+
+
+def test_material_coverage_never_marks_corrupt_or_unselected_attachment_verified(material_case):
+    from plane.quality.diagnostic_materials import inspect
+
+    add, job = material_case
+    image = add(b"not-real-image", name="corrupt.png", digest="0" * 64)
+    unselected = add("private", name="other.log")
+    coverage = []
+    inspect(job([image.id]), {}, coverage=coverage)
+    assert len(coverage) == 1 and coverage[0]["file_id"] == str(image.id)
+    assert coverage[0]["verified"] is False and coverage[0]["status"] == "not_read"
+    assert str(unselected.id) not in json.dumps(coverage)
+
+
+def test_zero_read_budget_is_not_reported_as_read(material_case, mocker):
+    from plane.quality.diagnostic_materials import inspect
+
+    add, job = material_case
+    row = add("ERROR retained original log", name="budget.log")
+    mocker.patch("plane.quality.diagnostic_materials.TOTAL_BYTES", 0)
+    coverage = []
+    _, sources, _ = inspect(job([row.id]), {}, coverage=coverage)
+    assert sources[0]["read_bytes"] == 0
+    assert coverage[0]["status"] == "not_read" and coverage[0]["verified"] is True
+
+
+def test_verified_png_ocr_text_is_derived_and_binary_bytes_stay_separate(material_case, mocker):
+    from plane.quality.diagnostic_materials import inspect
+
+    add, job = material_case
+    image = add(b"\x89PNG\r\n\x1a\nneutral", name="截图.png")
+    mocker.patch(
+        "plane.quality.diagnostic_image_text.extract_png",
+        return_value={"text": "ERROR module=daq timeout", "status": "read", "reason": "ocr_unreviewed"},
+    )
+    coverage = []
+    materials = {}
+    text, sources, _ = inspect(job([image.id]), materials, coverage=coverage)
+    assert len(sources) == 1 and sources[0]["origin"] == "image_ocr"
+    assert sources[0]["requires_review"] is True
+    assert sources[0]["file_bytes"] == image.size
+    assert sources[0]["text_bytes"] == len("ERROR module=daq timeout".encode())
+    assert coverage[0]["status"] == "analyzed"
+    assert coverage[0]["reason"] == "已提取图片文字，需核对原图"
+    assert "未经人工核对" in text
+    assert materials["FILE-" + str(image.id)]["origin"] == "image_ocr"
+
+
+def test_ocr_failure_does_not_prevent_other_log_diagnosis(material_case, mocker):
+    from plane.quality.diagnostic_materials import inspect
+
+    add, job = material_case
+    image = add(b"\x89PNG\r\n\x1a\nneutral", name="截图.png")
+    log = add("ERROR independent current log", name="event.log")
+    mocker.patch(
+        "plane.quality.diagnostic_image_text.extract_png",
+        return_value={"text": "", "status": "unavailable", "reason": "ocr_timeout"},
+    )
+    coverage = []
+    _, sources, _ = inspect(job([image.id, log.id]), {}, coverage=coverage)
+    assert len(sources) == 1 and sources[0]["file_id"] == str(log.id)
+    picture = next(row for row in coverage if row["file_id"] == str(image.id))
+    assert picture["verified"] is True and picture["status"] == "not_read"
+    assert picture["reason"] == "图片文字识别超时"
+
+
+def test_optional_image_deadline_does_not_mark_completed_log_incomplete(material_case, mocker):
+    from plane.quality.diagnostic_materials import inspect
+
+    add, job = material_case
+    log = add("ERROR current text log", name="event.log")
+    first = add(b"\x89PNG\r\n\x1a\nneutral1", name="first.png")
+    second = add(b"\x89PNG\r\n\x1a\nneutral2", name="second.png")
+    clock = [0.0]
+    mocker.patch("plane.quality.diagnostic_materials.time.monotonic", side_effect=lambda: clock[0])
+
+    def exhausted(*args):
+        clock[0] = 30.0
+        return {"status": "unavailable", "reason": "ocr_timeout", "text": ""}
+
+    mocker.patch("plane.quality.diagnostic_image_text.extract_png", side_effect=exhausted)
+    coverage = []
+    _, sources, _ = inspect(job([log.id, first.id, second.id]), {}, coverage=coverage)
+    assert [row["file_id"] for row in sources] == [str(log.id)]
+    assert sources[0]["scan_incomplete"] is False
+    assert next(row for row in coverage if row["file_id"] == str(second.id))["status"] == "not_read"

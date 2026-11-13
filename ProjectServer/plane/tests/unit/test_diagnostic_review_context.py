@@ -139,3 +139,10 @@ def test_negated_history_and_aggregate_failure_codes_do_not_reuse_foreign_review
     assert not select_reviews(
         [old], defect_id="current", sources=inspected("ERROR failure_class=raw_failed raw accounting type invalid")
     )
+
+
+def test_unreviewed_ocr_does_not_match_foreign_review_as_raw_fault():
+    source = inspected("ERROR invalid video_input_mode custom_fixture galbot")
+    row = {"id": "old", "defect_id": "other", "feedback": "unhelpful", "feedback_note": "旧评价", "sources": source}
+    derived = [{**source[0], "origin": "image_ocr", "requires_review": True}]
+    assert not select_reviews([row], defect_id="current", sources=derived)

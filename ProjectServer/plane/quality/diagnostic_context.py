@@ -15,6 +15,8 @@ def review_signature(sources):
     for source in sources[:100] if isinstance(sources, (list, tuple)) else []:
         if not isinstance(source, dict) or not source.get("file_id") or not source.get("sha256"):
             continue
+        if source.get("origin") == "image_ocr" or source.get("requires_review") is True:
+            continue
         if source.get("scan_incomplete", True) or source.get("preview_truncated", True):
             continue
         excerpt = source.get("excerpt", "")

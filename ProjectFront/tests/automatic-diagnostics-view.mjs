@@ -222,3 +222,158 @@ test("判级方法分别标明模型、材料规则与待评估，旧报告不�
   assert.ok(old.includes("旧版依据"));
   assert.ok(!old.includes("模型判级") && !old.includes("材料规则判级") && !old.includes("undefined"));
 });
+
+test("三份附件与两份读取分开呈现，校验过的图片仍明确未分析", () => {
+  const html = render([
+    {
+      id: "coverage",
+      status: "completed",
+      mode: "auto",
+      created_at: "now",
+      result: {
+        material_coverage: [
+          {
+            file_id: "png",
+            name: "合成中性图片.png",
+            kind: "image",
+            status: "unsupported",
+            reason: "当前诊断未读取图片内容",
+            verified: true,
+          },
+          { file_id: "log", name: "中文附件日志.log", kind: "text", status: "analyzed", reason: "", verified: true },
+          { file_id: "txt", name: "中文说明文本.txt", kind: "text", status: "analyzed", reason: "", verified: true },
+        ],
+        sources: [
+          { file_id: "log", name: "中文附件日志.log", read_bytes: 20, excerpt: "synthetic log", truncated: false },
+          { file_id: "txt", name: "中文说明文本.txt", read_bytes: 30, truncated: false },
+        ],
+      },
+    },
+  ]);
+  for (const text of [
+    "诊断材料（3）",
+    "附件 3 · 已读取 2",
+    "合成中性图片.png",
+    "未分析",
+    "当前诊断未读取图片内容",
+    "已校验",
+    "synthetic log",
+    "查看读取内容",
+  ])
+    assert.ok(html.includes(text), text);
+  assert.ok(!html.includes("图片分析完成"));
+  assert.ok(html.includes("files/png/download/"));
+});
+test("仅图片或未读附件也显示材料清单，不伪造校验和读取", () => {
+  const html = render([
+    {
+      id: "only-image",
+      status: "completed",
+      mode: "auto",
+      result: {
+        material_coverage: [
+          {
+            file_id: "png",
+            name: "图片.png",
+            kind: "image",
+            status: "unsupported",
+            reason: "当前诊断未读取图片内容",
+            verified: false,
+          },
+          {
+            file_id: "late",
+            name: "稍后.log",
+            kind: "text",
+            status: "not_read",
+            reason: "扫描预算耗尽",
+            verified: true,
+          },
+        ],
+        sources: [],
+      },
+    },
+  ]);
+  for (const text of ["诊断材料（2）", "附件 2 · 已读取 0", "未校验", "未读取", "扫描预算耗尽"])
+    assert.ok(html.includes(text), text);
+});
+test("旧报告无覆盖字段继续显示已读取材料，不伪造全附件总数", () => {
+  const html = render([
+    {
+      id: "legacy",
+      status: "completed",
+      mode: "auto",
+      result: { sources: [{ file_id: "old", name: "旧材料.log", read_bytes: 10, truncated: false }] },
+    },
+  ]);
+  assert.ok(html.includes("已读取材料（1）"));
+  assert.ok(!html.includes("诊断材料（") && !html.includes("附件 1 ·"));
+});
+
+test("仅图片未分析需补文字说明，保留已校验清单且不误称等待上传或模型失败", () => {
+  const html = render([
+    {
+      id: "image-only",
+      status: "completed",
+      mode: "auto",
+      result: {
+        model_status: "materials_unsupported",
+        materials_status: "unsupported",
+        material_coverage: [
+          {
+            file_id: "png",
+            name: "图片.png",
+            kind: "image",
+            status: "unsupported",
+            reason: "当前诊断未读取图片内容",
+            verified: true,
+          },
+        ],
+        sources: [],
+      },
+    },
+  ]);
+  for (const text of [
+    "需补文字说明",
+    "附件已保存；暂无可用于诊断的文字，请补充文字或日志。",
+    "诊断材料（1）",
+    "已校验",
+    "未分析",
+  ])
+    assert.ok(html.includes(text), text);
+  for (const misleading of ["等待日志上传完成", "等待材料", "模型分析失败", "仅规则结果"])
+    assert.ok(!html.includes(misleading), misleading);
+});
+
+test("OCR读取明确为识别文字，字节与原图分开且提示核对原图", () => {
+  const html = render([
+    {
+      id: "ocr",
+      status: "completed",
+      mode: "auto",
+      result: {
+        sources: [
+          {
+            file_id: "png",
+            name: "现场截图.png",
+            origin: "image_ocr",
+            requires_review: true,
+            original_bytes_scope: "image_ocr",
+            text_bytes: 1200,
+            read_bytes: 1200,
+            file_bytes: 400,
+            excerpt: "ERROR synthetic",
+            truncated: false,
+          },
+        ],
+      },
+    },
+  ]);
+  for (const text of [
+    "图片文字·需核对原图",
+    "识别文字 1200 字节 · 原图 400 字节",
+    "ERROR synthetic",
+    "files/png/download/",
+  ])
+    assert.ok(html.includes(text), text);
+  assert.ok(!html.includes("已读取 1200 字节"));
+});
