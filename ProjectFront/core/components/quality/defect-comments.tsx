@@ -87,8 +87,15 @@ export function DefectComments({ base, defectId, active }: { base: string; defec
               reply={null}
               onCancelReply={() => {}}
               onPublished={async () => {
-                latest();
-                await mutate();
+                const firstParams = discussionQuery(1, "", "");
+                firstParams.set("view", "threads");
+                const firstKey = `${endpoint}?${firstParams}`;
+                setPage(1);
+                setAuthor("");
+                setSearch("");
+                setQuery("");
+                await mutateCache(firstKey, qualityApi.read<DiscussionPage>(firstKey), { revalidate: false });
+                top.current?.scrollIntoView({ block: "start", behavior: "smooth" });
               }}
             />
           )}

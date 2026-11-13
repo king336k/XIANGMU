@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useRef, useState } from "react";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { qualityApi, errorMessage } from "./api";
 import { Paging } from "./shared";
@@ -40,6 +40,7 @@ export function DefectCommentThread({
   onDownload: (file: DiscussionAttachment) => void;
 }) {
   const composer = useRef<HTMLDivElement>(null);
+  const { mutate: mutateCache } = useSWRConfig();
   const [expanded, setExpanded] = useState(!!reply),
     [page, setPage] = useState(1);
   useEffect(() => {
@@ -65,26 +66,31 @@ export function DefectCommentThread({
   };
   const count = data?.reply_count ?? comment.reply_count ?? 0;
   return (
-    <section aria-label={`${comment.actor}的讨论`} className="min-w-0 space-y-2" data-thread-id={comment.id}>
+    <section
+      aria-label={`${comment.actor}的讨论`}
+      className="min-w-0 overflow-hidden rounded-lg border border-subtle bg-surface-1"
+      data-thread-id={comment.id}
+    >
       <DefectCommentCard
         comment={comment}
         endpoint={endpoint}
         onReply={replyTo}
         onPreview={onPreview}
         onDownload={onDownload}
+        embedded
       />
-      {(count > 0 || expanded) && (
+      {(count > 0 || expanded || !!reply) && (
         <button
           type="button"
           aria-expanded={expanded}
           onClick={() => setExpanded(!expanded)}
-          className="focus-visible:ring-accent-primary inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-12 text-accent-primary hover:bg-accent-subtle focus-visible:ring-2 focus-visible:outline-none"
+          className="focus-visible:ring-accent-primary mx-3 mb-3 inline-flex items-center gap-1.5 rounded border border-accent-subtle bg-accent-subtle px-3 py-1.5 text-12 text-accent-primary hover:bg-layer-1 focus-visible:ring-2 focus-visible:outline-none sm:mx-4"
         >
           {expanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
           {expanded ? `收起回复（${count}）` : `共 ${count} 条回复 · 展开`}
         </button>
       )}
-      <div hidden={!expanded} className="ml-2 min-w-0 space-y-3 border-l-2 border-accent-subtle pl-3 sm:ml-4 sm:pl-4">
+      <div hidden={!expanded} className="min-w-0 space-y-3 border-t border-subtle bg-layer-1 px-3 py-3 sm:px-4">
         {error && (
           <p
             role="alert"
@@ -104,7 +110,7 @@ export function DefectCommentThread({
         {data && !data.results.length && (
           <p className="py-3 text-12 text-secondary">{search || author ? "当前筛选没有匹配的回复。" : "暂无回复。"}</p>
         )}
-        <div aria-label="讨论回复" className="min-w-0">
+        <div aria-label="讨论回复" className="min-w-0 space-y-2 border-l-2 border-accent-subtle pl-3 sm:pl-4">
           {data?.results.map((row) => (
             <DefectCommentCard
               key={row.id}
@@ -127,8 +133,11 @@ export function DefectCommentThread({
               preserveReplyAfterPublish
               onCancelReply={onCancelReply}
               onPublished={async () => {
+                const firstParams = new URLSearchParams(params);
+                firstParams.set("page", "1");
+                const firstKey = `${endpoint}${comment.id}/replies/?${firstParams}`;
                 setPage(1);
-                await mutate();
+                await mutateCache(firstKey, qualityApi.read<DiscussionReplies>(firstKey), { revalidate: false });
                 await onRefresh();
               }}
             />

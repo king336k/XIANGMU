@@ -192,7 +192,9 @@ function panelHarness() {
   const state = [],
     refs = [];
   const requests = [],
-    refreshed = [];
+    refreshed = [],
+    reads = [],
+    cacheWrites = [];
   const data = {
     count: 36,
     participants: [{ id: "u1", name: "项目经理" }],
@@ -219,7 +221,11 @@ function panelHarness() {
     axios: { isAxiosError: (e) => !!e?.isAxiosError },
     swr: {
       useSWRConfig: () => ({
-        mutate: async (matcher) => {
+        mutate: async (matcher, value, options) => {
+          if (typeof matcher === "string") {
+            cacheWrites.push({ key: matcher, data: await value, options });
+            return;
+          }
           for (const key of [
             "/q/defects/d/comments/?view=threads&page=1",
             "/q/defects/d/comments/root/replies/?page=1",
@@ -239,11 +245,21 @@ function panelHarness() {
     "./defect-comments-thread": { DefectCommentThread: Thread },
     "./defect-comments-editor": { DefectCommentsEditor: Composer },
     "./shared": { Paging: "Paging", Modal: "Modal", fieldClass: "field" },
-    "./api": { qualityApi: {}, errorMessage: String },
+    "./api": {
+      qualityApi: {
+        read: async (key) => {
+          reads.push(key);
+          return { ...data, results: [{ id: "fresh-root", content: "最新发布" }] };
+        },
+      },
+      errorMessage: String,
+    },
   });
   return {
     requests,
     refreshed,
+    reads,
+    cacheWrites,
     set active(v) {
       active = v;
     },
@@ -468,15 +484,18 @@ test("主评论请求使用线程视图，未展开回复不读取回复接口",
   assert.equal(new URL(h.requests[0], "https://test").searchParams.get("view"), "threads");
 });
 
-function threadHarness() {
+function threadHarness(replyCount = 25) {
   let cursor = 0,
     selected = null,
     active = true,
     search = "",
     author = "",
-    root = { id: "root", actor: "经理", content: "主讨论", reply_count: 25 };
+    root = { id: "root", actor: "经理", content: "主讨论", reply_count: replyCount };
   const state = [],
     requests = [],
+    reads = [],
+    cacheWrites = [],
+    boundMutations = [],
     draft = { current: { html: "<p>保留草稿</p>", files: [{ id: "f", name: "图.png", size: 1 }], intent: null } };
   const { DefectCommentThread } = load("defect-comments-thread.tsx", {
     react: {
@@ -490,29 +509,58 @@ function threadHarness() {
       },
     },
     swr: {
+      useSWRConfig: () => ({
+        mutate: async (key, data, options) => {
+          cacheWrites.push({ key, data: await data, options });
+        },
+      }),
       default: (key) => {
         requests.push(key);
         return {
           data: key
             ? {
-                count: 25,
-                reply_count: 25,
+                count: replyCount,
+                reply_count: replyCount,
                 thread_id: "root",
                 results: [{ id: "child", actor: "技术员", content: "子回复", thread_id: "root" }],
               }
             : undefined,
-          mutate: async () => {},
+          mutate: async () => {
+            boundMutations.push(key);
+          },
         };
       },
     },
     "./defect-comments-card": { DefectCommentCard: Card },
     "./defect-comments-editor": { DefectCommentsEditor: Composer },
     "./shared": { Paging: "Paging" },
-    "./api": { qualityApi: {}, errorMessage: String },
+    "./api": {
+      qualityApi: {
+        read: async (url) => {
+          reads.push(url);
+          return {
+            count: replyCount + 1,
+            reply_count: replyCount + 1,
+            thread_id: "root",
+            results: [{ id: "just-published", actor: "技术员", content: "新回复" }],
+          };
+        },
+      },
+      errorMessage: String,
+    },
   });
   return {
     requests,
+    reads,
+    cacheWrites,
+    boundMutations,
     draft,
+    set search(value) {
+      search = value;
+    },
+    set author(value) {
+      author = value;
+    },
     set active(value) {
       active = value;
     },
@@ -617,4 +665,93 @@ test("刷新评论同时刷新本缺陷主讨论和已缓存回复，不触碰�
     "/q/defects/d/comments/?view=threads&page=1",
     "/q/defects/d/comments/root/replies/?page=1",
   ]);
+});
+
+test("零回复写草稿后收起仍能重新展开，目标与附件保持", () => {
+  const h = threadHarness(0);
+  let tree = h.render();
+  nodes(tree)
+    .find((n) => n.type === Card)
+    .props.onReply({ id: "root", actor: "经理", content: "主讨论" });
+  tree = h.render();
+  const compose = nodes(tree).find((n) => n.type === Composer);
+  assert.ok(compose);
+  nodes(tree)
+    .find((n) => n.type === "button" && n.props["aria-expanded"] === true)
+    .props.onClick();
+  tree = h.render();
+  const reopen = nodes(tree).find((n) => n.type === "button" && n.props["aria-expanded"] === false);
+  assert.ok(reopen, "零回复草稿不能丢失展开入口");
+  reopen.props.onClick();
+  tree = h.render();
+  assert.ok(nodes(tree).some((n) => n.type === Composer && n.props.reply.id === "root"));
+  assert.equal(h.draft.current.html, "<p>保留草稿</p>");
+  assert.equal(h.draft.current.files[0].id, "f");
+});
+
+test("主评论、回复与输入器同属一个讨论边框，回复区有淡底分隔", () => {
+  const h = threadHarness();
+  h.selected = { id: "child", actor: "技术员", content: "具体回复", thread_id: "root" };
+  const tree = h.render();
+  assert.match(tree.props.className, /rounded-lg/);
+  assert.match(tree.props.className, /border-subtle/);
+  const root = nodes(tree).find((n) => n.type === Card && n.props.comment.id === "root");
+  assert.equal(root.props.embedded, true);
+  const replies = nodes(tree).find((n) => n.type === "div" && typeof n.props.hidden === "boolean");
+  assert.match(replies.props.className, /bg-layer-1/);
+  assert.match(replies.props.className, /border-t/);
+  assert.ok(nodes(replies).some((n) => n.type === Composer && n.props.reply.id === "child"));
+});
+
+test("第三页发布回复后强制读取第一页并更新其缓存，不刷新旧页闭包", async () => {
+  const h = threadHarness();
+  h.selected = { id: "child", actor: "技术员", content: "原回复", thread_id: "root" };
+  h.search = "Topic & 中文";
+  h.author = "u-author";
+  let tree = h.render();
+  nodes(tree)
+    .find((n) => n.type === "Paging")
+    .props.onChange(3);
+  tree = h.render();
+  assert.equal(new URL(h.requests.at(-1), "https://test").searchParams.get("page"), "3");
+  await nodes(tree)
+    .find((n) => n.type === Composer)
+    .props.onPublished();
+  assert.equal(h.reads.length, 1);
+  const first = new URL(h.reads[0], "https://test");
+  assert.equal(first.searchParams.get("page"), "1");
+  assert.equal(first.searchParams.get("per_page"), "10");
+  assert.equal(first.searchParams.get("search"), "Topic & 中文");
+  assert.equal(first.searchParams.get("author"), "u-author");
+  assert.equal(h.cacheWrites[0].key, h.reads[0]);
+  assert.equal(h.cacheWrites[0].data.results[0].id, "just-published");
+  assert.equal(h.cacheWrites[0].options.revalidate, false);
+  assert.equal(h.boundMutations.length, 0);
+  tree = h.render();
+  assert.equal(new URL(h.requests.at(-1), "https://test").searchParams.get("page"), "1");
+  assert.equal(h.selected.id, "child");
+});
+
+test("主评论第二页或筛选下发布新讨论强制更新无筛选首页缓存", async () => {
+  const h = panelHarness();
+  let tree = h.render();
+  nodes(tree)
+    .find((n) => n.type === "Paging")
+    .props.onChange(2);
+  nodes(tree)
+    .find((n) => n.type === "select")
+    .props.onChange({ target: { value: "u1" } });
+  tree = h.render();
+  await nodes(tree)
+    .find((n) => n.type === Composer)
+    .props.onPublished();
+  assert.equal(h.reads.length, 1);
+  const first = new URL(h.reads[0], "https://test");
+  assert.equal(first.searchParams.get("page"), "1");
+  assert.equal(first.searchParams.get("view"), "threads");
+  assert.ok(!first.searchParams.has("author"));
+  assert.ok(!first.searchParams.has("search"));
+  assert.equal(h.cacheWrites[0].key, h.reads[0]);
+  assert.equal(h.cacheWrites[0].data.results[0].id, "fresh-root");
+  assert.equal(h.cacheWrites[0].options.revalidate, false);
 });
