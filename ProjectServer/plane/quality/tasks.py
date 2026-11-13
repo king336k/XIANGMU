@@ -124,9 +124,15 @@ def run_diagnostic(job_id):
                 result["model_error_code"] = "MODEL_TIMEOUT"
             else:
                 model_text = summarize(redact(text), 12000)
-                # A collector may submit to a project without acquiring its knowledge access.
-                revisions = [] if report_only else list(search(job.project, diagnostic_search_query(text, sources))[:5])
-                references = assistant.reference_payload(revisions, diagnostic_search_query(text, sources))
+                # The server may use approved knowledge without granting the collector knowledge access.
+                query = diagnostic_search_query(text, sources)
+                if report_only:
+                    from plane.knowledge.diagnostic_retrieval import search as diagnostic_search
+
+                    revisions = diagnostic_search(job.project, query)
+                else:
+                    revisions = list(search(job.project, query)[:5])
+                references = assistant.reference_payload(revisions, query)
                 try:
                     result["progress"] = {"stage": "model_analysis", "at": timezone.now().isoformat()}
                     DiagnosticJob.objects.filter(pk=job.pk, status="running").update(result=result)

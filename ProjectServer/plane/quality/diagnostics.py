@@ -125,6 +125,7 @@ def schedule_automatic(defect, actor, trigger, context=None):
 
 def expire_stale(defect):
     from .diagnostic_limits import task_limits, queue_wait_seconds
+
     stale = defect.diagnostics.filter(
         Q(status="running", started_at__lt=timezone.now() - timedelta(seconds=task_limits()[1] + 10))
         | Q(status="queued", created_at__lt=timezone.now() - timedelta(seconds=queue_wait_seconds()))
@@ -149,6 +150,12 @@ class DiagnosticSerializer(serializers.ModelSerializer):
             from plane.knowledge.serializers import visible_references
 
             allowed = visible_references(instance.project_id)
+            from .daq_reporting import report_only_diagnostic_access
+
+            if report_only_diagnostic_access(instance):
+                from plane.knowledge.diagnostic_retrieval import approved
+
+                allowed = {f"KN-{row.article_id}-v{row.version}" for row in approved(instance.project)}
             if any(
                 row.get("reference", "").startswith("KN-") and row.get("reference") not in allowed
                 for row in instance.result.get("citations", [])
