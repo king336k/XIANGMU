@@ -116,7 +116,15 @@ export function RecordProgress({
               {data.stages.map((stage, index) => {
                 const state = stage.key === data.current ? "current" : stage.state || "pending";
                 return (
-                  <li key={stage.key} data-stage={stage.key} data-state={state} className="flex items-center gap-3">
+                  <li
+                    key={stage.key}
+                    data-stage={stage.key}
+                    data-state={state}
+                    title={
+                      state === "skipped" ? `${kind === "defect" ? "缺陷" : "业务"}状态未单独记录该阶段` : undefined
+                    }
+                    className="flex items-center gap-3"
+                  >
                     <div
                       className={`space-y-2 rounded-md border px-4 py-3 ${state === "current" ? "border-accent-subtle bg-accent-subtle" : state === "completed" ? "border-success-subtle bg-success-subtle" : "border-subtle bg-surface-1"}`}
                     >
@@ -129,7 +137,7 @@ export function RecordProgress({
                             : state === "completed"
                               ? "已完成"
                               : state === "skipped"
-                                ? "已跳过"
+                                ? "未单独记录"
                                 : "未开始"
                         }
                         variant="plain"

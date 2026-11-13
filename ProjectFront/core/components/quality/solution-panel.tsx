@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useState } from "react";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { setToast, TOAST_TYPE } from "@plane/propel/toast";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
@@ -11,7 +11,18 @@ import { SolutionContent, SolutionReviewResult } from "./solution-content";
 import { currentSolutionRevision, solutionFields } from "./solution-data";
 import type { Solution, SolutionRevision } from "./solution-data";
 import type { Context } from "./types";
-export function SolutionPanel({ base, defectId, context }: { base: string; defectId: string; context: Context }) {
+export function SolutionPanel({
+  base,
+  defectId,
+  context,
+  onChanged,
+}: {
+  base: string;
+  defectId: string;
+  context: Context;
+  onChanged?: () => Promise<void>;
+}) {
+  const { mutate: revalidate } = useSWRConfig();
   const pagination = useCollectionPagination(`${base}:solutions:${defectId}`);
   const { data, error, mutate } = useSWR(`${base}solutions/?defect_id=${defectId}&${pagination.query}`, (url: string) =>
     qualityApi.read<{ results: Solution[]; count: number; can_create: boolean }>(url)
@@ -23,6 +34,12 @@ export function SolutionPanel({ base, defectId, context }: { base: string; defec
   const [reviewDecision, setReviewDecision] = useState("");
   const saved = async () => {
     await mutate();
+    await onChanged?.();
+    await revalidate((key) => {
+      if (typeof key !== "string" || !key.startsWith(`${base}record-progress/?`)) return false;
+      const query = new URLSearchParams(key.slice(key.indexOf("?") + 1));
+      return query.get("kind") === "defect" && query.get("id") === defectId;
+    });
   };
   const administrator =
     context.is_administrator === true ||

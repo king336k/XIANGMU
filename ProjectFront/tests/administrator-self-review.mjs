@@ -56,6 +56,7 @@ function harness(is_administrator, status = "draft") {
     if (id === "react/jsx-runtime") return require(id);
     if (id === "swr")
       return {
+        useSWRConfig: () => ({ mutate: async () => {} }),
         default: () => ({
           data: {
             results: [

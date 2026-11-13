@@ -286,7 +286,12 @@ export function DefectDetail({
                   <DefectTeam base={base} value={value} context={context} onChanged={onChanged} />
                 </div>
               </details>
-              <SolutionPanel base={base} defectId={value.id} context={context} />
+              <SolutionPanel
+                base={base}
+                defectId={value.id}
+                context={context}
+                onChanged={async () => onChanged(await qualityApi.read<Defect>(`${base}defects/${value.id}/`))}
+              />
             </div>
             <div hidden={activeTab !== "regression"} className="defect-page-verification">
               <DefectVerificationScope

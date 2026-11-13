@@ -75,6 +75,7 @@ test("技术方案与现场工作站读取后端页码和条数，翻页不局�
     const exports = load(`quality/${file}.tsx`, {
       react: h.hooks,
       swr: {
+        useSWRConfig: () => ({ mutate: async () => {} }),
         default: (query) => {
           h.queries.push(query);
           return { data: { results: [], count: 101 }, mutate() {} };

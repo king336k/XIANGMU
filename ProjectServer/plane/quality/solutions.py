@@ -8,7 +8,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from plane.db.models import ProjectMember
 from .permissions import strict, require_assignee, has_role, is_administrator, capable, writable_member
-from .models import Defect, Solution, SolutionRevision, SolutionReview
+from .models import Defect, DefectEvent, Solution, SolutionRevision, SolutionReview
 from .views import Conflict, QualityView
 
 FIELDS = ["title", "root_cause", "steps", "verification", "risk", "rollback", "repository", "commit_sha"]
@@ -174,6 +174,43 @@ def representation(view, solution):
     return SolutionSerializer(solution, context={"view": view}).data
 
 
+def locked_solution(view, pk):
+    # Every solution writer locks the defect first, including review decisions.
+    identity = get_object_or_404(Solution.objects.only("defect_id"), pk=pk, project_id=view.project_id)
+    defect = get_object_or_404(Defect.objects.select_for_update(), pk=identity.defect_id, project_id=view.project_id)
+    solution = get_object_or_404(
+        Solution.objects.select_for_update(), pk=pk, project_id=view.project_id, defect_id=defect.id
+    )
+    solution.defect = defect
+    return solution
+
+
+def start_processing(view, defect):
+    if defect.status != "open" or (
+        defect.assignee_id != view.request.user.id and not is_administrator(view.request.user)
+    ):
+        return
+    defect.status = "in_progress"
+    defect.edit_version += 1
+    fields = ["status", "edit_version", "updated_at"]
+    if defect.resolution_kind == "deferred":
+        defect.resolution_kind = "fixed"
+        defect.defer_until = None
+        fields.extend(["resolution_kind", "defer_until"])
+    defect.save(update_fields=fields)
+    DefectEvent.objects.create(
+        defect=defect,
+        project=defect.project,
+        previous_status="open",
+        status="in_progress",
+        created_by=view.request.user,
+        note="维护技术方案，开始处理缺陷。",
+    )
+    from .notifications import defect_notice
+
+    defect_notice(defect, view.request.user, "缺陷已开始处理")
+
+
 class SolutionList(QualityView):
     def get(self, request, **kwargs):
         qs = solutions().filter(project=self.project())
@@ -203,6 +240,7 @@ class SolutionList(QualityView):
         ):
             raise PermissionDenied("只有当前技术负责人可以维护方案。")
         value = Solution.objects.create(defect=defect, project=defect.project, created_by=request.user, **data)
+        start_processing(self, defect)
         return Response(representation(self, value), status=201)
 
 
@@ -217,8 +255,7 @@ class SolutionDetail(QualityView):
     @transaction.atomic
     def patch(self, request, pk, **kwargs):
         data = self.input(SolutionInput, partial=True)
-        solution = get_object_or_404(Solution.objects.select_for_update(), pk=pk, project_id=self.project_id)
-        solution.defect = Defect.objects.select_for_update().get(pk=solution.defect_id)
+        solution = locked_solution(self, pk)
         require_mutable(solution)
         self.author(solution)
         if data.pop("expected_version", None) != solution.edit_version:
@@ -233,6 +270,7 @@ class SolutionDetail(QualityView):
         solution.status = "draft"
         solution.edit_version += 1
         solution.save()
+        start_processing(self, solution.defect)
         from .notifications import defect_notice
 
         defect_notice(solution.defect, request.user, "技术方案状态已更新", [solution.created_by_id])
@@ -249,8 +287,7 @@ class SolutionSubmit(SolutionDetail):
     @transaction.atomic
     def post(self, request, pk, **kwargs):
         data = self.input(SubmitInput)
-        solution = get_object_or_404(Solution.objects.select_for_update(), pk=pk, project_id=self.project_id)
-        solution.defect = Defect.objects.select_for_update().get(pk=solution.defect_id)
+        solution = locked_solution(self, pk)
         require_mutable(solution)
         self.author(solution)
         if data["expected_version"] != solution.edit_version or solution.status != "draft":
@@ -285,6 +322,7 @@ class SolutionSubmit(SolutionDetail):
         solution.status = "review"
         solution.edit_version += 1
         solution.save()
+        start_processing(self, solution.defect)
         from .notifications import defect_notice
 
         defect_notice(solution.defect, request.user, "技术方案状态已更新", [solution.created_by_id])
@@ -301,8 +339,7 @@ class SolutionDecision(QualityView):
     @transaction.atomic
     def post(self, request, pk, **kwargs):
         data = self.input(ReviewInput)
-        solution = get_object_or_404(Solution.objects.select_for_update(), pk=pk, project_id=self.project_id)
-        solution.defect = Defect.objects.select_for_update().get(pk=solution.defect_id)
+        solution = locked_solution(self, pk)
         require_mutable(solution)
         revision = get_object_or_404(SolutionRevision, pk=data["revision_id"], solution=solution)
         contributors = {

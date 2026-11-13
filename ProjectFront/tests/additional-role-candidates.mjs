@@ -6,6 +6,7 @@ const require = createRequire(new URL("../package.json", import.meta.url)),
   ts = require("typescript"),
   React = require("react");
 const { renderToStaticMarkup } = require("react-dom/server");
+const Empty = () => null;
 function render(component, name, mode) {
   let index = 0;
   const exports = {};
@@ -14,7 +15,6 @@ function render(component, name, mode) {
     readFileSync(new URL(`../core/components/quality/${component}.tsx`, import.meta.url), "utf8"),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }
   ).outputText;
-  const Empty = () => null;
   const hooks = {
     ...React,
     useState: (initial) => {
@@ -27,7 +27,10 @@ function render(component, name, mode) {
       id === "react"
         ? hooks
         : id === "swr"
-          ? { default: () => ({ data: { results: [], count: 0 }, mutate() {} }) }
+          ? {
+              default: () => ({ data: { results: [], count: 0 }, mutate() {} }),
+              useSWRConfig: () => ({ mutate: async () => {} }),
+            }
           : id === "./types"
             ? { can: () => true }
             : id === "./use-collection-pagination"
@@ -63,7 +66,12 @@ function render(component, name, mode) {
             business_roles: ["TECHNICIAN", mode === "station" ? "REPORTER" : "PROJECT_MANAGER"],
           },
           { id: "author", name: "方案作者", business_role: "PROJECT_MANAGER", business_roles: ["PROJECT_MANAGER"] },
-          { id: "platformadmin", name: "最高管理员", business_role: "PLATFORM_ADMIN", business_roles: ["PLATFORM_ADMIN"] },
+          {
+            id: "platformadmin",
+            name: "最高管理员",
+            business_role: "PLATFORM_ADMIN",
+            business_roles: ["PLATFORM_ADMIN"],
+          },
         ],
       },
     })

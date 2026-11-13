@@ -213,7 +213,7 @@ test("已完成阶段只使用API事实，关闭弹窗回原页面而不触发�
   assert.equal(h.requests.at(-1), null);
 });
 
-test("已关闭时真实跳过的处理中显示已跳过，不能显示未开始或冒充已完成", () => {
+test("缺少独立状态记录时明确提示未单独记录，不冒充完成", () => {
   const closed = {
     ...data,
     current: "closed",
@@ -226,6 +226,9 @@ test("已关闭时真实跳过的处理中显示已跳过，不能显示未开�
   const tree = component("stages", closed).render();
   const stage = nodes(tree).find((n) => n.props?.["data-stage"] === "in_progress");
   assert.equal(stage.props["data-state"], "skipped");
-  assert.ok(nodes(stage).some((n) => n.type === Badge && n.props.label === "已跳过" && n.props.value === "neutral"));
+  assert.ok(
+    nodes(stage).some((n) => n.type === Badge && n.props.label === "未单独记录" && n.props.value === "neutral")
+  );
+  assert.equal(stage.props.title, "缺陷状态未单独记录该阶段");
   assert.ok(!nodes(stage).some((n) => n.props?.label === "未开始" || n.props?.label === "已完成"));
 });
