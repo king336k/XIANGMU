@@ -16,12 +16,14 @@ export function DefectCommentCard({
   onReply,
   onPreview,
   onDownload,
+  compact = false,
 }: {
   comment: DiscussionComment;
   endpoint: string;
   onReply: (comment: DiscussionComment) => void;
   onPreview: (file: DiscussionAttachment) => void;
   onDownload: (file: DiscussionAttachment) => void;
+  compact?: boolean;
 }) {
   const tone =
     avatarColors[
@@ -37,7 +39,11 @@ export function DefectCommentCard({
     <article
       id={`discussion-${comment.id}`}
       aria-label={`${comment.actor}的评论`}
-      className="min-w-0 rounded-lg border border-subtle bg-surface-1 px-3 py-4 sm:px-4"
+      className={
+        compact
+          ? "min-w-0 border-b border-subtle bg-surface-1 py-3 last:border-b-0"
+          : "min-w-0 rounded-lg border border-subtle bg-surface-1 px-3 py-4 sm:px-4"
+      }
     >
       <div className="flex min-w-0 gap-3">
         <span

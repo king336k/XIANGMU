@@ -1,28 +1,42 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useRef, useState } from "react";
 import { isAxiosError } from "axios";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { ArrowUp, LockKeyhole, MessageCircle, RefreshCw, Search } from "lucide-react";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
 import { Modal, Paging, fieldClass } from "./shared";
 import { DefectCommentsEditor } from "./defect-comments-editor";
-import { DefectCommentCard } from "./defect-comments-card";
+import { DefectCommentThread } from "./defect-comments-thread";
 import { discussionQuery } from "./defect-comments-data";
-import type { DiscussionAttachment, DiscussionComment, DiscussionPage } from "./defect-comments-data";
+import type { DiscussionAttachment, DiscussionComment, DiscussionDraft, DiscussionPage } from "./defect-comments-data";
 export function DefectComments({ base, defectId, active }: { base: string; defectId: string; active: boolean }) {
   const endpoint = `${base}defects/${defectId}/comments/`;
+  const { mutate: mutateCache } = useSWRConfig();
+  const refreshDiscussion = () =>
+    mutateCache(
+      (key) =>
+        typeof key === "string" &&
+        (key.startsWith(`${endpoint}?`) || (key.startsWith(endpoint) && key.includes("/replies/?")))
+    );
   const top = useRef<HTMLDivElement>(null),
     permitted = useRef(false);
   const [page, setPage] = useState(1),
     [search, setSearch] = useState(""),
     [query, setQuery] = useState(""),
     [author, setAuthor] = useState("");
-  const [reply, setReply] = useState<DiscussionComment | null>(null),
+  const replyDrafts = useRef<Record<string, { current: DiscussionDraft }>>({});
+  const draftFor = (id: string) => {
+    if (!replyDrafts.current[id]) replyDrafts.current[id] = { current: { html: "", files: [], intent: null } };
+    return replyDrafts.current[id];
+  };
+  const [reply, setReply] = useState<{ rootId: string; target: DiscussionComment } | null>(null),
     [preview, setPreview] = useState<DiscussionAttachment | null>(null);
   const [actionError, setActionError] = useState("");
+  const params = discussionQuery(page, query, author);
+  params.set("view", "threads");
   const { data, error, isLoading, mutate } = useSWR(
-    active ? `${endpoint}?${discussionQuery(page, query, author)}` : null,
+    active ? `${endpoint}?${params}` : null,
     (url: string) => qualityApi.read<DiscussionPage>(url),
     { revalidateOnFocus: false }
   );
@@ -51,7 +65,9 @@ export function DefectComments({ base, defectId, active }: { base: string; defec
         <div className="flex items-center gap-2">
           <MessageCircle className="size-4 text-accent-primary" />
           <h2 className="text-15 font-semibold">评论</h2>
-          <span className="rounded-full bg-layer-1 px-2 py-0.5 text-11 text-secondary">{data?.count ?? "—"}</span>
+          <span className="rounded-full bg-layer-1 px-2 py-0.5 text-11 text-secondary">
+            {data?.comment_count ?? data?.count ?? "—"}
+          </span>
         </div>
         <span className="inline-flex items-center gap-1.5 text-11 text-secondary">
           <LockKeyhole className="size-3.5" />
@@ -68,8 +84,8 @@ export function DefectComments({ base, defectId, active }: { base: string; defec
             <DefectCommentsEditor
               key={endpoint}
               endpoint={endpoint}
-              reply={reply}
-              onCancelReply={() => setReply(null)}
+              reply={null}
+              onCancelReply={() => {}}
               onPublished={async () => {
                 latest();
                 await mutate();
@@ -124,11 +140,11 @@ export function DefectComments({ base, defectId, active }: { base: string; defec
               </select>
             </div>
             <div className="flex shrink-0 items-center gap-3 text-11 text-secondary">
-              <span>最新在前</span>
+              <span>最新在前 · 回复在原讨论内</span>
               <button
                 type="button"
                 aria-label="刷新评论"
-                onClick={() => void mutate()}
+                onClick={refreshDiscussion}
                 className="rounded p-1.5 hover:bg-surface-1 hover:text-accent-primary"
               >
                 <RefreshCw className="size-3.5" />
@@ -176,14 +192,18 @@ export function DefectComments({ base, defectId, active }: { base: string; defec
           )}
           <div aria-label="讨论记录" className="min-w-0 space-y-3">
             {data?.results.map((comment) => (
-              <DefectCommentCard
+              <DefectCommentThread
                 key={comment.id}
                 comment={comment}
                 endpoint={endpoint}
-                onReply={(value) => {
-                  setReply(value);
-                  top.current?.scrollIntoView({ block: "start", behavior: "smooth" });
-                }}
+                active={active}
+                search={query}
+                author={author}
+                reply={reply?.rootId === comment.id ? reply.target : null}
+                draftStore={draftFor(comment.id)}
+                onReply={(rootId, target) => setReply({ rootId, target })}
+                onCancelReply={() => setReply(null)}
+                onRefresh={mutate}
                 onPreview={setPreview}
                 onDownload={(file) => void download(file)}
               />

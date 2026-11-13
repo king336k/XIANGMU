@@ -10,7 +10,8 @@ const stub = () => null,
   Editor = () => null,
   Button = () => null,
   Card = () => null,
-  Composer = () => null;
+  Composer = () => null,
+  Thread = () => null;
 function load(file, mocks = {}) {
   const exp = {};
   new Function(
@@ -58,6 +59,7 @@ function editorHarness({
   failFirst = true,
   uuidFactory = () => "12345678-1234-4234-8234-123456789abc",
   intentFactory = helpers.discussionIntent,
+  props = {},
 } = {}) {
   let cursor = 0,
     rcursor = 0,
@@ -69,6 +71,8 @@ function editorHarness({
     inserted = [];
   const api = load("defect-comments-editor.tsx", {
     react: {
+      useEffect() {},
+      useId: () => "test-editor",
       useState: (v) => {
         const i = cursor++;
         if (!(i in state)) state[i] = v;
@@ -125,6 +129,7 @@ function editorHarness({
         reply: null,
         onCancelReply() {},
         onPublished: async () => {},
+        ...props,
       });
     },
   };
@@ -186,14 +191,20 @@ function panelHarness() {
     active = true;
   const state = [],
     refs = [];
-  const requests = [];
+  const requests = [],
+    refreshed = [];
   const data = {
     count: 36,
     participants: [{ id: "u1", name: "项目经理" }],
-    results: [{ id: "new", content: "最新", actor: "项目经理" }],
+    results: [
+      { id: "new", content: "最新", actor: "项目经理" },
+      { id: "other", content: "其他讨论", actor: "技术员" },
+    ],
   };
   const api = load("defect-comments.tsx", {
     react: {
+      useEffect() {},
+      useId: () => "test-editor",
       useState: (v) => {
         const i = cursor++;
         if (!(i in state)) state[i] = v;
@@ -207,6 +218,17 @@ function panelHarness() {
     },
     axios: { isAxiosError: (e) => !!e?.isAxiosError },
     swr: {
+      useSWRConfig: () => ({
+        mutate: async (matcher) => {
+          for (const key of [
+            "/q/defects/d/comments/?view=threads&page=1",
+            "/q/defects/d/comments/root/replies/?page=1",
+            "/q/defects/other/comments/root/replies/?page=1",
+            "/q/defects/d/comments/files/f/preview/",
+          ])
+            if (matcher(key)) refreshed.push(key);
+        },
+      }),
       default: (key) => {
         requests.push(key);
         return { data: key ? data : undefined, mutate: async () => {}, isLoading: false };
@@ -214,12 +236,14 @@ function panelHarness() {
     },
     "./defect-comments-data": helpers,
     "./defect-comments-card": { DefectCommentCard: Card },
+    "./defect-comments-thread": { DefectCommentThread: Thread },
     "./defect-comments-editor": { DefectCommentsEditor: Composer },
     "./shared": { Paging: "Paging", Modal: "Modal", fieldClass: "field" },
     "./api": { qualityApi: {}, errorMessage: String },
   });
   return {
     requests,
+    refreshed,
     set active(v) {
       active = v;
     },
@@ -393,4 +417,204 @@ test("编号生成异常保留草稿并解除busy，展示错误后可重试", a
   assert.equal(nodes(tree).find((n) => n.type === Button).props.children, "发布评论");
   assert.equal(nodes(tree).find((n) => n.type === Button).props.disabled, false);
   assert.ok(nodes(tree).some((n) => n.props?.role === "alert" && n.props.children === "编号生成失败"));
+});
+
+test("同一评论连续回复保留引用对象，发布成功后只清输入不退出回复", async () => {
+  let cancelled = 0,
+    published = 0;
+  const target = { id: "root", actor: "技术员", content: "修复说明" };
+  const h = editorHarness({
+    failFirst: false,
+    props: {
+      reply: target,
+      preserveReplyAfterPublish: true,
+      onCancelReply() {
+        cancelled++;
+      },
+      onPublished: async () => {
+        published++;
+      },
+    },
+  });
+  let tree = h.render();
+  nodes(tree)
+    .find((n) => n.type === Editor)
+    .props.onChange({}, "<p>第一次回复</p>");
+  tree = h.render();
+  await nodes(tree)
+    .find((n) => n.type === Button)
+    .props.onClick();
+  tree = h.render();
+  assert.equal(cancelled, 0);
+  assert.equal(published, 1);
+  assert.equal(h.clear, 1);
+  assert.ok(nodes(tree).some((n) => n.type === "p" && n.props.children?.includes?.("技术员")));
+  nodes(tree)
+    .find((n) => n.type === Editor)
+    .props.onChange({}, "<p>第二次回复</p>");
+  tree = h.render();
+  await nodes(tree)
+    .find((n) => n.type === Button)
+    .props.onClick();
+  assert.equal(h.writes.length, 2);
+  assert.ok(h.writes.every(([, body]) => body.reply_to === "root"));
+  assert.notEqual(h.writes[0][1].content_html, h.writes[1][1].content_html);
+  assert.equal(cancelled, 0);
+});
+
+test("主评论请求使用线程视图，未展开回复不读取回复接口", () => {
+  const h = panelHarness();
+  h.render();
+  assert.equal(new URL(h.requests[0], "https://test").searchParams.get("view"), "threads");
+});
+
+function threadHarness() {
+  let cursor = 0,
+    selected = null,
+    active = true,
+    search = "",
+    author = "",
+    root = { id: "root", actor: "经理", content: "主讨论", reply_count: 25 };
+  const state = [],
+    requests = [],
+    draft = { current: { html: "<p>保留草稿</p>", files: [{ id: "f", name: "图.png", size: 1 }], intent: null } };
+  const { DefectCommentThread } = load("defect-comments-thread.tsx", {
+    react: {
+      useRef: (v) => ({ current: v }),
+      useEffect() {},
+      useId: () => "test-editor",
+      useState: (v) => {
+        const i = cursor++;
+        if (!(i in state)) state[i] = v;
+        return [state[i], (next) => (state[i] = typeof next === "function" ? next(state[i]) : next)];
+      },
+    },
+    swr: {
+      default: (key) => {
+        requests.push(key);
+        return {
+          data: key
+            ? {
+                count: 25,
+                reply_count: 25,
+                thread_id: "root",
+                results: [{ id: "child", actor: "技术员", content: "子回复", thread_id: "root" }],
+              }
+            : undefined,
+          mutate: async () => {},
+        };
+      },
+    },
+    "./defect-comments-card": { DefectCommentCard: Card },
+    "./defect-comments-editor": { DefectCommentsEditor: Composer },
+    "./shared": { Paging: "Paging" },
+    "./api": { qualityApi: {}, errorMessage: String },
+  });
+  return {
+    requests,
+    draft,
+    set active(value) {
+      active = value;
+    },
+    get selected() {
+      return selected;
+    },
+    set selected(value) {
+      selected = value;
+    },
+    render() {
+      cursor = 0;
+      return DefectCommentThread({
+        comment: root,
+        endpoint: "/q/defects/d/comments/",
+        active,
+        search,
+        author,
+        reply: selected,
+        draftStore: draft,
+        onReply: (rootId, target) => {
+          assert.equal(rootId, "root");
+          selected = target;
+        },
+        onCancelReply: () => {
+          selected = null;
+        },
+        onRefresh: async () => {},
+        onPreview() {},
+        onDownload() {},
+      });
+    },
+  };
+}
+test("线程默认折叠不读取回复，展开按10条分页，连续回复不改变目标", async () => {
+  const h = threadHarness();
+  let tree = h.render();
+  assert.equal(h.requests[0], null);
+  assert.ok(!nodes(tree).some((n) => n.type === Composer));
+  nodes(tree)
+    .find((n) => n.type === "button" && n.props["aria-expanded"] === false)
+    .props.onClick();
+  tree = h.render();
+  assert.match(h.requests.at(-1), /root\/replies\//);
+  assert.equal(new URL(h.requests.at(-1), "https://test").searchParams.get("per_page"), "10");
+  nodes(tree)
+    .find((n) => n.type === Card && n.props.comment.id === "child")
+    .props.onReply({ id: "child", actor: "技术员", content: "子回复", thread_id: "root" });
+  tree = h.render();
+  const composer = nodes(tree).find((n) => n.type === Composer);
+  assert.equal(composer.props.reply.id, "child");
+  assert.equal(composer.props.preserveReplyAfterPublish, true);
+  assert.equal(composer.props.draftStore, h.draft);
+  const anchor = nodes(tree).find((n) => n.type === "div" && n.props["aria-label"] === "回复输入区");
+  assert.ok(anchor?.props?.ref || anchor?.ref, "回复输入器必须挂载滚动和聚焦目标");
+  nodes(tree)
+    .find((n) => n.type === "Paging")
+    .props.onChange(2);
+  tree = h.render();
+  assert.equal(new URL(h.requests.at(-1), "https://test").searchParams.get("page"), "2");
+  await composer.props.onPublished();
+  tree = h.render();
+  assert.equal(new URL(h.requests.at(-1), "https://test").searchParams.get("page"), "1");
+  assert.equal(h.selected.id, "child");
+  nodes(tree)
+    .find((n) => n.type === "button" && n.props["aria-expanded"] === true)
+    .props.onClick();
+  tree = h.render();
+  assert.equal(h.requests.at(-1), null);
+  assert.ok(nodes(tree).some((n) => n.type === Composer));
+  assert.equal(h.draft.current.files[0].id, "f");
+});
+
+test("不同讨论使用独立回复草稿，筛选分页重渲染保留各自附件", () => {
+  const h = panelHarness();
+  let tree = h.render();
+  let threads = nodes(tree).filter((n) => n.type === Thread);
+  assert.equal(threads.length, 2);
+  assert.notEqual(threads[0].props.draftStore, threads[1].props.draftStore);
+  const first = threads[0].props.draftStore;
+  first.current = { html: "<p>A草稿</p>", files: [{ id: "a-file" }], intent: null };
+  threads[0].props.onReply("new", { id: "child-a", actor: "经理", content: "引用A" });
+  tree = h.render();
+  threads = nodes(tree).filter((n) => n.type === Thread);
+  assert.equal(threads[0].props.reply.id, "child-a");
+  assert.equal(threads[0].props.draftStore, first);
+  threads[1].props.onReply("other", { id: "other", actor: "技术员", content: "B" });
+  tree = h.render();
+  threads = nodes(tree).filter((n) => n.type === Thread);
+  assert.equal(threads[0].props.reply, null);
+  assert.equal(threads[1].props.reply.id, "other");
+  assert.equal(threads[1].props.draftStore.current.html, "");
+  assert.equal(threads[0].props.draftStore.current.files[0].id, "a-file");
+});
+
+test("刷新评论同时刷新本缺陷主讨论和已缓存回复，不触碰其他缺陷或附件", async () => {
+  const h = panelHarness();
+  const tree = h.render();
+  await nodes(tree)
+    .find((n) => n.type === "button" && n.props["aria-label"] === "刷新评论")
+    .props.onClick();
+  assert.deepEqual(h.refreshed, [
+    "/q/defects/d/comments/?view=threads&page=1",
+    "/q/defects/d/comments/root/replies/?page=1",
+  ]);
 });

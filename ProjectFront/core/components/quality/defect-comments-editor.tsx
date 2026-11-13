@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { LiteTextEditorWithRef } from "@plane/editor";
 import type { EditorRefApi, TFileHandler } from "@plane/editor";
@@ -8,7 +8,12 @@ import { Button } from "@plane/ui";
 import { sanitizeHTML } from "@plane/utils";
 import { qualityApi, errorMessage } from "./api";
 import { discussionIntent, discussionSize, validateDiscussionFiles } from "./defect-comments-data";
-import type { DiscussionAttachment, DiscussionComment, DiscussionIntent } from "./defect-comments-data";
+import type {
+  DiscussionAttachment,
+  DiscussionComment,
+  DiscussionDraft,
+  DiscussionIntent,
+} from "./defect-comments-data";
 const disabledFiles: TFileHandler = {
   assetsUploadStatus: {},
   cancel() {},
@@ -40,17 +45,25 @@ export function DefectCommentsEditor({
   reply,
   onCancelReply,
   onPublished,
+  preserveReplyAfterPublish = false,
+  draftStore,
 }: {
   endpoint: string;
   reply: DiscussionComment | null;
   onCancelReply: () => void;
   onPublished: () => Promise<unknown>;
+  preserveReplyAfterPublish?: boolean;
+  draftStore?: { current: DiscussionDraft };
 }) {
+  const editorId = useId();
   const editor = useRef<EditorRefApi>(null),
     input = useRef<HTMLInputElement>(null);
-  const intent = useRef<DiscussionIntent | null>(null);
-  const [html, setHtml] = useState(""),
-    [files, setFiles] = useState<DiscussionAttachment[]>([]);
+  const intent = useRef<DiscussionIntent | null>(draftStore?.current.intent || null);
+  const [html, setHtml] = useState(draftStore?.current.html || ""),
+    [files, setFiles] = useState<DiscussionAttachment[]>(draftStore?.current.files || []);
+  useEffect(() => {
+    if (draftStore) draftStore.current = { html, files, intent: intent.current };
+  }, [draftStore, html, files]);
   const [busy, setBusy] = useState(false),
     [uploading, setUploading] = useState(false),
     [error, setError] = useState("");
@@ -99,12 +112,14 @@ export function DefectCommentsEditor({
         attachment_ids: files.map((file) => file.id),
       };
       intent.current = discussionIntent(intent.current, body, uuidv4);
+      if (draftStore) draftStore.current.intent = intent.current;
       await qualityApi.write(endpoint, { ...body, request_id: intent.current.requestId });
       editor.current?.clearEditor();
       setHtml("");
       setFiles([]);
       intent.current = null;
-      onCancelReply();
+      if (draftStore) draftStore.current = { html: "", files: [], intent: null };
+      if (!preserveReplyAfterPublish) onCancelReply();
       await onPublished();
     } catch (e) {
       setError(errorMessage(e));
@@ -114,7 +129,7 @@ export function DefectCommentsEditor({
   };
   return (
     <section
-      aria-label="发表评论"
+      aria-label={preserveReplyAfterPublish ? "连续回复" : "发表评论"}
       onKeyDown={(event) => {
         if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
           event.preventDefault();
@@ -146,7 +161,7 @@ export function DefectCommentsEditor({
       }}
     >
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-subtle bg-layer-1 px-4 py-3">
-        <h3 className="text-13 font-semibold">发表评论</h3>
+        <h3 className="text-13 font-semibold">{preserveReplyAfterPublish ? "回复讨论" : "发表评论"}</h3>
         <span className="text-11 text-secondary">仅项目成员可见</span>
       </header>
       {reply && (
@@ -248,9 +263,13 @@ export function DefectCommentsEditor({
       <div className="min-h-36 min-w-0 px-3 py-3 [&_.ProseMirror]:max-h-72 [&_.ProseMirror]:min-h-28 [&_.ProseMirror]:overflow-y-auto">
         <LiteTextEditorWithRef
           ref={editor}
-          id={`defect-discussion-${endpoint.split("/").filter(Boolean).at(-2)}`}
+          id={`defect-discussion-${editorId}`}
           initialValue={html || "<p></p>"}
           editable={!busy}
+          autofocus={preserveReplyAfterPublish}
+          handleEditorReady={(ready) => {
+            if (ready && preserveReplyAfterPublish) setTimeout(() => editor.current?.focus("end"), 0);
+          }}
           disabledExtensions={["image", "issue-embed", "slash-commands", "enter-key"]}
           flaggedExtensions={[]}
           fileHandler={disabledFiles}
@@ -258,7 +277,10 @@ export function DefectCommentsEditor({
           getEditorMetaData={() => ({ file_assets: [], user_mentions: [] })}
           extendedEditorProps={{}}
           placeholder="写下讨论内容，或粘贴图片、拖入文件…"
-          onChange={(_, content) => setHtml(content)}
+          onChange={(_, content) => {
+            if (draftStore) draftStore.current.html = content;
+            setHtml(content);
+          }}
           onTransaction={refreshActiveTools}
           displayConfig={{ fontSize: "small-font" }}
           containerClassName="min-w-0"

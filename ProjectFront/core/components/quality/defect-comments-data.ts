@@ -10,12 +10,17 @@ export type DiscussionComment = {
   created_at: string;
   reply_to: { id: string; actor: string; content: string } | null;
   attachments: DiscussionAttachment[];
+  thread_id?: string;
+  reply_count?: number;
 };
 export type DiscussionPage = {
   count: number;
   results: DiscussionComment[];
   participants: { id: string; name: string }[];
+  comment_count?: number;
 };
+export type DiscussionDraft = { html: string; files: DiscussionAttachment[]; intent: DiscussionIntent | null };
+export type DiscussionReplies = { count: number; results: DiscussionComment[]; thread_id: string; reply_count: number };
 export type DiscussionIntent = { signature: string; requestId: string };
 export function discussionIntent(
   previous: DiscussionIntent | null,
