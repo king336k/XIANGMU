@@ -177,7 +177,7 @@
     "restore": {
       "success": {
         "title": "恢复成功",
-        "message": "您的工作项可以在项目工作项中找到。"
+        "message": "已恢复，可在项目任务中查看。"
       },
       "failed": {
         "message": "无法恢复工作项。请重试。"
