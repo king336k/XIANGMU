@@ -170,3 +170,34 @@ def test_nested_safe_agent_failure_keeps_provider_classification(mocker, monkeyp
             [{"file_id": "local", "name": "log", "read_bytes": 10, "excerpt": "Connection refused"}],
             [],
         )
+
+
+def test_invalid_output_retains_only_safe_validation_fields(mocker, monkeypatch):
+    import subprocess
+
+    monkeypatch.setenv("DIAGNOSTIC_AGENT_PYTHON", "fixture-python")
+    details = {
+        "error_type": "UnexpectedModelBehavior",
+        "error_chain": [{"error_type": "ValidationError"}],
+        "validation_errors": [
+            {"type": "value_error", "loc": ["model_confidence"], "input": "PRIVATE-VALUE", "msg": "PRIVATE-MESSAGE"},
+            {"type": "PRIVATE-TYPE", "loc": ["PRIVATE-LOCATION"]},
+        ],
+    }
+    mocker.patch(
+        "plane.quality.diagnostic_model.subprocess.run",
+        side_effect=subprocess.CalledProcessError(1, ["runner"], stderr=json.dumps(details)),
+    )
+    with pytest.raises(ValueError, match="AGENT_INVALID_OUTPUT") as caught:
+        analyze_diagnostic(
+            {"api_key": "fixture", "base_url": "https://api.openai.com/v1", "model": "fixture"},
+            "neutral",
+            [{"file_id": "local", "name": "log", "read_bytes": 10, "excerpt": "neutral"}],
+            [],
+        )
+    safe = caught.value.validation_details
+    assert safe == [
+        {"type": "value_error", "loc": ["model_confidence"]},
+        {"type": "other_schema_error", "loc": ["item"]},
+    ]
+    assert "PRIVATE" not in json.dumps(safe)

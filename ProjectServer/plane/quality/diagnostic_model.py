@@ -15,6 +15,65 @@ from .log_evidence import summarize
 from .diagnostic_limits import timeout_seconds
 
 
+class DiagnosticOutputFailure(ValueError):
+    def __init__(self, details):
+        super().__init__("AGENT_INVALID_OUTPUT")
+        self.validation_details = safe_validation_details(details)
+
+
+def safe_validation_details(details):
+    fields = {
+        "answer",
+        "suggested_actions",
+        "verification_steps",
+        "citations",
+        "model_confidence",
+        "evidence_assessment",
+        "confidence_basis",
+        "confidence_references",
+        "severity_assessment",
+        "severity",
+        "basis",
+        "evidence",
+        "reference",
+        "quote",
+    }
+    kinds = {
+        "missing",
+        "string_type",
+        "string_too_long",
+        "list_type",
+        "too_long",
+        "too_short",
+        "literal_error",
+        "float_type",
+        "float_parsing",
+        "greater_than_equal",
+        "less_than_equal",
+        "finite_number",
+        "value_error",
+        "json_invalid",
+        "model_type",
+        "dict_type",
+    }
+    return (
+        [
+            {
+                "type": row.get("type")
+                if isinstance(row.get("type"), str) and row.get("type") in kinds
+                else "other_schema_error",
+                "loc": [
+                    part if isinstance(part, str) and part in fields else "item" for part in row.get("loc", [])[:8]
+                ],
+            }
+            for row in details[:20]
+            if isinstance(row, dict) and isinstance(row.get("loc", []), list)
+        ]
+        if isinstance(details, list)
+        else []
+    )
+
+
 class ModelConfidenceField(serializers.Field):
     def to_internal_value(self, value):
         if type(value) not in {int, float} or not 0 <= value <= 1 or not math.isfinite(value):
@@ -69,7 +128,11 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
             "read_bytes": row["read_bytes"],
             "file_bytes": row.get("file_bytes"),
             "archive_entry": row.get("archive_entry"),
-            "original_bytes_scope": "archive_entry" if row.get("archive_entry") else "attachment",
+            "original_bytes_scope": row.get(
+                "original_bytes_scope", "archive_entry" if row.get("archive_entry") else "attachment"
+            ),
+            "origin": row.get("origin", "attachment"),
+            "requires_review": row.get("requires_review", False),
             "scanned_bytes": row.get("scanned_bytes"),
             "content": row.get("excerpt", ""),
         }
@@ -160,7 +223,7 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
                 if status in {408, 429} or isinstance(status, int) and status >= 500:
                     raise ValueError("AGENT_PROVIDER_UNAVAILABLE") from error
                 if diagnostic.get("error_type") in {"UnexpectedModelBehavior", "ModelRetry", "ValidationError"}:
-                    raise ValueError("AGENT_INVALID_OUTPUT") from error
+                    raise DiagnosticOutputFailure(diagnostic.get("validation_errors")) from error
             raise ValueError("AGENT_FAILED") from error
         content = process.stdout
     else:
