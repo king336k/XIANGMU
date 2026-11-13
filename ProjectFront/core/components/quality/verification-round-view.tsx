@@ -57,8 +57,8 @@ export function VerificationRoundView({
         </span>
         {showStatus && (
           <Badge
-            value={verificationStatusTone[round.status] || "neutral"}
-            label={verificationStatus[round.status] || round.status}
+            value={verificationStatusTone[round.execution_state || round.status] || "neutral"}
+            label={verificationStatus[round.execution_state || round.status] || round.status}
           />
         )}
       </div>
@@ -71,6 +71,7 @@ export function VerificationRoundView({
             </div>
             {latest && (
               <span className="text-12 text-secondary">
+                实际测试人：
                 {latest.created_by_name ||
                   members.find((member) => member.id === latest.created_by_id)?.name ||
                   "执行人未记录"}{" "}

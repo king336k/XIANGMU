@@ -4,6 +4,7 @@
  * See the LICENSE file for details.
  */
 
+import { OwnerSummary } from "@/components/quality/owner-summary";
 import React, { useCallback, useMemo } from "react";
 import { observer } from "mobx-react";
 import { useParams, useSearchParams } from "next/navigation";
@@ -43,7 +44,7 @@ export const AllIssueLayoutRoot = observer(function AllIssueLayoutRoot(props: Pr
   const searchParams = useSearchParams();
   // store hooks
   const {
-    issuesFilter: { filters, fetchFilters, updateFilterExpression },
+    issuesFilter: { filters, fetchFilters, updateFilterExpression, getFilterParams },
     issues: { clear, groupedIssueIds, fetchIssues, fetchNextIssues },
   } = useIssues(EIssuesStoreType.GLOBAL);
   const { fetchAllGlobalViews, getViewDetailsById } = useGlobalView();
@@ -155,6 +156,34 @@ export const AllIssueLayoutRoot = observer(function AllIssueLayoutRoot(props: Pr
                     saveView: GLOBAL_VIEW_TRACKER_ELEMENTS.HEADER_SAVE_VIEW_BUTTON,
                   }}
                 />
+              )}
+              {!globalViewsLoading && !issuesLoading && (
+                <details className="mx-4 my-2 shrink-0 rounded-md border border-subtle p-3">
+                  <summary className="cursor-pointer text-13">人员事项</summary>
+                  <div className="mt-3 max-h-80 overflow-auto">
+                    <OwnerSummary
+                      endpoint={`/api/workspaces/${workspaceSlug}/owner-statistics/`}
+                      source="work_items"
+                      params={
+                        new URLSearchParams(
+                          Object.fromEntries(
+                            Object.entries({
+                              ...getFilterParams(
+                                { canGroup: false, perPageCount: 100 },
+                                globalViewId,
+                                undefined,
+                                undefined,
+                                undefined
+                              ),
+                              ...routeFilters,
+                            }).map(([key, value]) => [key, String(value)])
+                          )
+                        )
+                      }
+                      metrics={[{ key: "total_work_items", label: "当前任务与需求" }]}
+                    />
+                  </div>
+                </details>
               )}
               <WorkspaceActiveLayout
                 activeLayout={activeLayout}

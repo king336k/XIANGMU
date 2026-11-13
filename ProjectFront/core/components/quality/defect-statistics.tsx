@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { OwnerSummary } from "./owner-summary";
+import { defectOwnerMetrics } from "./owner-metrics";
 import { useState } from "react";
 import useSWR from "swr";
 import { Distribution, TrendChart } from "./statistics-display";
@@ -129,6 +131,12 @@ export function DefectStatistics({
           </button>
         ))}
       </div>
+      <OwnerSummary
+        endpoint={`${base}owner-statistics/`}
+        source="defects"
+        params={params}
+        metrics={defectOwnerMetrics}
+      />
       <div className="grid gap-4 lg:grid-cols-2">
         <Distribution
           title="状态分布"

@@ -25,9 +25,12 @@ const groups = {
   requirement: "需求",
   defect: "缺陷",
   solution: "方案审核",
-  plan: "测试计划",
+  plan: "测试任务",
 };
 const stateNames: Record<string, string> = {
+  waiting_repair: "待修复",
+  waiting_test: "待测试",
+  tested: "已测试，待提交",
   draft: "草稿",
   approved: "已确认",
   backlog: "待排期",
@@ -107,7 +110,7 @@ export function PersonalTodoList({
                     row.status
                   ] || row.status
                 }
-                label={stateNames[row.status] || "待处理"}
+                label={row.kind === "plan" && row.status === "review" ? "待验收" : stateNames[row.status] || "待处理"}
               />
               <span className="text-12 text-accent-primary">{row.next_action} →</span>
             </Link>
@@ -125,8 +128,8 @@ export function PersonalTodoList({
     </>
   );
 }
-export function PersonalTodos({ workspaceSlug }: { workspaceSlug: string }) {
-  const [filters, setFilters] = useState({ kind: "", search: "", page: 1, perPage: 5 });
+export function PersonalTodos({ workspaceSlug, projectId }: { workspaceSlug: string; projectId?: string }) {
+  const [filters, setFilters] = useState({ kind: projectId ? "plan" : "", search: "", page: 1, perPage: 5 });
   const params = new URLSearchParams({
     workspace: workspaceSlug,
     search: filters.search,
@@ -134,6 +137,7 @@ export function PersonalTodos({ workspaceSlug }: { workspaceSlug: string }) {
     per_page: String(filters.perPage),
   });
   if (filters.kind) params.set("kind", filters.kind);
+  if (projectId) params.set("project_id", projectId);
   const { data, error, isLoading, mutate } = useSWR(
     `/api/quality-auth/my-todos/?${params}`,
     (url: string) => qualityApi.read<{ count: number; results: PersonalTodo[] }>(url),
@@ -146,7 +150,8 @@ export function PersonalTodos({ workspaceSlug }: { workspaceSlug: string }) {
     >
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-16 font-semibold">
-          我的待办{data ? <span className="font-normal ml-2 text-12 text-secondary">{data.count}</span> : null}
+          {projectId ? "测试待办" : "我的待办"}
+          {data ? <span className="font-normal ml-2 text-12 text-secondary">{data.count}</span> : null}
         </h2>
         <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_7rem] items-center gap-2 sm:w-72">
           <input

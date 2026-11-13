@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { OwnerSummary } from "./owner-summary";
+import { qualityOwnerMetrics } from "./owner-metrics";
 import { Distribution } from "./statistics-display";
 import { Badge } from "./shared";
 import { resultNames } from "./types";
@@ -55,6 +57,14 @@ export function QualitySummary({
           </button>
         ))}
       </div>
+      {base && (
+        <OwnerSummary
+          endpoint={`${base}owner-statistics/`}
+          source="quality"
+          params={new URLSearchParams()}
+          metrics={qualityOwnerMetrics}
+        />
+      )}
       <section className="space-y-4">
         <h2 className="text-16 font-semibold">计划执行概况</h2>
         <p className="text-13">

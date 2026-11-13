@@ -248,7 +248,12 @@ def permission_for(view, request):
     if name == "DefectVerificationResult":
         return "execute"
     if name == "DefectVerificationWorkflow":
-        return "execute" if action == "submit" else "manage_test"
+        if action == "assign":
+            return (
+                "manage_test_plan" if capable(view.project_id, request.user.id, "manage_test_plan")
+                else "manage_defect"
+            )
+        return "execute" if action in {"claim", "submit"} else "manage_test"
     if name in {"RoleList", "RolePolicy"}:
         return "manage_roles"
     if name == "PlanWorkflow":

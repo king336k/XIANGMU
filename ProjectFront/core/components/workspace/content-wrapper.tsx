@@ -4,6 +4,7 @@
  * See the LICENSE file for details.
  */
 
+import { StatisticsReturnLink } from "@/components/quality/statistics-return-link";
 import React from "react";
 import { observer } from "mobx-react";
 // plane imports
@@ -34,7 +35,10 @@ export const WorkspaceContentWrapper = observer(function WorkspaceContentWrapper
             }
           )}
         >
-          {children}
+          <div className="flex size-full min-h-0 flex-col">
+            <StatisticsReturnLink />
+            <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+          </div>
         </div>
       </div>
     </div>

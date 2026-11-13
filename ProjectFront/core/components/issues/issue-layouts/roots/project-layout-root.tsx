@@ -11,6 +11,7 @@ import useSWR from "swr";
 import { ISSUE_DISPLAY_FILTERS_BY_PAGE, PROJECT_VIEW_TRACKER_ELEMENTS } from "@plane/constants";
 import { EIssueLayoutTypes, EIssuesStoreType } from "@plane/types";
 import { Spinner } from "@plane/ui";
+import { PersonalTodos } from "@/components/home/personal-todos";
 // components
 import { ProjectLevelWorkItemFiltersHOC } from "@/components/work-item-filters/filters-hoc/project-level";
 import { WorkItemFiltersRow } from "@/components/work-item-filters/filters-row";
@@ -87,6 +88,9 @@ export const ProjectLayoutRoot = observer(function ProjectLayoutRoot() {
               />
             )}
             <div className="relative h-full w-full overflow-auto bg-surface-1">
+              <div className="px-4 pt-3">
+                <PersonalTodos workspaceSlug={workspaceSlug} projectId={projectId} />
+              </div>
               {/* mutation loader */}
               {issues?.getIssueLoader() === "mutation" && (
                 <div className="shadow-sm fixed top-[70px] right-[20px] z-50 flex h-[40px] w-[40px] items-center justify-center rounded-sm bg-layer-1">

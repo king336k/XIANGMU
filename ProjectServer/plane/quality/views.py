@@ -48,9 +48,7 @@ class QualityPermission(BasePermission):
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
-        if type(view).__name__ in {
-            "QualityContext", "DefectList", "DefectDetail", "DiagnosticList", "DiagnosticDetail"
-        } and is_administrator(request.user):
+        if is_administrator(request.user):
             return Project.objects.filter(
                 pk=view.project_id, workspace__slug=view.workspace_slug,
                 archived_at__isnull=True, workspace__deleted_at__isnull=True,
@@ -203,7 +201,9 @@ def plan_queryset():
     items = PlanItem.objects.select_related("revision", "case").prefetch_related(
         Prefetch("executions", queryset=executions, to_attr="latest_results")
     )
-    return TestPlan.objects.select_related("assignee", "data_regression__binding").prefetch_related(
+    return TestPlan.objects.select_related(
+        "assignee", "data_regression__binding", "defect_verification__defect"
+    ).prefetch_related(
         Prefetch("items", queryset=items), "workflow_events__created_by"
     )
 
@@ -289,7 +289,7 @@ class ExecutionList(QualityView):
         data = self.input(ExecutionInput)
         from .defect_verification import lock_execution, validate_actual
 
-        verification = lock_execution(pk, self.project_id)
+        verification = lock_execution(pk, self.project_id, request.user)
         item = get_object_or_404(PlanItem.objects.select_for_update(), pk=pk, project_id=self.project_id)
         plan = TestPlan.objects.select_for_update().get(pk=item.plan_id)
         if verification:
@@ -332,6 +332,10 @@ class ExecutionList(QualityView):
             resource_snapshot=resource_snapshot,
             **data,
         )
+        if verification:
+            from .defect_verification import sync_plan, audit
+            sync_plan(verification)
+            audit(verification.defect, request.user, f"记录用例实测第{verification.round_no}轮：{execution.result}")
         return Response(ExecutionSerializer(execution).data, status=201)
 
 
@@ -575,6 +579,10 @@ class DefectDetail(QualityView):
             defect.assignment_reason = "人工选择负责人。"
         defect.edit_version += 1
         defect.save()
+        from .defect_verification import latest, sync_plan
+        verification = latest(defect)
+        if verification:
+            sync_plan(verification)
         if old_status != "closed" and new_status == "closed":
             from .data_regression import create_functional_knowledge
 
@@ -825,6 +833,8 @@ def quality_report(project):
         key: 0 for key in ["passed", "failed", "blocked", "inconclusive", "skipped", "pending", "total", "executed"]
     }
     for plan in plans:
+        if getattr(plan, "defect_verification", None) and plan.defect_verification.mode == "manual":
+            continue
         summary = plan_summary(plan)
         for key in totals:
             totals[key] += summary[key]

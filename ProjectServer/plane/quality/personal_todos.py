@@ -17,8 +17,10 @@ from .models import (
     Requirement,
     PlanItem,
     TestExecution,
+    DefectVerification,
+    DefectVerificationResult,
 )
-from .permissions import ROLE_CAPABILITIES, roles_for
+from .permissions import ROLE_CAPABILITIES, roles_for, is_administrator
 from .views import QualityPagination
 
 KINDS = {
@@ -26,7 +28,7 @@ KINDS = {
     "requirement": "需求",
     "defect": "缺陷",
     "solution": "方案审核",
-    "plan": "测试计划",
+    "plan": "测试任务",
 }
 
 
@@ -39,6 +41,13 @@ class TodoQuery(serializers.Serializer):
 
 
 def permitted_projects(user, workspace):
+    if is_administrator(user):
+        from plane.db.models import Project
+
+        projects = list(
+            Project.objects.filter(workspace__slug=workspace, archived_at__isnull=True).values_list("id", flat=True)
+        )
+        return (projects,) * 5
     membership = WorkspaceMember.objects.filter(workspace__slug=workspace, member=user, is_active=True).first()
     if not user.is_active or membership is None:
         raise PermissionDenied("当前账号没有此工作空间的工作权限。")
@@ -246,15 +255,73 @@ def todo_query(user, options):
             | Q(managed=True, project_id__in=managers, status="review")
         )
     )
-    plan_query = plan_query.annotate(is_regression=Exists(DataRegression.objects.filter(plan_id=OuterRef("pk"))))
+    verification_query = DefectVerification.objects.filter(plan_id=OuterRef("pk"))
+    # Verification rounds have one shared task for both manual and case execution.
+    verification_plans = TestPlan.objects.filter(
+        project_id__in=execute,
+        archived_at__isnull=True,
+        defect_verification__status="testing",
+        defect_verification__defect__archived_at__isnull=True,
+        defect_verification__defect__status__in=["open", "in_progress", "resolved"],
+    ).filter(Q(assignee=user) | Q(assignee__isnull=True))
+    if is_administrator(user):
+        verification_plans = TestPlan.objects.filter(
+            project_id__in=execute,
+            archived_at__isnull=True,
+            defect_verification__status__in=["testing", "review"],
+            defect_verification__defect__archived_at__isnull=True,
+            defect_verification__defect__status__in=["open", "in_progress", "resolved"],
+        )
+    review_plans = TestPlan.objects.filter(
+        project_id__in=managers,
+        archived_at__isnull=True,
+        defect_verification__status="review",
+        defect_verification__defect__archived_at__isnull=True,
+        defect_verification__defect__status="resolved",
+    )
+    plan_query = TestPlan.objects.filter(
+        Q(pk__in=plan_query.filter(defect_verification__isnull=True).values("pk"))
+        | Q(pk__in=verification_plans.values("pk"))
+        | Q(pk__in=review_plans.values("pk"))
+    )
+    plan_query = plan_query.annotate(
+        is_regression=Exists(DataRegression.objects.filter(plan_id=OuterRef("pk"))),
+        is_verification=Exists(verification_query),
+        verification_status=Subquery(verification_query.values("status")[:1]),
+        verification_defect_status=Subquery(verification_query.values("defect__status")[:1]),
+        verification_mode=Subquery(verification_query.values("mode")[:1]),
+        has_manual_execution=Exists(DefectVerificationResult.objects.filter(verification__plan_id=OuterRef("pk"))),
+        has_case_execution=Exists(
+            TestExecution.objects.filter(item__plan_id=OuterRef("pk"), round_no=OuterRef("round_no"))
+        ),
+        has_pending_items=Exists(pending_items),
+    )
     plan_rows = projection(
         plan_query,
         Value("plan"),
         "name",
-        "status",
+        Case(
+            When(verification_status="review", then=Value("review")),
+            When(
+                is_verification=True,
+                verification_defect_status__in=["open", "in_progress"],
+                then=Value("waiting_repair"),
+            ),
+            When(verification_mode="manual", has_manual_execution=False, then=Value("waiting_test")),
+            When(verification_mode="cases", has_case_execution=False, then=Value("waiting_test")),
+            When(verification_mode="manual", has_manual_execution=True, then=Value("tested")),
+            When(verification_mode="cases", has_pending_items=False, then=Value("tested")),
+            default=F("status"),
+        ),
         "quality.testplan",
         responsibility=Case(When(status="review", then=Value("验收")), default=Value("执行")),
         action=Case(
+            When(verification_status="review", then=Value("验收结果")),
+            When(is_verification=True, verification_defect_status__in=["open", "in_progress"], then=Value("等待修复")),
+            When(is_verification=True, assignee__isnull=True, then=Value("认领测试")),
+            When(verification_mode="manual", has_manual_execution=True, then=Value("提交验收")),
+            When(verification_mode="cases", has_pending_items=False, then=Value("提交验收")),
+            When(is_verification=True, then=Value("执行验证")),
             When(managed=False, then=Value("记录结果")),
             When(status="review", then=Value("确认结果")),
             When(status__in=["pending", "ready", "returned"], then=Value("开始测试")),

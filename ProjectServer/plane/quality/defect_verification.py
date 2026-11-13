@@ -22,7 +22,7 @@ from .models import (
     TestPlan,
     BusinessNumber,
 )
-from .permissions import capable, strict, writable_member
+from .permissions import capable, strict, writable_member, is_administrator
 from .serializers import ExecutionInput, ExecutionSerializer, StepInput, RESULTS
 from .views import Conflict, QualityView
 
@@ -35,6 +35,7 @@ class ConfigureInput(serializers.Serializer):
     environment = serializers.CharField(max_length=255)
     steps = StepInput(many=True, max_length=100, required=False)
     case_ids = serializers.ListField(child=serializers.UUIDField(), max_length=500, required=False)
+    assignee_id = serializers.UUIDField(required=False, allow_null=True)
 
     def validate(self, data):
         field = "steps" if data["mode"] == "manual" else "case_ids"
@@ -52,7 +53,10 @@ class ResultInput(ExecutionInput):
 class WorkflowInput(serializers.Serializer):
     expected_version = serializers.IntegerField(min_value=1)
     request_id = serializers.UUIDField()
-    action = serializers.ChoiceField(choices=["submit", "accept", "return_test", "return_repair", "reopen"])
+    action = serializers.ChoiceField(
+        choices=["assign", "claim", "submit", "accept", "return_test", "return_repair", "reopen"]
+    )
+    assignee_id = serializers.UUIDField(required=False, allow_null=True)
     comment = serializers.CharField(max_length=4000, allow_blank=True, default="")
 
 
@@ -65,13 +69,71 @@ def latest(defect):
 
 
 def manager(view):
-    return (
+    return is_administrator(view.request.user) or (
         capable(view.project_id, view.request.user.id, "manage_test")
         if strict(view.project_id)
         else ProjectMember.objects.filter(
             project_id=view.project_id, member=view.request.user, is_active=True, role=20
         ).exists()
     )
+
+
+def execution_state(row):
+    if row.status != "testing":
+        return row.status
+    if row.defect.status not in {"resolved", "closed"}:
+        return "waiting_repair"
+    if row.fixed_build != row.defect.fixed_build or row.resolved_at not in {None, row.defect.resolved_at}:
+        return "needs_arrangement"
+    if row.plan_id and (row.plan.archived_at or row.plan.build != row.fixed_build or row.plan.round_no != row.round_no):
+        return "needs_arrangement"
+    if row.mode == "cases" and row.plan.items.exclude(revision__version=F("case__version")).exists():
+        return "needs_arrangement"
+    _, summary = results(row)
+    if summary["pending"] == summary["total"]:
+        return "pending"
+    return "tested" if not summary["pending"] else "running"
+
+
+def sync_plan(row):
+    if not row.plan_id:
+        return
+    state = execution_state(row)
+    status = {
+        "review": "review",
+        "accepted": "completed",
+        "waiting_repair": "pending",
+        "needs_arrangement": "pending",
+        "returned_repair": "cancelled",
+        "reopened": "cancelled",
+        "superseded": "cancelled",
+    }.get(state, "running")
+    if row.plan.status != status:
+        row.plan.status = status
+        row.plan.workflow_version += 1
+        row.plan.save(update_fields=["status", "workflow_version"])
+
+
+def require_executor(row, user):
+    if not is_administrator(user) and row.plan_id and row.plan.assignee_id and row.plan.assignee_id != user.id:
+        raise PermissionDenied("此验证已指派给其他测试员。")
+
+
+def validate_tester(view, assignee):
+    if assignee is None:
+        return
+    member = ProjectMember.objects.filter(
+        project_id=view.project_id,
+        member_id=assignee,
+        is_active=True,
+        role__gte=15,
+        member__is_active=True,
+        member__member_workspace__workspace__slug=view.workspace_slug,
+        member__member_workspace__is_active=True,
+        member__member_workspace__role__gte=15,
+    ).exists()
+    if not is_administrator(assignee) and (not member or not capable(view.project_id, assignee, "execute")):
+        raise ValidationError({"assignee_id": "请选择当前项目的测试员。"})
 
 
 def current_check(row, defect):
@@ -136,11 +198,21 @@ def serialize(row, view):
         and row.fixed_build == row.defect.fixed_build
         and row.resolved_at in {None, row.defect.resolved_at}
         and not any(item.get("stale") for item in items)
+        and (
+            not row.plan_id
+            or (not row.plan.archived_at and row.plan.build == row.fixed_build and row.plan.round_no == row.round_no)
+        )
     )
-    writable = writable_member(view.project_id, view.request.user.id, view.workspace_slug)
+    administrator = is_administrator(view.request.user)
+    writable = administrator or writable_member(view.project_id, view.request.user.id, view.workspace_slug)
     mutable = writable and row.status == "testing" and fresh
     is_manager = writable and manager(view)
-    can_execute = writable and capable(view.project_id, view.request.user.id, "execute")
+    can_execute = writable and (administrator or capable(view.project_id, view.request.user.id, "execute"))
+    can_execute = can_execute and (
+        administrator or not row.plan_id or not row.plan.assignee_id or row.plan.assignee_id == view.request.user.id
+    )
+    state = execution_state(row)
+    blocked = {"waiting_repair": "待修复后测试", "needs_arrangement": "修复版本已更新，请重新安排"}.get(state, "")
     return {
         "id": str(row.id),
         "defect_id": str(row.defect_id),
@@ -148,6 +220,13 @@ def serialize(row, view):
         "version": row.version,
         "mode": row.mode,
         "status": row.status,
+        "execution_state": state,
+        "blocked_reason": blocked,
+        "assignee_id": str(row.plan.assignee_id) if row.plan_id and row.plan.assignee_id else None,
+        "assignee_name": (row.plan.assignee.display_name or row.plan.assignee.username)
+        if row.plan_id and row.plan.assignee_id
+        else "",
+        "can_claim": mutable and can_execute and bool(row.plan_id) and not row.plan.assignee_id,
         "fixed_build": row.fixed_build,
         "environment": row.environment,
         "steps": row.steps,
@@ -188,12 +267,12 @@ def serialize(row, view):
         and row.defect.status in {"open", "in_progress", "resolved"}
         and row.status not in {"review", "accepted"}
         and any(
-            capable(view.project_id, view.request.user.id, cap)
+            administrator or capable(view.project_id, view.request.user.id, cap)
             for cap in ["manage_test_plan", "manage_defect", "solution"]
         ),
         "can_accept": row.status == "review" and is_manager and fresh,
         "can_return_test": row.status == "review" and is_manager,
-        "can_return_repair": row.status in {"testing", "review"} and is_manager,
+        "can_return_repair": row.status in {"testing", "review"} and row.defect.status == "resolved" and is_manager,
         "can_reopen": row.status == "accepted" and row.defect.status == "closed" and is_manager,
     }
 
@@ -233,6 +312,18 @@ def create_round(defect, actor, data, previous=None):
         steps=data.get("steps", []),
         resolved_at=defect.resolved_at,
     )
+    plan = TestPlan.objects.create(
+        project=defect.project,
+        created_by=actor,
+        name=f"{defect.title} · {'人工验证' if row.mode == 'manual' else '用例回归'} · 第{number}轮"[:255],
+        build=row.fixed_build,
+        environment=row.environment,
+        round_no=number,
+        assignee_id=data.get("assignee_id", previous.plan.assignee_id if previous and previous.plan_id else None),
+        status="running" if defect.status == "resolved" else "pending",
+    )
+    row.plan = plan
+    row.save(update_fields=["plan"])
     if row.mode == "cases":
         cases = list(
             TestCase.objects.select_for_update()
@@ -246,15 +337,6 @@ def create_round(defect, actor, data, previous=None):
         )
         if len(cases) != len(data["case_ids"]):
             raise ValidationError({"case_ids": "请选择当前项目未归档的有效用例。"})
-        plan = TestPlan.objects.create(
-            project=defect.project,
-            created_by=actor,
-            name=f"{defect.title} · 验证第{number}轮"[:255],
-            build=row.fixed_build,
-            environment=row.environment,
-            round_no=number,
-            status="running",
-        )
         for case in cases:
             PlanItem.objects.create(
                 project=defect.project,
@@ -295,10 +377,13 @@ class DefectVerification(QualityView):
     @transaction.atomic
     def post(self, request, pk, **kwargs):
         if not any(
-            capable(self.project_id, request.user.id, c) for c in ["manage_test_plan", "manage_defect", "solution"]
+            is_administrator(request.user) or capable(self.project_id, request.user.id, c)
+            for c in ["manage_test_plan", "manage_defect", "solution"]
         ):
             raise PermissionDenied("当前角色不能配置验证。")
         data = self.input(ConfigureInput)
+        if "assignee_id" in data:
+            validate_tester(self, data["assignee_id"])
         defect, old = lock(self, pk)
         existing = Verification.objects.filter(defect=defect, request_id=data["request_id"]).first()
         if existing:
@@ -333,8 +418,34 @@ class DefectVerification(QualityView):
                 and not old.plan.items.exclude(revision__version=F("case__version")).exists()
             )
         if unchanged:
+            if "assignee_id" in data and old.plan_id and old.plan.assignee_id != data["assignee_id"]:
+                previous_assignee_id = old.plan.assignee_id
+                old.plan.assignee_id = data["assignee_id"]
+                old.plan.save(update_fields=["assignee"])
+                old.version += 1
+                old.save(update_fields=["version"])
+                defect.edit_version += 1
+                defect.save(update_fields=["edit_version", "updated_at"])
+                audit(defect, request.user, "调整测试负责人")
+                from .notifications import plan_notice
+
+                plan_notice(old.plan, "assign", request.user)
+                if previous_assignee_id:
+                    from .notifications import notify
+
+                    notify(
+                        defect.project,
+                        request.user,
+                        [previous_assignee_id],
+                        old.plan_id,
+                        f"测试已改派：{defect.title}",
+                        f"quality?tab=plans&plan={old.plan_id}",
+                    )
             return Response(payload(defect, self))
         row = create_round(defect, request.user, data, old)
+        from .notifications import plan_notice
+
+        plan_notice(row.plan, "assign", request.user)
         audit(
             defect,
             request.user,
@@ -347,13 +458,14 @@ class DefectVerification(QualityView):
 class DefectVerificationResult(QualityView):
     @transaction.atomic
     def post(self, request, pk, **kwargs):
-        if not capable(self.project_id, request.user.id, "execute"):
+        if not is_administrator(request.user) and not capable(self.project_id, request.user.id, "execute"):
             raise PermissionDenied("当前角色不能提交实测结果。")
         data = self.input(ResultInput)
         defect, row = lock(self, pk)
         if not row or row.mode != "manual":
             raise Conflict("请使用此缺陷关联用例的执行入口。")
         current_check(row, defect)
+        require_executor(row, request.user)
         existing = ManualResult.objects.filter(verification__defect=defect, request_id=data["request_id"]).first()
         if existing:
             if (
@@ -386,6 +498,7 @@ class DefectVerificationResult(QualityView):
         )
         row.version += 1
         row.save(update_fields=["version"])
+        sync_plan(row)
         audit(defect, request.user, f"记录人工实测第{row.round_no}轮：{data['result']}")
         return Response(payload(defect, self), status=201)
 
@@ -402,9 +515,22 @@ class DefectVerificationWorkflow(QualityView):
     def post(self, request, pk, **kwargs):
         data = self.input(WorkflowInput)
         action = data["action"]
-        if (action == "submit" and not capable(self.project_id, request.user.id, "execute")) or (
-            action != "submit" and not manager(self)
-        ):
+        if action == "assign":
+            if not (
+                is_administrator(request.user)
+                or any(
+                    capable(self.project_id, request.user.id, cap)
+                    for cap in ["manage_test_plan", "manage_defect", "solution"]
+                )
+            ):
+                raise PermissionDenied("当前账号不能指派测试员。")
+            if "assignee_id" not in data:
+                raise ValidationError({"assignee_id": "请选择测试员。"})
+            validate_tester(self, data["assignee_id"])
+        if (
+            action in {"claim", "submit"}
+            and not (is_administrator(request.user) or capable(self.project_id, request.user.id, "execute"))
+        ) or (action not in {"assign", "claim", "submit"} and not manager(self)):
             raise PermissionDenied("仅项目经理或管理员可以最终验收、退回或重开。")
         defect, row = lock(self, pk)
         if not row or defect.archived_at:
@@ -417,6 +543,8 @@ class DefectVerificationWorkflow(QualityView):
         if row.version != data["expected_version"]:
             raise Conflict()
         allowed = {
+            "assign": {"testing"},
+            "claim": {"testing"},
             "submit": {"testing"},
             "accept": {"review"},
             "return_test": {"review"},
@@ -427,15 +555,30 @@ class DefectVerificationWorkflow(QualityView):
             raise Conflict("当前验证状态不允许此操作。")
         if action in {"return_test", "return_repair", "reopen"} and not data["comment"].strip():
             raise ValidationError({"comment": "请说明退回或重开原因。"})
-        if action in {"submit", "accept"}:
+        if action in {"claim", "submit", "accept"}:
             current_check(row, defect)
+            if action in {"claim", "submit"}:
+                require_executor(row, request.user)
             items, summary = results(row)
-            if summary["pending"] or not summary["total"]:
+            if action != "claim" and (summary["pending"] or not summary["total"]):
                 raise ValidationError({"result": "请先记录本轮全部验证的实际结果。"})
             if action == "accept" and summary["passed"] != summary["total"]:
                 raise ValidationError({"result": "本轮全部验证通过后才可关闭缺陷。"})
         before = defect.status
-        if action == "submit":
+        previous_assignee = row.plan.assignee if row.plan_id else None
+        if action == "assign":
+            if not row.plan_id:
+                raise Conflict("请先安排验证。")
+            row.plan.assignee_id = data["assignee_id"]
+            row.plan.save(update_fields=["assignee"])
+            defect.edit_version += 1
+            defect.save(update_fields=["edit_version", "updated_at"])
+        elif action == "claim":
+            if not row.plan_id or row.plan.assignee_id:
+                raise Conflict("测试已由其他人认领，请刷新。")
+            row.plan.assignee = request.user
+            row.plan.save(update_fields=["assignee"])
+        elif action == "submit":
             row.status = "review"
         elif action == "accept":
             row.status = "accepted"
@@ -470,9 +613,31 @@ class DefectVerificationWorkflow(QualityView):
         if action != "return_test":
             row.version += 1
             row.save()
-        if row.plan_id:
-            row.plan.status = {"submit": "review", "accept": "completed"}.get(action, "cancelled")
-            row.plan.save(update_fields=["status"])
+        if action != "return_test":
+            sync_plan(row)
+        from .notifications import plan_notice
+
+        notice_action = {
+            "assign": "assign",
+            "claim": "claim",
+            "submit": "submit",
+            "accept": "approve",
+            "return_test": "return",
+            "return_repair": "cancel",
+            "reopen": "return",
+        }[action]
+        plan_notice(latest(defect).plan, notice_action, request.user)
+        if action == "assign" and previous_assignee and previous_assignee.id != row.plan.assignee_id:
+            from .notifications import notify
+
+            notify(
+                defect.project,
+                request.user,
+                [previous_assignee.id],
+                row.plan_id,
+                f"测试已改派：{defect.title}",
+                f"quality?tab=plans&plan={row.plan_id}",
+            )
         Event.objects.create(
             project=defect.project,
             created_by=request.user,
@@ -492,13 +657,21 @@ class DefectVerificationWorkflow(QualityView):
             },
         )
         label = {
+            "assign": "指派测试员",
+            "claim": "认领测试",
             "submit": "提交验证结果",
             "accept": "验收关闭",
             "return_test": "退回补测",
             "return_repair": "退回修复",
             "reopen": "重开",
         }[action]
-        audit(defect, request.user, f"{label}，验证第{row.round_no}轮：{data['comment']}", before)
+        detail = data["comment"]
+        if action == "assign":
+            old_name = (previous_assignee.display_name or previous_assignee.username) if previous_assignee else "待认领"
+            new_assignee = row.plan.assignee
+            new_name = (new_assignee.display_name or new_assignee.username) if new_assignee else "待认领"
+            detail = f"{old_name} → {new_name}"
+        audit(defect, request.user, f"{label}，验证第{row.round_no}轮：{detail}", before)
         return Response(payload(defect, self))
 
 
@@ -557,7 +730,7 @@ def guard_legacy(defect, data):
         raise Conflict("此缺陷已配置验证流程，请从验证面板验收或填写原因后重开。")
 
 
-def lock_execution(item_id, project_id):
+def lock_execution(item_id, project_id, user=None):
     row = Verification.objects.filter(plan__items__id=item_id, project_id=project_id).first()
     if not row:
         return None
@@ -565,6 +738,8 @@ def lock_execution(item_id, project_id):
     row = Verification.objects.select_for_update().get(pk=row.id)
     row.plan = TestPlan.objects.select_for_update().get(pk=row.plan_id)
     current_check(row, defect)
+    if user is not None:
+        require_executor(row, user)
     if row.status != "testing":
         raise Conflict("本轮已提交验收，不能追加或改写执行结果。")
     return row

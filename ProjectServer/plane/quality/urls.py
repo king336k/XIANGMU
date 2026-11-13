@@ -7,6 +7,7 @@ from . import views, plans
 from .team import DefectTeam
 from .collaboration_admin import ProjectCollaborationSettings, DefectRouting, DefectReminders
 from .diagnostics import DiagnosticList, DiagnosticDetail
+from .owner_statistics import OwnerStatistics
 from .deployment_snapshots import DefectDeploymentSnapshots
 from .resources import (
     FieldAgents,
@@ -52,6 +53,7 @@ from .defect_verification import (
 )
 
 urlpatterns = [
+    path("owner-statistics/", OwnerStatistics.as_view()),
     path("defects/<uuid:pk>/reassign/", views.DefectReassign.as_view()),
     path("verification-results/", DefectVerificationResults.as_view()),
     path("defects/<uuid:pk>/verification/", DefectVerification.as_view()),

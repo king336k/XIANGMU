@@ -138,9 +138,12 @@ test("结果列选择绑定当前步骤并打开原轮次实测表单，历史�
     ],
     onResultChange: (index, result) => changes.push([index, result]),
   });
-  descendants(table)
-    .find((node) => node.type === "select" && node.props["aria-label"] === "步骤 2 结果")
-    .props.onChange({ target: { value: "failed" } });
+  const menu = descendants(table).find((node) => node.props?.ariaLabel === "步骤 2 结果");
+  assert.ok(menu, "使用不会截断文字的浮层菜单");
+  assert.equal(menu.props.placement, "bottom-end");
+  descendants(menu)
+    .find((node) => node.key === "failed")
+    .props.onClick();
   assert.deepEqual(changes, [[1, "failed"]]);
 
   const current = {
@@ -178,7 +181,7 @@ test("结果列选择绑定当前步骤并打开原轮次实测表单，历史�
         ];
       },
     },
-    swr: { default: () => ({ data, mutate: async () => {} }) },
+    swr: { default: () => ({ data, mutate: async () => {} }), useSWRConfig: () => ({ mutate: async () => {} }) },
     "./verification-types": types,
     "./types": { can: () => true },
     "./verification-round-view": { VerificationRoundView: View },

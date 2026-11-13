@@ -5,7 +5,7 @@ import { CasePicker } from "./case-picker";
 import type { CaseOption } from "./case-selection";
 import { qualityApi, errorMessage } from "./api";
 import { Field, fieldClass } from "./shared";
-import type { Step } from "./types";
+import type { Context, Step } from "./types";
 import type { VerificationData, VerificationRound } from "./verification-types";
 
 export function VerificationConfigure({
@@ -17,6 +17,7 @@ export function VerificationConfigure({
   initialMode,
   onSaved,
   onCancel,
+  context,
 }: {
   base: string;
   defectId: string;
@@ -26,6 +27,7 @@ export function VerificationConfigure({
   initialMode?: "manual" | "cases";
   onSaved: (data: VerificationData) => Promise<void>;
   onCancel: () => void;
+  context?: Context;
 }) {
   const [mode, setMode] = useState(initialMode || initial?.mode || "manual");
   const [steps, setSteps] = useState<(Step & { id: string })[]>(
@@ -46,6 +48,7 @@ export function VerificationConfigure({
   );
   const [build, setBuild] = useState(initial?.fixed_build || fixedBuild);
   const [environment, setEnvironment] = useState(initial?.environment || "");
+  const [assignee, setAssignee] = useState(initial?.assignee_id || "");
   const [requestId, setRequestId] = useState<string>(() => uuidv4());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -63,6 +66,7 @@ export function VerificationConfigure({
         mode,
         fixed_build: build,
         environment,
+        assignee_id: assignee || null,
         ...(mode === "manual"
           ? { steps: steps.map(({ action, expected }) => ({ action, expected })) }
           : { case_ids: selected.map((row) => row.id) }),
@@ -122,6 +126,31 @@ export function VerificationConfigure({
           />
         </Field>
       </div>
+      <Field label="指派测试员">
+        <select
+          aria-label="指派测试员"
+          value={assignee}
+          className={fieldClass}
+          onChange={(event) => {
+            setAssignee(event.target.value);
+            change();
+          }}
+        >
+          <option value="">待测试员认领</option>
+          {context?.members
+            .filter(
+              (member) =>
+                !context.business_roles_enabled ||
+                member.is_administrator ||
+                [member.business_role, ...(member.business_roles || [])].includes("REGRESSION_TESTER")
+            )
+            .map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+        </select>
+      </Field>
       {mode === "manual" ? (
         <div className="space-y-3">
           {steps.map((step, index) => (

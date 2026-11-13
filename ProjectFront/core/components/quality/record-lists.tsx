@@ -7,6 +7,7 @@ import { Button } from "@plane/ui";
 import { RecordLifecycleActions } from "./record-lifecycle-actions";
 import { TableHeaderFilter } from "./table-header-filter";
 import { Badge } from "./shared";
+import { verificationStatus, verificationStatusTone } from "./verification-types";
 import { defectDisplayTitle, priorityNames, planStatusNames } from "./types";
 import type { TestCase, Plan, Execution, Defect, Context } from "./types";
 export function CaseList({
@@ -168,6 +169,12 @@ export function PlanList({ rows, onSelect }: { rows: Plan[]; onSelect: (value: P
             <h2 className="text-14 font-medium">
               {p.code && <span className="mr-2 text-11 text-secondary">{p.code}</span>}
               <span className="platform-record-link">{p.name}</span>{" "}
+              {p.verification && (
+                <Badge
+                  value={verificationStatusTone[p.verification.execution_state] || "pending"}
+                  label={verificationStatus[p.verification.execution_state] || "待测试"}
+                />
+              )}
               {p.managed && (
                 <span className="ml-2 inline-flex items-center gap-2 text-11 text-secondary">
                   <Badge value={p.status} label={planStatusNames[p.status]} /> 第 {p.round_no} 轮

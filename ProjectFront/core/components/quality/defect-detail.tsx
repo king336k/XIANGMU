@@ -18,6 +18,7 @@ import { DeploymentSnapshots } from "./deployment-snapshots";
 import { DefectTeam } from "./defect-team";
 import { SolutionPanel } from "./solution-panel";
 import { DefectVerificationScope } from "./defect-verification-scope";
+import { VerificationAssignee } from "./verification-assignee";
 import { DefectComments } from "./defect-comments";
 import { can, severityNames } from "./types";
 import type { Context, Defect } from "./types";
@@ -289,6 +290,7 @@ export function DefectDetail({
             </div>
             <div hidden={activeTab !== "regression"} className="defect-page-verification">
               <DefectVerificationScope
+                onRepair={canEdit ? () => onEdit("workflow") : undefined}
                 projectUrl={projectUrl}
                 base={base}
                 value={value}
@@ -386,6 +388,14 @@ export function DefectDetail({
                   )}
                 </div>
               ))}
+              <div className="px-2">
+                <VerificationAssignee
+                  base={base}
+                  defectId={value.id}
+                  context={context}
+                  onArrange={() => setActiveTab("regression")}
+                />
+              </div>
               {value.defer_until && (
                 <div>
                   <h4 className="px-2 text-11 text-secondary">计划重新处理</h4>

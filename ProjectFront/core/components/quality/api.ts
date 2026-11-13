@@ -12,7 +12,7 @@ class QualityService extends APIService {
     return (await this.get(url)).data;
   }
   async write<T>(url: string, data: object, method: "post" | "patch" | "delete" = "post"): Promise<T> {
-    if (method === "delete") return (await this.delete(url)).data;
+    if (method === "delete") return (await this.delete(url, data)).data;
     return (await this[method](url, data)).data;
   }
   async blob(url: string): Promise<Blob> {

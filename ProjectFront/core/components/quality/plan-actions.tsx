@@ -62,7 +62,7 @@ export function PlanActions({
     setAdjusting(false);
     setMode(value);
   };
-  if (!can(context, "manage_test_plan") || plan.data_regression) return null;
+  if (!can(context, "manage_test_plan") || plan.data_regression || plan.verification) return null;
   return (
     <>
       {!initialMode && (

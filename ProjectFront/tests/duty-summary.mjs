@@ -40,6 +40,11 @@ test("项目职责说明简短且对应实际岗位", () => {
 });
 
 test("没有专职岗位的普通项目成员保留基础反馈能力", () => {
-  assert.deepEqual(api.projectDutySummary([]), { label: "项目成员", description: "反馈问题、补充材料" });
-  assert.deepEqual(api.projectDutySummary(["数采员"]), { label: "项目成员", description: "反馈问题、补充材料" });
+  assert.deepEqual(api.projectDutySummary([]), { label: "未分配岗位", description: "反馈问题、补充材料" });
+  assert.deepEqual(api.projectDutySummary(["数采员"]), { label: "未分配岗位", description: "反馈问题、补充材料" });
+});
+
+test("账号岗位标签不拿访问成员身份替代未分配岗位，多岗位去重", () => {
+  assert.equal(api.projectDutySummary(["项目成员"]).label, "未分配岗位");
+  assert.equal(api.projectDutySummary(["技术员", "测试员", "技术员"]).label, "技术员、测试员");
 });

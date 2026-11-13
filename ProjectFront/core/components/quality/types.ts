@@ -58,6 +58,14 @@ export type PlanItem = {
 };
 export type Summary = Record<Result | "pending" | "total" | "executed" | "pass_rate" | "execution_rate", number>;
 export type Plan = {
+  verification?: {
+    id: string;
+    defect_id: string;
+    defect_title: string;
+    mode: "manual" | "cases";
+    status: string;
+    execution_state: string;
+  } | null;
   code?: string;
   number?: number;
   created_by_id?: string | null;

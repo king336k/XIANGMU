@@ -1,3 +1,4 @@
+import { RoundOwnerSummary } from "./round-owner-summary";
 import { useState } from "react";
 import useSWR from "swr";
 import { qualityApi, errorMessage } from "./api";
@@ -53,8 +54,8 @@ export function DefectVerificationResults({ base, projectUrl }: { base: string; 
                       <span className="text-12 text-secondary">第 {row.current.round_no} 轮</span>
                       <Badge value="neutral" label={`版本 ${row.current.fixed_build}`} />
                       <Badge
-                        value={verificationStatusTone[row.current.status] || "neutral"}
-                        label={`${row.defect_status === "resolved" && ["returned_repair", "reopened", "superseded"].includes(row.current.status) ? "上轮：" : ""}${verificationStatus[row.current.status] || row.current.status}`}
+                        value={verificationStatusTone[row.current.execution_state || row.current.status] || "neutral"}
+                        label={`${row.defect_status === "resolved" && ["returned_repair", "reopened", "superseded"].includes(row.current.status) ? "上轮：" : ""}${verificationStatus[row.current.execution_state || row.current.status] || row.current.status}`}
                       />
                       <Badge
                         value={row.current.summary.passed ? "passed" : "neutral"}
@@ -80,6 +81,9 @@ export function DefectVerificationResults({ base, projectUrl }: { base: string; 
                 </span>
               </summary>
               <div className="mt-3 space-y-3">
+                {row.current && !["returned_repair", "reopened", "superseded"].includes(row.current.status) && (
+                  <RoundOwnerSummary base={base} verificationId={row.current.id} mode={row.current.mode} />
+                )}
                 {row.current && <VerificationRoundView round={row.current} />}
                 <ProjectRouteLink
                   to={`${projectUrl}/defects/?defect=${row.defect_id}`}

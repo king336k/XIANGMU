@@ -170,6 +170,14 @@ class ItemSerializer(serializers.ModelSerializer):
 
 
 def plan_summary(plan):
+    verification = getattr(plan, "defect_verification", None)
+    if verification and verification.mode == "manual":
+        from .defect_verification import results
+        _, counts = results(verification)
+        total = counts["total"]
+        executed = total - counts["pending"]
+        return {**counts, "executed": executed, "execution_rate": round(executed * 100 / total, 1) if total else 0,
+                "pass_rate": round(counts["passed"] * 100 / executed, 1) if executed else 0}
     counts = {key: 0 for key in [*RESULTS, "pending"]}
     for item in plan.items.all():
         execution = next(iter(item.latest_results), None)
@@ -205,6 +213,15 @@ class PlanEventSerializer(serializers.ModelSerializer):
 
 class PlanSerializer(AuthoredRecordSerializer):
     data_regression = serializers.SerializerMethodField()
+    verification = serializers.SerializerMethodField()
+
+    def get_verification(self, obj):
+        row = getattr(obj, "defect_verification", None)
+        if not row:
+            return None
+        from .defect_verification import execution_state
+        return {"id": str(row.id), "defect_id": str(row.defect_id), "defect_title": row.defect.title,
+                "mode": row.mode, "status": row.status, "execution_state": execution_state(row)}
 
     def get_data_regression(self, obj):
         row = getattr(obj, "data_regression", None)
@@ -244,6 +261,7 @@ class PlanSerializer(AuthoredRecordSerializer):
             "managed",
             "archived_at",
             "data_regression",
+            "verification",
             "status",
             "round_no",
             "workflow_version",
@@ -268,6 +286,9 @@ class EventSerializer(serializers.ModelSerializer):
                 data["note"] = note["message"]
         except (ValueError, TypeError):
             pass
+        from .reference_names import readable_references
+
+        data["note"] = readable_references(data["note"], instance.project_id, instance.defect_id, self.context)
         return data
 
     actor = serializers.CharField(source="created_by.display_name", default="")
@@ -292,6 +313,11 @@ class DefectSerializer(AuthoredRecordSerializer):
 
         data["title"], data["description"] = defect_content(data["title"], data["description"])
         data["module"] = {"key": instance.module_id, "name": instance.module.name} if instance.module_id else None
+        from .reference_names import readable_references
+
+        data["assignment_reason"] = readable_references(
+            data["assignment_reason"], instance.project_id, instance.id, self.context
+        )
         data["has_verification"] = instance.verification_rounds.exists()
         data["source_kind"] = (
             "daq"

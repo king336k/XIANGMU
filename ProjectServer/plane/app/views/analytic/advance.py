@@ -15,12 +15,12 @@ from plane.app.permissions import ROLE, allow_permission
 from plane.db.models import (
     WorkspaceMember,
     Project,
-    Issue,
     Cycle,
     Workspace,
     ProjectMember,
 )
 from plane.utils.build_chart import build_analytics_chart
+from .drilldown import analytics_work_queryset
 from plane.utils.date_utils import (
     get_analytics_filters,
     china_date_filter,
@@ -87,7 +87,7 @@ class AdvanceAnalyticsEndpoint(AdvanceAnalyticsBaseView):
     def get_work_items_stats(self) -> Dict[str, Dict[str, int]]:
         from .drilldown import work_queries
 
-        query = Issue.issue_objects.filter(**self.filters["base_filters"])
+        query = analytics_work_queryset(self)
         return {
             key: self.get_filtered_counts(rows)
             for key, rows in work_queries(query).items()
@@ -105,7 +105,7 @@ class AdvanceAnalyticsEndpoint(AdvanceAnalyticsBaseView):
             queries = (
                 overview_queries(self)
                 if tab == "overview"
-                else work_queries(Issue.issue_objects.filter(**self.filters["base_filters"]))
+                else work_queries(analytics_work_queryset(self))
                 if tab == "work-items"
                 else {}
             )
@@ -127,7 +127,7 @@ class AdvanceAnalyticsEndpoint(AdvanceAnalyticsBaseView):
 class AdvanceAnalyticsStatsEndpoint(AdvanceAnalyticsBaseView):
     def get_project_issues_stats(self) -> QuerySet:
         # Get the base queryset with workspace and project filters
-        base_queryset = Issue.issue_objects.filter(**self.filters["base_filters"])
+        base_queryset = analytics_work_queryset(self)
 
         # Apply date range filter if available
         if self.filters["chart_period_range"]:
@@ -147,7 +147,7 @@ class AdvanceAnalyticsStatsEndpoint(AdvanceAnalyticsBaseView):
         )
 
     def get_work_items_stats(self) -> Dict[str, Dict[str, int]]:
-        base_queryset = Issue.issue_objects.filter(**self.filters["base_filters"])
+        base_queryset = analytics_work_queryset(self)
         if self.filters["chart_period_range"]:
             base_queryset = base_queryset.filter(**china_date_filter(*self.filters["chart_period_range"]))
         return (
@@ -179,7 +179,7 @@ class AdvanceAnalyticsStatsEndpoint(AdvanceAnalyticsBaseView):
 class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
     def project_chart(self) -> List[Dict[str, Any]]:
         # Get the base queryset with workspace and project filters
-        base_queryset = Issue.issue_objects.filter(**self.filters["base_filters"])
+        base_queryset = analytics_work_queryset(self)
         date_filter = {}
 
         # Apply date range filter if available
@@ -222,7 +222,7 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
     def work_item_completion_chart(self) -> Dict[str, Any]:
         # Get the base queryset
         queryset = (
-            Issue.issue_objects.filter(**self.filters["base_filters"])
+            analytics_work_queryset(self)
             .select_related("workspace", "state", "parent")
             .prefetch_related("assignees", "labels", "issue_module__module", "issue_cycle__cycle")
         )
@@ -299,7 +299,7 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
 
         elif type == "custom-work-items":
             queryset = (
-                Issue.issue_objects.filter(**self.filters["base_filters"])
+                analytics_work_queryset(self)
                 .select_related("workspace", "state", "parent")
                 .prefetch_related("assignees", "labels", "issue_module__module", "issue_cycle__cycle")
             )

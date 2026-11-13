@@ -318,9 +318,16 @@ def route_completed(job, materials=None):
         ModuleOwner.objects.filter(workspace_id=defect.project.workspace_id, module=module).first() if module else None
     )
     target = owner.user_id if owner and eligible_technician(defect.project, owner.user_id) else None
+    origin = "diagnostic"
     if not target and defect.assignee_id:
-        # The initial triager stays accountable when the evidence cannot improve routing.
-        return
+        # Unconfirmed automatic module claims return to triage; manual choices are guarded above.
+        if defect.assignment_origin == "triage":
+            return
+        triager = triage_user(defect.project)
+        if not triager:
+            return
+        target = triager.id
+        origin = "triage"
     if module and not target:
         reason += " 该模块尚无当前项目的有效技术负责人，待人工指派。"
     reason = reason[:2000]
@@ -331,7 +338,7 @@ def route_completed(job, materials=None):
     defect.assignment_reason = reason
     if target:
         defect.assignee_id = target
-        defect.assignment_origin = "diagnostic"
+        defect.assignment_origin = origin
     defect.edit_version += 1
     defect.save(
         update_fields=["module", "assignment_reason", "assignment_origin", "assignee", "edit_version", "updated_at"]
@@ -346,10 +353,15 @@ def route_completed(job, materials=None):
             note=(
                 f"诊断自动指派：{(previous.display_name or previous.username) if previous else '未指派'} "
                 f"({previous.id if previous else '-'}) → "
-                f"{owner.user.display_name or owner.user.username} ({owner.user_id})；"
-                f"模块：{module.name}；{reason}"
+                f"{defect.assignee.display_name or defect.assignee.username} ({target})；"
+                f"模块：{module.name if module else '待确认'}；{reason}"
             ),
         )
         from .notifications import defect_notice
 
-        defect_notice(defect, job.created_by, "诊断已确认模块负责人", [previous.id] if previous else [])
+        defect_notice(
+            defect,
+            job.created_by,
+            "诊断待分诊，请确认负责人" if origin == "triage" else "诊断已确认模块负责人",
+            [previous.id] if previous else [],
+        )

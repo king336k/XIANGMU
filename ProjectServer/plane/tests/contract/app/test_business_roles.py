@@ -367,7 +367,7 @@ def test_policy_cannot_lock_out_managers_or_be_downgraded(session_client, busine
     assert session_client.post(base + "role-policy/", {"enabled": True}, format="json").status_code == 400
 
 
-def test_reporter_cannot_assign_via_failed_execution_and_old_owner_loses_solution(session_client, business):
+def test_reporter_cannot_assign_via_failed_execution_and_solution_author_retains_ownership(session_client, business):
     from plane.quality.models import TestCase, CaseRevision, TestPlan, PlanItem, TestExecution, Defect, Solution
 
     base, project, people, admin = business
@@ -400,17 +400,17 @@ def test_reporter_cannot_assign_via_failed_execution_and_old_owner_loses_solutio
     session_client.force_authenticate(user=people["TECHNICIAN"])
     assert (
         session_client.patch(
-            base + f"solutions/{solution.id}/", {"title": "不应改写", "expected_version": 1}, format="json"
+            base + f"solutions/{solution.id}/", {"title": "作者仍可维护", "expected_version": 1}, format="json"
         ).status_code
-        == 403
+        == 200
     )
     assert (
         session_client.post(
             base + f"solutions/{solution.id}/submit/",
-            {"expected_version": 1, "reviewer_ids": [str(people["PROJECT_MANAGER"].id)], "required_count": 1},
+            {"expected_version": 2, "reviewer_ids": [str(people["PROJECT_MANAGER"].id)], "required_count": 1},
             format="json",
         ).status_code
-        == 403
+        == 200
     )
 
 

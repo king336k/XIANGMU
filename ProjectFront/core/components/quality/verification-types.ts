@@ -17,6 +17,11 @@ export type VerificationRound = {
   version: number;
   mode: "manual" | "cases";
   status: string;
+  execution_state?: string;
+  blocked_reason?: string;
+  assignee_id?: string | null;
+  assignee_name?: string;
+  can_claim?: boolean;
   fixed_build: string;
   environment: string;
   steps: Step[];
@@ -53,6 +58,11 @@ export type VerificationData = {
   history: VerificationRound[];
 };
 export const verificationStatus: Record<string, string> = {
+  waiting_repair: "待修复",
+  needs_arrangement: "待重新安排",
+  pending: "待测试",
+  running: "测试中",
+  tested: "已测试，待提交",
   testing: "待验证",
   review: "待验收",
   accepted: "已验收",
@@ -63,6 +73,11 @@ export const verificationStatus: Record<string, string> = {
 };
 
 export const verificationStatusTone: Record<string, string> = {
+  waiting_repair: "pending",
+  needs_arrangement: "blocked",
+  pending: "pending",
+  running: "running",
+  tested: "passed",
   testing: "running",
   review: "review",
   accepted: "passed",

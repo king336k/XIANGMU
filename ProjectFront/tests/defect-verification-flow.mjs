@@ -41,7 +41,8 @@ function harness(current = null, canConfigure = true) {
         },
       };
     if (id === "react/jsx-runtime") return require(id);
-    if (id === "swr") return { default: () => ({ data, mutate: async (v) => v }) };
+    if (id === "swr")
+      return { default: () => ({ data, mutate: async (v) => v }), useSWRConfig: () => ({ mutate: async () => {} }) };
     if (id === "./api")
       return {
         qualityApi: { write: async (...args) => writes.push(args), read: async () => ({ id: "d" }) },

@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Badge } from "./shared";
+import { CustomMenu } from "@plane/ui";
+import { ChevronDown, Check } from "lucide-react";
 import { resultNames } from "./types";
 import type { Step } from "./types";
 
@@ -23,7 +25,7 @@ export function VerificationStepsTable({
             <th className="p-3 font-medium">验证操作</th>
             <th className="p-3 font-medium">预期结果</th>
             <th className="p-3 font-medium">实际结果</th>
-            <th className="w-24 p-3 font-medium">结果</th>
+            <th className="w-32 p-3 font-medium">结果</th>
           </tr>
         </thead>
         <tbody className="block divide-y divide-subtle sm:table-row-group">
@@ -46,23 +48,38 @@ export function VerificationStepsTable({
               </td>
               <td className="block py-1 sm:table-cell sm:p-3 sm:align-top">
                 {onResultChange ? (
-                  <select
-                    aria-label={`步骤 ${index + 1} 结果`}
-                    value={results?.[index]?.result || "pending"}
-                    onChange={(event) => onResultChange(index, event.target.value)}
-                    className={`max-w-full rounded border px-2 py-1 text-12 ${results?.[index]?.result === "passed" ? "border-success-subtle bg-success-subtle text-success-primary" : ["failed", "blocked"].includes(results?.[index]?.result || "") ? "border-danger-subtle bg-danger-subtle text-danger-primary" : "border-subtle bg-layer-1 text-secondary"}`}
+                  <CustomMenu
+                    ariaLabel={`步骤 ${index + 1} 结果`}
+                    placement="bottom-end"
+                    portalElement={
+                      typeof document === "undefined"
+                        ? undefined
+                        : Array.from(document.querySelectorAll<HTMLDialogElement>("dialog[open]")).at(-1) ||
+                          document.body
+                    }
+                    menuItemsClassName="!z-[80]"
+                    closeOnSelect
+                    optionsClassName="min-w-32"
+                    customButton={
+                      <span
+                        className={`inline-flex min-w-24 items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-12 whitespace-nowrap ${results?.[index]?.result === "passed" ? "border-success-subtle bg-success-subtle text-success-primary" : ["failed", "blocked"].includes(results?.[index]?.result || "") ? "border-danger-subtle bg-danger-subtle text-danger-primary" : "border-subtle bg-layer-1 text-secondary"}`}
+                      >
+                        <span>{resultNames[results?.[index]?.result || "pending"]}</span>
+                        <ChevronDown className="size-3 shrink-0" />
+                      </span>
+                    }
                   >
-                    <option value="pending" disabled>
-                      未执行
-                    </option>
                     {Object.entries(resultNames)
                       .filter(([key]) => key !== "pending")
                       .map(([key, label]) => (
-                        <option key={key} value={key}>
-                          {label}
-                        </option>
+                        <CustomMenu.MenuItem key={key} onClick={() => onResultChange(index, key)}>
+                          <Badge value={key} label={label} />
+                          {results?.[index]?.result === key && (
+                            <Check className="ml-auto size-3.5" aria-label="当前结果" />
+                          )}
+                        </CustomMenu.MenuItem>
                       ))}
-                  </select>
+                  </CustomMenu>
                 ) : (
                   <Badge value={results?.[index]?.result || "pending"} />
                 )}

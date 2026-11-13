@@ -62,6 +62,7 @@ def notify(project, actor, receivers, entity_id, title, path):
 def plan_notice(plan, action, actor):
     names = {
         "assign": "测试计划已分派给你",
+        "claim": "测试已认领",
         "submit": "测试结果等待你确认",
         "return": "测试结果被退回，请补充复测",
         "approve": "测试结果已由经理确认",
@@ -91,8 +92,10 @@ def serialize_with_current_status(notifications, request):
     from plane.app.serializers import NotificationSerializer
     from plane.db.models import Issue
     from .models import Defect, TestPlan, Requirement
+    from .reference_names import readable_references
 
     rows = list(notifications)
+    reference_context = {}
     data = NotificationSerializer(rows, many=True).data
     projects = set(
         ProjectMember.objects.filter(
@@ -114,7 +117,11 @@ def serialize_with_current_status(notifications, request):
         row.id: row
         for row in Defect.objects.filter(id__in=ids, project_id__in=projects).select_related("module", "assignee")
     }
-    plans = {row.id: row for row in TestPlan.objects.filter(id__in=ids, project_id__in=projects)}
+    plans = {
+        row.id: row
+        for row in TestPlan.objects.filter(id__in=ids, project_id__in=projects)
+        .select_related("defect_verification__defect", "assignee")
+    }
     issues = {row.id: row for row in Issue.objects.filter(id__in=ids, project_id__in=projects).select_related("state")}
     requirements = {row.issue_id: row for row in Requirement.objects.filter(issue_id__in=ids, project_id__in=projects)}
     labels = {
@@ -169,6 +176,20 @@ def serialize_with_current_status(notifications, request):
                     else labels[kind].get(obj.status, "状态已更新"),
                     "available": True,
                 }
+                if kind == "plan" and getattr(obj, "defect_verification", None) and not obj.archived_at:
+                    from .defect_verification import execution_state
+                    state = execution_state(obj.defect_verification)
+                    record.update(
+                        status=state,
+                        label={
+                            "waiting_repair": "待修复", "needs_arrangement": "待重新安排", "pending": "待测试",
+                            "running": "测试中", "tested": "已测试，待提交", "review": "待验收",
+                            "accepted": "已验收", "returned_repair": "退回修复", "returned_test": "退回补测",
+                            "superseded": "已调整", "reopened": "已重新打开",
+                        }.get(state, "状态已更新"),
+                        assignee_name=(obj.assignee.display_name or obj.assignee.username)
+                        if obj.assignee_id else "待认领",
+                    )
         if row.entity_name == "issue" or (row.entity_name == "quality" and kind == "issue"):
             issue = issues.get(row.entity_identifier)
             if issue and issue.project_id == row.project_id:
@@ -200,7 +221,9 @@ def serialize_with_current_status(notifications, request):
                     if defect.assignee_id
                     else "",
                     "origin": defect.assignment_origin,
-                    "reason": defect.assignment_reason,
+                    "reason": readable_references(
+                        defect.assignment_reason, defect.project_id, defect.id, reference_context
+                    ),
                     "url": (row.data or {}).get("quality", {}).get("url", ""),
                 }
         item["data"] = {

@@ -56,6 +56,38 @@ class DetailQuery(serializers.Serializer):
         return value
 
 
+def analytics_work_queryset(view, queryset=None):
+    """One work-item scope for analytics cards, charts, existing details and owner breakdowns."""
+    from plane.db.models import CycleIssue, ModuleIssue
+
+    rows = queryset if queryset is not None else Issue.issue_objects.filter(**view.filters["base_filters"])
+    params = view.request.query_params
+    if params.get("epic") is not None:
+        rows = (
+            rows.filter(type__is_epic=True)
+            if serializers.BooleanField().run_validation(params["epic"])
+            else rows.filter(Q(type__isnull=True) | Q(type__is_epic=False))
+        )
+    for parameter, model, link, relation in [
+        ("cycle_id", Cycle, CycleIssue, "cycle"),
+        ("module_id", Module, ModuleIssue, "module"),
+    ]:
+        if not params.get(parameter):
+            continue
+        from django.shortcuts import get_object_or_404
+
+        obj = get_object_or_404(
+            model,
+            pk=serializers.UUIDField().run_validation(params[parameter]),
+            project_id__in=Project.objects.filter(**view.filters["project_filters"]).values("pk"),
+        )
+        rows = rows.filter(
+            project_id=obj.project_id,
+            pk__in=link.objects.filter(**{relation: obj, "project_id": obj.project_id}).values("issue_id"),
+        )
+    return rows
+
+
 def work_queries(query):
     return {"total_work_items": query, **{key: query.filter(state__group=value) for key, value in STATES.items()}}
 
@@ -80,9 +112,11 @@ def overview_queries(view):
         "total_members": members.filter(role=15),
         "total_guests": members.filter(role=5),
         "total_projects": Project.objects.filter(**view.filters["project_filters"]),
-        "total_work_items": Issue.issue_objects.filter(**base),
+        "total_work_items": analytics_work_queryset(view),
         "total_cycles": Cycle.objects.filter(**base),
-        "total_intake": Issue.objects.filter(**base, issue_intake__status__in=[-2, -1, 0, 1, 2]).distinct(),
+        "total_intake": analytics_work_queryset(
+            view, Issue.objects.filter(**base, issue_intake__status__in=[-2, -1, 0, 1, 2])
+        ).distinct(),
         **resource_queries(view),
     }
 

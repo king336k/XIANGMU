@@ -1,5 +1,6 @@
+import { RoundOwnerSummary } from "./round-owner-summary";
 import { useEffect, useState } from "react";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { v4 as uuidv4 } from "uuid";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
@@ -12,7 +13,9 @@ import { VerificationManualResult } from "./verification-manual-result";
 import { VerificationRoundView } from "./verification-round-view";
 import type { VerificationData, VerificationItem, VerificationRound } from "./verification-types";
 import { verificationStatus, verificationStatusTone } from "./verification-types";
+import { ProjectRouteLink } from "@/components/common/project-route-link";
 const actionLabels: Record<string, string> = {
+  claim: "认领测试",
   submit: "提交验收",
   accept: "验收关闭",
   return_test: "退回补测",
@@ -24,15 +27,21 @@ export function DefectVerificationScope({
   value,
   context,
   onChanged,
+  projectUrl,
+  onRepair,
 }: {
   base: string;
   value: Defect;
   context: Context;
   projectUrl: string;
+  onRepair?: () => void;
   onChanged: (value: Defect) => Promise<void>;
 }) {
   const endpoint = `${base}defects/${value.id}/verification/`;
-  const { data, error, mutate } = useSWR(endpoint, (url: string) => qualityApi.read<VerificationData>(url));
+  const { mutate: revalidate } = useSWRConfig();
+  const { data, error, mutate } = useSWR(endpoint, (url: string) => qualityApi.read<VerificationData>(url), {
+    refreshInterval: 30000,
+  });
   useEffect(() => {
     void mutate();
   }, [value.edit_version, mutate]);
@@ -47,6 +56,7 @@ export function DefectVerificationScope({
   }>();
   const [action, setAction] = useState<{ key: string; requestId: string; round: VerificationRound }>();
   const round = data?.current;
+  const displayState = round?.execution_state || round?.status || "";
   const retiredRound = !!round && ["returned_repair", "reopened", "superseded"].includes(round.status);
   const readyForNewRound =
     !!round &&
@@ -61,6 +71,9 @@ export function DefectVerificationScope({
     setRecording(undefined);
     setExecuting(undefined);
     await onChanged(await qualityApi.read<Defect>(`${base}defects/${value.id}/`));
+    void revalidate(
+      (key) => typeof key === "string" && (key.startsWith(base) || key.startsWith("/api/quality-auth/my-todos/"))
+    );
   };
   const start = (mode: "manual" | "cases") => {
     setInitialMode(mode);
@@ -94,6 +107,7 @@ export function DefectVerificationScope({
           initialMode={initialMode}
           onSaved={update}
           onCancel={() => setEditing(false)}
+          context={context}
         />
       ) : (
         <>
@@ -104,8 +118,8 @@ export function DefectVerificationScope({
               </p>
               {round && (
                 <Badge
-                  value={readyForNewRound ? "pending" : verificationStatusTone[round.status] || "neutral"}
-                  label={readyForNewRound ? "待重新安排" : verificationStatus[round.status] || round.status}
+                  value={readyForNewRound ? "pending" : verificationStatusTone[displayState] || "neutral"}
+                  label={readyForNewRound ? "待重新安排" : verificationStatus[displayState] || displayState}
                 />
               )}
             </div>
@@ -134,8 +148,37 @@ export function DefectVerificationScope({
           )}
           {round && (
             <>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-subtle bg-layer-1 px-3 py-2 text-12">
+                <span>指派测试员：{round.assignee_name || "待认领"}</span>
+                <span className="text-secondary">
+                  下一步：
+                  {round.blocked_reason ||
+                    (round.status === "review"
+                      ? "经理或管理员验收"
+                      : round.status === "accepted"
+                        ? "验收完成"
+                        : round.can_record
+                          ? round.summary.pending
+                            ? "执行验证，填写实测结果"
+                            : "提交验收"
+                          : "由指派测试员继续处理")}
+                </span>
+                {round.blocked_reason &&
+                  (onRepair ? (
+                    <Button type="button" variant="neutral-primary" size="sm" onClick={onRepair}>
+                      登记修复
+                    </Button>
+                  ) : (
+                    <ProjectRouteLink to={`${projectUrl}/defects/?defect=${value.id}`} className="text-accent-primary">
+                      查看缺陷
+                    </ProjectRouteLink>
+                  ))}
+              </div>
               {readyForNewRound && (
                 <p className="text-12 text-secondary">当前修复版本：{value.fixed_build}；以下为上一轮结果。</p>
+              )}
+              {!retiredRound && !readyForNewRound && (
+                <RoundOwnerSummary base={base} verificationId={round.id} mode={round.mode} />
               )}
               <VerificationRoundView
                 round={round}
@@ -169,6 +212,7 @@ export function DefectVerificationScope({
                   )}
                   {(
                     [
+                      ["claim", round.can_claim],
                       ["return_repair", round.can_return_repair],
                       ["return_test", round.can_return_test],
                       ["submit", round.can_submit],
@@ -253,6 +297,10 @@ export function DefectVerificationScope({
             setExecuting(undefined);
             await mutate();
             await onChanged(await qualityApi.read<Defect>(`${base}defects/${value.id}/`));
+            void revalidate(
+              (key) =>
+                typeof key === "string" && (key.startsWith(base) || key.startsWith("/api/quality-auth/my-todos/"))
+            );
           }}
         />
       )}

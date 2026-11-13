@@ -17,7 +17,6 @@ from plane.app.views.base import BaseAPIView
 from plane.app.permissions import ROLE, allow_permission
 from plane.db.models import (
     Project,
-    Issue,
     Cycle,
     Module,
     CycleIssue,
@@ -27,6 +26,7 @@ from django.db import models
 from django.db.models import F, Case, When, Value
 from django.db.models.functions import Cast, Concat
 from plane.utils.build_chart import build_analytics_chart
+from .drilldown import analytics_work_queryset
 from plane.utils.date_utils import (
     get_analytics_filters,
     china_date_filter,
@@ -46,7 +46,7 @@ class ProjectAdvanceAnalyticsBaseView(BaseAPIView):
 
     def selected_work_items(self, project_id, cycle_id=None, module_id=None):
         """A linked object never changes the project scope named by this route."""
-        queryset = Issue.issue_objects.filter(**self.filters["base_filters"], project_id=project_id)
+        queryset = analytics_work_queryset(self).filter(project_id=project_id)
         if cycle_id is not None:
             cycle = get_object_or_404(
                 Cycle,
@@ -124,7 +124,7 @@ class ProjectAdvanceAnalyticsEndpoint(ProjectAdvanceAnalyticsBaseView):
 class ProjectAdvanceAnalyticsStatsEndpoint(ProjectAdvanceAnalyticsBaseView):
     def get_project_issues_stats(self) -> QuerySet:
         # Get the base queryset with workspace and project filters
-        base_queryset = Issue.issue_objects.filter(**self.filters["base_filters"])
+        base_queryset = analytics_work_queryset(self)
 
         # Apply date range filter if available
         if self.filters["chart_period_range"]:

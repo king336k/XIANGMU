@@ -365,3 +365,191 @@ def test_manual_and_case_steps_need_no_duplicate_summary_or_evidence(session_cli
         format="json",
     )
     assert incomplete.status_code == 400
+
+
+@pytest.mark.parametrize("mode", ["manual", "cases"])
+def test_verification_task_owner_queue_and_result_share_one_round(session_client, verification, mode):
+    base, cases, defects, tester, manager = verification
+    defect = defects[0]
+    response = configure(session_client, base, defect, cases if mode == "cases" else None, assignee_id=str(tester.id))
+    assert response.status_code == 201, response.content
+    row = response.data["current"]
+    assert row["plan_id"], "人工验证也需要现有测试任务入口"
+    assert row["assignee_id"] == str(tester.id)
+    session_client.force_authenticate(tester)
+    task = session_client.get(base + f"plans/{row['plan_id']}/")
+    assert task.status_code == 200, task.content
+    assert task.data["verification"]["defect_id"] == str(defect.id)
+    assert task.data["verification"]["mode"] == mode
+    todos = session_client.get(
+        "/api/quality-auth/my-todos/", {"workspace": defect.project.workspace.slug, "kind": "plan"}
+    )
+    assert any(item["id"] == row["plan_id"] for item in todos.data["results"]), todos.data
+    if mode == "manual":
+        recorded = session_client.post(
+            base + f"defects/{defect.id}/verification/result/",
+            {
+                "expected_version": row["version"],
+                "request_id": str(uuid4()),
+                "result": "passed",
+                "step_results": [{"result": "passed", "actual": "实测正常"}],
+            },
+            format="json",
+        )
+        assert recorded.status_code == 201, recorded.content
+    else:
+        for item in row["items"]:
+            assert execute(session_client, base, item).status_code == 201
+    row = session_client.get(base + f"defects/{defect.id}/verification/").data["current"]
+    task = session_client.get(base + f"plans/{row['plan_id']}/").data
+    assert task["summary"]["passed"] == row["summary"]["passed"]
+    row = workflow(session_client, base, defect, row, "submit").data["current"]
+    task = session_client.get(base + f"plans/{row['plan_id']}/").data
+    assert task["status"] == "review"
+    assert task["verification"]["status"] == row["status"] == "review"
+    session_client.force_authenticate(manager)
+    accepted = workflow(session_client, base, defect, row, "accept")
+    assert accepted.status_code == 200, accepted.content
+    assert session_client.get(base + f"plans/{row['plan_id']}/").data["status"] == "completed"
+
+
+def test_prearranged_task_explains_waiting_for_repair(session_client, verification):
+    base, cases, defects, tester, manager = verification
+    defect = defects[0]
+    defect.status, defect.fixed_build, defect.resolved_at = "open", "", None
+    defect.save()
+    row = configure(session_client, base, defect, assignee_id=str(tester.id)).data["current"]
+    assert row["execution_state"] == "waiting_repair"
+    assert row["blocked_reason"] == "待修复后测试"
+    assert not row["can_record"]
+    assert row["plan_id"]
+
+
+def test_different_tester_cannot_overwrite_assigned_verification(session_client, verification):
+    base, cases, defects, tester, manager = verification
+    row = configure(session_client, base, defects[0], assignee_id=str(tester.id)).data["current"]
+    other = User.objects.create(username="other-verifier", email="other-verifier@local.test")
+    WorkspaceMember.objects.create(workspace=defects[0].project.workspace, member=other, role=15)
+    ProjectMember.objects.create(project=defects[0].project, member=other, role=15)
+    session_client.force_authenticate(other)
+    response = session_client.post(
+        base + f"defects/{defects[0].id}/verification/result/",
+        {
+            "expected_version": row["version"],
+            "request_id": str(uuid4()),
+            "result": "passed",
+            "step_results": [{"result": "passed", "actual": "不能代填"}],
+        },
+        format="json",
+    )
+    assert response.status_code == 403, response.content
+
+
+def test_assigned_manual_retest_keeps_owner_and_closure_removes_todo(session_client, verification):
+    base, _, defects, tester, manager = verification
+    defect = defects[0]
+    row = configure(session_client, base, defect, assignee_id=str(tester.id)).data["current"]
+    session_client.force_authenticate(tester)
+
+    def record(current, result):
+        response = session_client.post(
+            base + f"defects/{defect.id}/verification/result/",
+            {
+                "expected_version": current["version"],
+                "request_id": str(uuid4()),
+                "result": result,
+                "step_results": [{"result": result, "actual": "实测"}],
+            },
+            format="json",
+        )
+        assert response.status_code == 201, response.content
+        return response.data["current"]
+
+    row = record(row, "failed")
+    assert row["execution_state"] == "tested"
+    row = workflow(session_client, base, defect, row, "submit").data["current"]
+    session_client.force_authenticate(manager)
+    assert workflow(session_client, base, defect, row, "accept").status_code == 400
+    old_plan = row["plan_id"]
+    row = workflow(session_client, base, defect, row, "return_test", comment="补测失败步骤").data["current"]
+    assert row["plan_id"] != old_plan and row["assignee_id"] == str(tester.id)
+    assert session_client.get(base + f"plans/{old_plan}/").data["status"] == "cancelled"
+    session_client.force_authenticate(tester)
+    row = record(row, "passed")
+    row = workflow(session_client, base, defect, row, "submit").data["current"]
+    session_client.force_authenticate(manager)
+    assert workflow(session_client, base, defect, row, "accept").status_code == 200
+    session_client.force_authenticate(tester)
+    todos = session_client.get(
+        "/api/quality-auth/my-todos/", {"workspace": defect.project.workspace.slug, "kind": "plan"}
+    )
+    assert not any(item["id"] in {old_plan, row["plan_id"]} for item in todos.data["results"])
+
+
+def test_global_administrator_can_execute_other_testers_round(session_client, verification):
+    from plane.license.models import Instance, InstanceAdmin
+
+    base, _, defects, tester, manager = verification
+    row = configure(session_client, base, defects[0], assignee_id=str(tester.id)).data["current"]
+    administrator = User.objects.create(username="verification-admin", email="verification-admin@test.invalid")
+    instance = Instance.objects.create(
+        instance_name="验证",
+        instance_id=str(uuid4()),
+        current_version="test",
+        last_checked_at=timezone.now(),
+        is_setup_done=True,
+    )
+    InstanceAdmin.objects.create(instance=instance, user=administrator)
+    session_client.force_authenticate(administrator)
+    detail = session_client.get(base + f"defects/{defects[0].id}/verification/")
+    assert detail.status_code == 200 and detail.data["current"]["can_record"], detail.content
+    response = session_client.post(
+        base + f"defects/{defects[0].id}/verification/result/",
+        {
+            "expected_version": row["version"],
+            "request_id": str(uuid4()),
+            "result": "passed",
+            "step_results": [{"result": "passed", "actual": "管理员代执行"}],
+        },
+        format="json",
+    )
+    assert response.status_code == 201, response.content
+    assert response.data["current"]["manual_results"][0]["created_by_id"] == str(administrator.id)
+
+
+def test_reassign_verification_moves_todos_and_rejects_stale_or_revoked_actor(session_client, verification):
+    from plane.db.models import Notification
+
+    base, _, defects, tester, manager = verification
+    defect = defects[0]
+    row = configure(session_client, base, defect, assignee_id=str(tester.id)).data["current"]
+    second = User.objects.create(username="second-test", email="second-test@test.invalid")
+    WorkspaceMember.objects.create(workspace=defect.project.workspace, member=second, role=15)
+    ProjectMember.objects.create(project=defect.project, member=second, role=15)
+    assigned = workflow(session_client, base, defect, row, "assign", assignee_id=str(second.id))
+    assert assigned.status_code == 200, assigned.content
+    assert assigned.data["current"]["assignee_id"] == str(second.id)
+    assert Notification.objects.filter(receiver=second).exists()
+    assert workflow(session_client, base, defect, row, "assign", assignee_id=str(tester.id)).status_code == 409
+    session_client.force_authenticate(tester)
+    assert not session_client.get(base + f"defects/{defect.id}/verification/").data["current"]["can_record"]
+    todos_url = "/api/quality-auth/my-todos/"
+    assert (
+        session_client.get(todos_url, {"workspace": defect.project.workspace.slug, "kind": "plan"}).data["count"] == 0
+    )
+    session_client.force_authenticate(second)
+    assert (
+        session_client.get(todos_url, {"workspace": defect.project.workspace.slug, "kind": "plan"}).data["count"] == 1
+    )
+    ProjectMember.objects.filter(project=defect.project, member=second).update(is_active=False)
+    response = session_client.post(
+        base + f"defects/{defect.id}/verification/result/",
+        {
+            "expected_version": assigned.data["current"]["version"],
+            "request_id": str(uuid4()),
+            "result": "passed",
+            "step_results": [{"result": "passed", "actual": "已失去权限"}],
+        },
+        format="json",
+    )
+    assert response.status_code == 403
