@@ -1,7 +1,10 @@
 import { ProjectRouteLink as Link } from "@/components/common/project-route-link";
 import { useCollectionPagination } from "@/components/quality/use-collection-pagination";
 // SPDX-License-Identifier: AGPL-3.0-only
-import { useState } from "react";
+import { useLocation } from "react-router";
+import { ownerRecordHref, ownerStatisticsScope } from "@/components/quality/owner-statistics";
+import { OwnerSummary } from "@/components/quality/owner-summary";
+import { periodOwnerMetrics } from "@/components/quality/owner-metrics";
 import { observer } from "mobx-react";
 import useSWR from "swr";
 import { useParams, useSearchParams } from "react-router";
@@ -31,11 +34,17 @@ const colors: Record<string, string> = {
   running: "text-accent-primary",
   in_progress: "text-accent-primary",
   paused: "text-secondary",
+  completed: "text-success-primary",
+  closed: "text-success-primary",
+  cancelled: "text-secondary",
+  resolved: "text-warning-primary",
+  open: "text-warning-primary",
   returned: "text-danger-primary",
 };
 
 export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
   const { workspaceSlug } = useParams();
+  const location = useLocation();
   const { joinedProjectIds, getProjectById } = useProject();
   const [params, setParams] = useSearchParams();
   // Compute calendar ranges in the same China date used by the report query.
@@ -49,7 +58,25 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
   const { data, error, isLoading } = useSWR(projectId ? `${base}?${query}` : null, (url: string) =>
     qualityApi.read<ProjectReport>(url)
   );
-  const [detail, setDetail] = useState<{ title: string; query: Record<string, string> }>();
+  const detailMetric = params.get("report_detail");
+  const detail = detailMetric
+    ? {
+        title: params.get("report_title") || "报表明细",
+        query: Object.fromEntries(
+          [...params].filter(([key]) => key.startsWith("report_filter_")).map(([key, value]) => [key.slice(14), value])
+        ) as Record<string, string>,
+      }
+    : undefined;
+  const setDetail = (next: { title: string; query: Record<string, string> } | undefined) => {
+    const values = new URLSearchParams(params);
+    for (const key of [...values.keys()].filter((name) => name.startsWith("report_"))) values.delete(key);
+    if (next) {
+      values.set("report_detail", next.query.detail || "workload");
+      values.set("report_title", next.title);
+      for (const [key, value] of Object.entries(next.query)) values.set(`report_filter_${key}`, value);
+    }
+    setParams(values, { replace: true, preventScrollReset: true });
+  };
   const detailPagination = useCollectionPagination(`${base}:${query}:${JSON.stringify(detail)}`);
   const detailQuery = new URLSearchParams({
     ...Object.fromEntries(query),
@@ -70,7 +97,8 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
   const apply = (values: Record<string, string>) => {
     const next = new URLSearchParams(params);
     for (const [key, value] of Object.entries(values)) next.set(key, value);
-    setDetail(undefined);
+    for (const key of [...next.keys()].filter((name) => name.startsWith("report_") || name.startsWith("owner_")))
+      next.delete(key);
     setParams(next);
   };
   const quick = (kind: string) => {
@@ -265,6 +293,12 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
               ))}
             </section>
           </div>
+          <OwnerSummary
+            endpoint={base.replace(/project-report\/$/, "owner-statistics/")}
+            source="period"
+            params={query}
+            metrics={periodOwnerMetrics}
+          />
           <section className="space-y-3">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-16 font-semibold">人员负载</h2>
@@ -291,7 +325,31 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
                       <td className="p-3">{workloadCell(row, "work")}</td>
                       <td className="p-3">{workloadCell(row, "plans")}</td>
                       <td className="p-3">{workloadCell(row, "defects")}</td>
-                      <td className="p-3 tabular-nums">{row.period_executions}</td>
+                      <td className="p-3 tabular-nums">
+                        <button
+                          type="button"
+                          className="text-accent-primary hover:underline"
+                          onClick={() => {
+                            const next = new URLSearchParams(params);
+                            next.set(
+                              "owner_scope",
+                              ownerStatisticsScope(
+                                base.replace(/project-report\/$/, "owner-statistics/"),
+                                "period",
+                                query
+                              )
+                            );
+                            next.set("owner_metric", "test_executions");
+                            next.set("owner_id", row.user_id);
+                            next.set("owner_name", row.name);
+                            next.set("owner_detail_page", "1");
+                            next.delete("owner_status");
+                            setParams(next, { replace: true, preventScrollReset: true });
+                          }}
+                        >
+                          {row.period_executions}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -323,7 +381,7 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
                 {records.results.map((row) => (
                   <Link
                     key={row.id}
-                    to={`${projectUrl}/${row.path}`}
+                    to={ownerRecordHref(`${projectUrl}/${row.path}`, location.pathname + location.search)}
                     className="flex items-center justify-between rounded border border-subtle p-3 text-13 hover:bg-layer-1"
                   >
                     <span>{row.title}</span>

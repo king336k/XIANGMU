@@ -4,6 +4,7 @@
  * See the LICENSE file for details.
  */
 
+import { AnalyticsOwnerSummary } from "../owner-summary";
 import React from "react";
 import AnalyticsWrapper from "../analytics-wrapper";
 import TotalInsights from "../total-insights";
@@ -16,6 +17,7 @@ function WorkItems() {
     <AnalyticsWrapper i18nTitle="work_items">
       <div className="flex flex-col gap-8">
         <TotalInsights analyticsType="work-items" />
+        <AnalyticsOwnerSummary />
         <CreatedVsResolved />
         <CustomizedInsights />
         <WorkItemsInsightTable />

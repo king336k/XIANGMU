@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+export const defectOwnerMetrics = [
+  { key: "total", label: "全部缺陷" },
+  { key: "unclosed", label: "未关闭" },
+  { key: "open", label: "待处理" },
+  { key: "in_progress", label: "处理中" },
+  { key: "resolved", label: "待回归" },
+  { key: "closed", label: "已关闭" },
+];
+export const qualityOwnerMetrics = [
+  { key: "case_count", label: "测试用例" },
+  { key: "plan_count", label: "有效测试计划" },
+  { key: "historical_plan_count", label: "历史测试计划" },
+  { key: "execution_count", label: "执行记录" },
+  { key: "manual_execution_count", label: "人工验证记录" },
+  { key: "open_defects", label: "未关闭缺陷" },
+  { key: "closed_defects", label: "已关闭缺陷" },
+  ...[
+    ["summary", "当前测试"],
+    ["manual", "当前人工验证"],
+  ].flatMap(([prefix, label]) =>
+    [
+      ["total", "全部"],
+      ["executed", "已执行"],
+      ["passed", "通过"],
+      ["failed", "失败"],
+      ["blocked", "阻塞"],
+      ["inconclusive", "无法判定"],
+      ["skipped", "跳过"],
+      ["pending", "待执行"],
+    ].map(([key, name]) => ({ key: `${prefix}_${key}`, label: `${label} · ${name}` }))
+  ),
+  { key: "manual_accepted", label: "人工验证 · 已验收" },
+];
+export const analyticsOwnerMetrics = [
+  { key: "total_defects", label: "缺陷" },
+  { key: "total_test_plans", label: "未归档计划（含历史）" },
+  { key: "total_test_executions", label: "测试执行记录" },
+  { key: "total_manual_executions", label: "人工验证记录" },
+  { key: "total_work_items", label: "全部任务与需求" },
+  { key: "total_projects", label: "项目" },
+  { key: "total_cycles", label: "周期" },
+  { key: "total_modules", label: "模块" },
+  { key: "total_pages", label: "文档" },
+  { key: "total_views", label: "视图" },
+  { key: "total_users", label: "成员" },
+  { key: "total_admins", label: "工作空间管理成员" },
+  { key: "total_members", label: "普通成员" },
+  { key: "total_guests", label: "访客" },
+  { key: "backlog_work_items", label: "待排期" },
+  { key: "un_started_work_items", label: "未开始" },
+  { key: "started_work_items", label: "处理中" },
+  { key: "completed_work_items", label: "已完成" },
+  { key: "cancelled_work_items", label: "已取消" },
+  { key: "total_intake", label: "待评估事项" },
+];
+export const periodOwnerMetrics = [
+  { key: "work_created", label: "新增任务与需求" },
+  { key: "work_completed", label: "完成任务与需求" },
+  { key: "test_executions", label: "测试执行" },
+  { key: "manual_executions", label: "人工验证" },
+  { key: "plans_confirmed", label: "确认测试计划" },
+  { key: "defects_created", label: "新增缺陷" },
+  { key: "defects_closed", label: "关闭缺陷" },
+  { key: "defects_reopened", label: "重新打开" },
+  { key: "current_work", label: "当前工作待办" },
+  { key: "current_plans", label: "当前计划待办" },
+  { key: "current_defects", label: "当前未关闭缺陷" },
+];

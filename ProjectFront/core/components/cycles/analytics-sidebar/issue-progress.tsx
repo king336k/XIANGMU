@@ -138,6 +138,10 @@ export const CycleAnalyticsProgress = observer(function CycleAnalyticsProgress(p
                       <div className="w-full py-4">
                         <CycleProgressStats
                           cycleId={cycleId}
+                          ownerEndpoint={`/api/workspaces/${workspaceSlug}/owner-statistics/`}
+                          ownerParams={new URLSearchParams({ project_ids: projectId, cycle_id: cycleId })}
+                          historical={!isEmpty(getCycleById(cycleId)?.progress_snapshot)}
+                          estimatePoints={estimateType === "points"}
                           distribution={chartDistributionData}
                           groupedIssues={groupedIssues}
                           handleFiltersUpdate={updateFilterValueFromSidebar.bind(

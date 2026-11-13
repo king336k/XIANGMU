@@ -59,7 +59,7 @@ export const ModuleAnalyticsProgress = observer(function ModuleAnalyticsProgress
   const selectedStateGroups = moduleFilter?.findFirstConditionByPropertyAndOperator("state_group", "in");
   const moduleDetails = getModuleById(moduleId);
   const plotType: TModulePlotType = getPlotTypeByModuleId(moduleId);
-  const isCurrentProjectEstimateEnabled = projectId && areEstimateEnabledByProjectId(projectId) ? true : false;
+  const isCurrentProjectEstimateEnabled = Boolean(projectId && areEstimateEnabledByProjectId(projectId));
   const estimateDetails =
     isCurrentProjectEstimateEnabled && currentActiveEstimateId && estimateById(currentActiveEstimateId);
   const isCurrentEstimateTypeIsPoints = estimateDetails && estimateDetails?.type === EEstimateSystem.POINTS;
@@ -126,7 +126,7 @@ export const ModuleAnalyticsProgress = observer(function ModuleAnalyticsProgress
   if (!moduleDetails) return <></>;
   return (
     <div className="space-y-4 border-t border-subtle px-3 py-4">
-      <Disclosure defaultOpen={isModuleDateValid ? true : false}>
+      <Disclosure defaultOpen={isModuleDateValid}>
         {({ open }) => (
           <div className="space-y-6">
             {/* progress bar header */}
@@ -206,6 +206,15 @@ export const ModuleAnalyticsProgress = observer(function ModuleAnalyticsProgress
                 {chartDistributionData && (
                   <div className="w-full border-t border-subtle pt-5">
                     <ModuleProgressStats
+                      ownerEndpoint={`/api/workspaces/${workspaceSlug}/owner-statistics/`}
+                      ownerParams={
+                        new URLSearchParams({
+                          project_ids: projectId,
+                          module_id: moduleId,
+                          ...(isArchived ? { archived: "true" } : {}),
+                        })
+                      }
+                      historical={isArchived}
                       distribution={chartDistributionData}
                       groupedIssues={groupedIssues}
                       handleFiltersUpdate={updateFilterValueFromSidebar.bind(

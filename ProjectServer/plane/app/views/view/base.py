@@ -141,6 +141,16 @@ class WorkspaceViewViewSet(BaseViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+
+def workspace_issue_queryset(request, slug):
+    """The unpaginated authorized source shared by the list and owner statistics."""
+    view = WorkspaceViewIssuesViewSet()
+    view.request = request
+    view.kwargs = {"slug": slug}
+    queryset = view.filter_queryset(view.get_queryset())
+    queryset = queryset.filter(**issue_filters(request.query_params, "GET"))
+    return queryset.filter(view._get_project_permission_filters())
+
 class WorkspaceViewIssuesViewSet(BaseViewSet):
     filter_backends = (ComplexFilterBackend,)
     filterset_class = IssueFilterSet
@@ -221,21 +231,8 @@ class WorkspaceViewIssuesViewSet(BaseViewSet):
     @method_decorator(gzip_page)
     @allow_permission(allowed_roles=[ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST], level="WORKSPACE")
     def list(self, request, slug):
-        issue_queryset = self.get_queryset()
-
-        # Apply filtering from filterset
-        issue_queryset = self.filter_queryset(issue_queryset)
-
+        issue_queryset = workspace_issue_queryset(request, slug)
         order_by_param = request.GET.get("order_by", "-created_at")
-
-        # Apply legacy filters
-        filters = issue_filters(request.query_params, "GET")
-        issue_queryset = issue_queryset.filter(**filters)
-
-        # Get common project permission filters
-        permission_filters = self._get_project_permission_filters()
-        # Apply project permission filters to the issue queryset
-        issue_queryset = issue_queryset.filter(permission_filters)
 
         # Base query for the counts
         total_issue_count_queryset = copy.deepcopy(issue_queryset)

@@ -4,6 +4,7 @@
  * See the LICENSE file for details.
  */
 
+import { AnalyticsOwnerSummary } from "../../owner-summary";
 import React, { useEffect, useState } from "react";
 import { observer } from "mobx-react";
 import { Tab } from "@headlessui/react";
@@ -78,6 +79,7 @@ export const WorkItemsModalMainContent = observer(function WorkItemsModalMainCon
     <Tab.Group as={React.Fragment}>
       <div className="flex flex-col gap-14 overflow-y-auto p-6">
         <TotalInsights analyticsType="work-items" peekView={!fullScreen} />
+        <AnalyticsOwnerSummary />
         <CreatedVsResolved />
         <CustomizedInsights peekView={!fullScreen} isEpic={isEpic} />
         <WorkItemsInsightTable />

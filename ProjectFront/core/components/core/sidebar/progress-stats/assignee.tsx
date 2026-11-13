@@ -28,15 +28,26 @@ type TAssigneeStatComponent = {
   handleAssigneeFiltersUpdate: (assigneeId: string | undefined) => void;
   distribution: TAssigneeData;
   isEditable?: boolean;
+  canView?: boolean;
+  unit?: string;
+  onOpenAssignee?: (id: string, name: string) => void;
 };
 
 export const AssigneeStatComponent = observer(function AssigneeStatComponent(props: TAssigneeStatComponent) {
-  const { distribution, isEditable, selectedAssigneeIds, handleAssigneeFiltersUpdate } = props;
+  const {
+    distribution,
+    isEditable,
+    canView = true,
+    unit,
+    onOpenAssignee,
+    selectedAssigneeIds,
+    handleAssigneeFiltersUpdate,
+  } = props;
   const { t } = useTranslation();
   return (
     <div>
       {distribution && distribution.length > 0 ? (
-        distribution.map((assignee, index) => {
+        distribution.map((assignee) => {
           if (assignee?.id)
             return (
               <SingleProgressStats
@@ -49,18 +60,26 @@ export const AssigneeStatComponent = observer(function AssigneeStatComponent(pro
                     </span>
                   </div>
                 }
+                unit={unit}
                 completed={assignee?.completed ?? 0}
                 total={assignee?.total ?? 0}
-                {...(isEditable && {
-                  onClick: () => handleAssigneeFiltersUpdate(assignee.id),
-                  selected: assignee.id ? selectedAssigneeIds.includes(assignee.id) : false,
-                })}
+                {...(canView &&
+                  (onOpenAssignee || isEditable) && {
+                    onClick: () =>
+                      onOpenAssignee
+                        ? onOpenAssignee?.(assignee.id || "unassigned", assignee.title || "未指派")
+                        : handleAssigneeFiltersUpdate(assignee.id),
+                    selected: assignee.id ? selectedAssigneeIds.includes(assignee.id) : false,
+                  })}
               />
             );
           else
             return (
               <SingleProgressStats
-                key={`unassigned-${index}`}
+                key="unassigned"
+                onClick={
+                  canView && onOpenAssignee ? () => onOpenAssignee?.(assignee.id || "unassigned", "未指派") : undefined
+                }
                 title={
                   <div className="flex items-center gap-2">
                     <div className="h-4 w-4 rounded-full border-2 border-subtle bg-layer-1">
@@ -69,6 +88,7 @@ export const AssigneeStatComponent = observer(function AssigneeStatComponent(pro
                     <span>{t("no_assignee")}</span>
                   </div>
                 }
+                unit={unit}
                 completed={assignee?.completed ?? 0}
                 total={assignee?.total ?? 0}
               />

@@ -33,6 +33,7 @@ function render(instant, params = new URLSearchParams()) {
         react: { useState: (value) => [value, () => {}] },
         "mobx-react": { observer: (value) => value },
         "react-router": {
+          useLocation: () => ({ pathname: "/w/analytics", search: "" }),
           useParams: () => ({ workspaceSlug: "test" }),
           useSearchParams: () => [params, (value) => updates.push(value)],
         },

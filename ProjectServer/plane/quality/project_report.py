@@ -82,102 +82,128 @@ def grouped(qs, field):
     }
 
 
+def period_querysets(project, data):
+    zone = ZoneInfo(data["timezone"])
+    start = datetime.combine(data["start"], time.min, tzinfo=zone)
+    end = datetime.combine(data["end"] + timedelta(days=1), time.min, tzinfo=zone)
+    window = {"created_at__gte": start, "created_at__lt": end}
+    work = Issue.issue_objects.filter(project=project)
+    all_defects = Defect.objects.filter(project=project)
+    defects = all_defects.filter(archived_at__isnull=True)
+    plans = TestPlan.objects.filter(project=project)
+    terminal_requirements = Requirement.objects.filter(
+        project=project, status__in=["completed", "cancelled", "archived"]
+    ).values("issue_id")
+    current_work = work.exclude(state__group__in=["completed", "cancelled"]).exclude(pk__in=terminal_requirements)
+    active_members = ProjectMember.objects.filter(
+        project=project,
+        is_active=True,
+        member__is_active=True,
+        member__is_bot=False,
+        member__member_workspace__workspace=project.workspace,
+        member__member_workspace__is_active=True,
+    ).distinct()
+    pending_items = (
+        PlanItem.objects.filter(project=project)
+        .annotate(
+            has_execution=Exists(
+                TestExecution.objects.filter(item_id=OuterRef("pk")).filter(
+                    Q(item__plan__managed=False, item__plan__defect_verification__isnull=True)
+                    | Q(round_no=OuterRef("plan__round_no"))
+                )
+            )
+        )
+        .filter(has_execution=False)
+    )
+    unfinished_plans = (
+        current_plans(project)
+        .exclude(status__in=["completed", "cancelled", "failed"])
+        .filter(
+            Q(managed=True) & ~Q(status__in=["completed", "cancelled", "failed"])
+            | Q(defect_verification__status__in=["testing", "review"])
+            | Q(managed=False) & (Q(pk__in=pending_items.values("plan_id")) | Q(items__isnull=True))
+        )
+        .distinct()
+    )
+    executions = TestExecution.objects.filter(project=project)
+    # Activities are append-only. Fallback completion timestamps cover direct native writes without activities.
+    completed_states = State.objects.filter(project=project, group="completed").values("id")
+    completed_activity = IssueActivity.objects.filter(
+        project=project,
+        issue_id__in=work.values("id"),
+        field="state",
+        new_identifier__in=completed_states,
+        **window,
+    ).exclude(old_identifier__in=completed_states)
+    completed_work = work.filter(
+        Q(pk__in=completed_activity.values("issue_id")) | Q(completed_at__gte=start, completed_at__lt=end)
+    )
+    closure = DefectEvent.objects.filter(
+        project=project, defect_id__in=all_defects.values("id"), status="closed", **window
+    ).exclude(previous_status="closed")
+    reopened = DefectEvent.objects.filter(
+        project=project, defect_id__in=all_defects.values("id"), previous_status="closed", **window
+    ).exclude(status="closed")
+    confirmed = PlanEvent.objects.filter(
+        project=project, plan_id__in=plans.values("id"), action="approve", status="completed", **window
+    )
+    period_executions = executions.filter(**window)
+    manual_executions = DefectVerificationResult.objects.filter(project=project, **window)
+    confirmed_plans = plans.filter(
+        Q(pk__in=confirmed.values("plan_id"))
+        | Q(
+            defect_verification__workflow_events__action="accept",
+            defect_verification__workflow_events__created_at__gte=start,
+            defect_verification__workflow_events__created_at__lt=end,
+        )
+    ).distinct()
+    detail_queries = {
+        "work_created": work.filter(**window),
+        "work_completed": completed_work,
+        "defects_created": all_defects.filter(**window),
+        "defects_closed": all_defects.filter(pk__in=closure.values("defect_id")),
+        "defects_reopened": all_defects.filter(pk__in=reopened.values("defect_id")),
+        "test_executions": period_executions,
+        "manual_executions": manual_executions,
+        "plans_confirmed": confirmed_plans,
+    }
+    current_queries = {
+        "current_work": current_work,
+        "current_plans": unfinished_plans,
+        "current_defects": defects.exclude(status="closed"),
+    }
+    return {
+        "zone": zone,
+        "active_members": active_members,
+        "current_work": current_work,
+        "unfinished_plans": unfinished_plans,
+        "defects": defects,
+        "period_executions": period_executions,
+        "manual_executions": manual_executions,
+        "closure": closure,
+        "detail_queries": detail_queries,
+        "current_queries": current_queries,
+    }
+
+
 class ProjectPeriodReport(QualityView):
     def get(self, request, **kwargs):
         report_access(self)
         options = PeriodInput(data=request.query_params)
         options.is_valid(raise_exception=True)
         data = options.validated_data
-        zone = ZoneInfo(data["timezone"])
-        start = datetime.combine(data["start"], time.min, tzinfo=zone)
-        end = datetime.combine(data["end"] + timedelta(days=1), time.min, tzinfo=zone)
-        window = {"created_at__gte": start, "created_at__lt": end}
         project = self.project()
-        work = Issue.issue_objects.filter(project=project)
-        all_defects = Defect.objects.filter(project=project)
-        defects = all_defects.filter(archived_at__isnull=True)
-        plans = TestPlan.objects.filter(project=project)
-        terminal_requirements = Requirement.objects.filter(
-            project=project, status__in=["completed", "cancelled", "archived"]
-        ).values("issue_id")
-        current_work = work.exclude(state__group__in=["completed", "cancelled"]).exclude(pk__in=terminal_requirements)
-        active_members = ProjectMember.objects.filter(
-            project=project,
-            is_active=True,
-            member__is_active=True,
-            member__is_bot=False,
-            member__member_workspace__workspace=project.workspace,
-            member__member_workspace__is_active=True,
-        ).distinct()
-        pending_items = (
-            PlanItem.objects.filter(project=project)
-            .annotate(
-                has_execution=Exists(
-                    TestExecution.objects.filter(item_id=OuterRef("pk")).filter(
-                        Q(item__plan__managed=False, item__plan__defect_verification__isnull=True)
-                        | Q(round_no=OuterRef("plan__round_no"))
-                    )
-                )
-            )
-            .filter(has_execution=False)
-        )
-        unfinished_plans = (
-            current_plans(project)
-            .exclude(status__in=["completed", "cancelled", "failed"])
-            .filter(
-                Q(managed=True) & ~Q(status__in=["completed", "cancelled", "failed"])
-                | Q(defect_verification__status__in=["testing", "review"])
-                | Q(managed=False) & (Q(pk__in=pending_items.values("plan_id")) | Q(items__isnull=True))
-            )
-            .distinct()
-        )
-        executions = TestExecution.objects.filter(project=project)
-        # Activities are append-only. Fallback completion timestamps cover direct native writes without activities.
-        completed_states = State.objects.filter(project=project, group="completed").values("id")
-        completed_activity = IssueActivity.objects.filter(
-            project=project,
-            issue_id__in=work.values("id"),
-            field="state",
-            new_identifier__in=completed_states,
-            **window,
-        ).exclude(old_identifier__in=completed_states)
-        completed_work = work.filter(
-            Q(pk__in=completed_activity.values("issue_id")) | Q(completed_at__gte=start, completed_at__lt=end)
-        )
-        closure = DefectEvent.objects.filter(
-            project=project, defect_id__in=all_defects.values("id"), status="closed", **window
-        ).exclude(previous_status="closed")
-        reopened = DefectEvent.objects.filter(
-            project=project, defect_id__in=all_defects.values("id"), previous_status="closed", **window
-        ).exclude(status="closed")
-        confirmed = PlanEvent.objects.filter(
-            project=project, plan_id__in=plans.values("id"), action="approve", status="completed", **window
-        )
-        period_executions = executions.filter(**window)
-        manual_executions = DefectVerificationResult.objects.filter(project=project, **window)
-        confirmed_plans = plans.filter(
-            Q(pk__in=confirmed.values("plan_id"))
-            | Q(
-                defect_verification__workflow_events__action="accept",
-                defect_verification__workflow_events__created_at__gte=start,
-                defect_verification__workflow_events__created_at__lt=end,
-            )
-        ).distinct()
-        detail_queries = {
-            "work_created": work.filter(**window),
-            "work_completed": completed_work,
-            "defects_created": all_defects.filter(**window),
-            "defects_closed": all_defects.filter(pk__in=closure.values("defect_id")),
-            "defects_reopened": all_defects.filter(pk__in=reopened.values("defect_id")),
-            "test_executions": period_executions,
-            "manual_executions": manual_executions,
-            "plans_confirmed": confirmed_plans,
-        }
-        current_queries = {
-            "current_work": current_work,
-            "current_plans": unfinished_plans,
-            "current_defects": defects.exclude(status="closed"),
-        }
+        scope = period_querysets(project, data)
+        zone = scope["zone"]
+        active_members = scope["active_members"]
+        current_work = scope["current_work"]
+        unfinished_plans = scope["unfinished_plans"]
+        defects = scope["defects"]
+        period_executions = scope["period_executions"]
+        manual_executions = scope["manual_executions"]
+        closure = scope["closure"]
+        detail_queries = scope["detail_queries"]
+        current_queries = scope["current_queries"]
         if data.get("detail"):
             kind = data["detail"]
             if kind == "workload":

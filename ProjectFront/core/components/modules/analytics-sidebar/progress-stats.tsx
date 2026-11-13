@@ -4,6 +4,9 @@
  * See the LICENSE file for details.
  */
 
+import { useSearchParams } from "react-router";
+import { ownerStatisticsScope } from "@/components/quality/owner-statistics";
+import { OwnerSummary } from "@/components/quality/owner-summary";
 import { observer } from "mobx-react";
 import { Tab } from "@headlessui/react";
 import { useTranslation } from "@plane/i18n";
@@ -27,6 +30,9 @@ type TModuleProgressStats = {
   groupedIssues: Record<string, number>;
   handleFiltersUpdate: (condition: TWorkItemFilterCondition) => void;
   isEditable?: boolean;
+  ownerEndpoint?: string;
+  ownerParams?: URLSearchParams;
+  historical?: boolean;
   moduleId: string;
   noBackground?: boolean;
   plotType: TModulePlotType;
@@ -42,6 +48,9 @@ export const ModuleProgressStats = observer(function ModuleProgressStats(props: 
     groupedIssues,
     handleFiltersUpdate,
     isEditable = false,
+    ownerEndpoint,
+    ownerParams,
+    historical = false,
     moduleId,
     noBackground = false,
     plotType,
@@ -51,6 +60,7 @@ export const ModuleProgressStats = observer(function ModuleProgressStats(props: 
     totalIssuesCount,
   } = props;
   // plane imports
+  const [ownerRoute, setOwnerRoute] = useSearchParams();
   const { t } = useTranslation();
   // hooks
   const { storedValue: currentTab, setValue: setModuleTab } = useLocalStorage(
@@ -149,6 +159,25 @@ export const ModuleProgressStats = observer(function ModuleProgressStats(props: 
           <Tab.Panel key={"stat-assignees"}>
             <AssigneeStatComponent
               distribution={distributionAssigneeData}
+              canView={!historical}
+              unit={plotType === "points" ? "点" : "条"}
+              onOpenAssignee={
+                ownerEndpoint
+                  ? (id, name) => {
+                      const next = new URLSearchParams(ownerRoute);
+                      next.set(
+                        "owner_scope",
+                        ownerStatisticsScope(ownerEndpoint, "work_items", ownerParams || new URLSearchParams())
+                      );
+                      next.set("owner_id", id);
+                      next.set("owner_name", name);
+                      next.set("owner_metric", "total_work_items");
+                      next.delete("owner_status");
+                      next.set("owner_detail_page", "1");
+                      setOwnerRoute(next, { replace: true, preventScrollReset: true });
+                    }
+                  : undefined
+              }
               handleAssigneeFiltersUpdate={handleAssigneeFiltersUpdate}
               isEditable={isEditable}
               selectedAssigneeIds={selectedAssigneeIds}
@@ -173,6 +202,19 @@ export const ModuleProgressStats = observer(function ModuleProgressStats(props: 
           </Tab.Panel>
         </Tab.Panels>
       </Tab.Group>
+      {plotType === "points" && !historical && (
+        <p className="mt-2 text-11 text-secondary">估算点 · 点击查看对应任务与需求</p>
+      )}
+      {historical && <p className="mt-2 text-11 text-secondary">完成时快照</p>}
+      {ownerEndpoint && ownerParams && !historical && (
+        <OwnerSummary
+          endpoint={ownerEndpoint}
+          source="work_items"
+          params={ownerParams}
+          metrics={[{ key: "total_work_items", label: plotType === "points" ? "对应任务与需求" : "任务与需求" }]}
+          detailsOnly
+        />
+      )}
     </div>
   );
 });

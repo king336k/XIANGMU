@@ -30,6 +30,8 @@ const data = {
   opened_by_day: [],
 };
 const common = {
+  "./owner-summary": { OwnerSummary: () => null },
+  "./owner-metrics": { defectOwnerMetrics: [] },
   react: { ...React, useState: (v) => [v, () => {}] },
   swr: { default: () => ({ data }) },
   "./statistics-display": { Distribution: "Distribution", TrendChart: "TrendChart" },

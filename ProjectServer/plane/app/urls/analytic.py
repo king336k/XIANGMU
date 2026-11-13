@@ -3,6 +3,7 @@
 # See the LICENSE file for details.
 
 from django.urls import path
+from plane.quality.owner_statistics import OwnerStatistics
 
 
 from plane.app.views import (
@@ -22,6 +23,7 @@ from plane.app.views import (
 
 
 urlpatterns = [
+    path("workspaces/<str:slug>/owner-statistics/", OwnerStatistics.as_view()),
     path(
         "workspaces/<str:slug>/analytics/",
         AnalyticsEndpoint.as_view(),

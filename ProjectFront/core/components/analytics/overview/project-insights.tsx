@@ -65,7 +65,11 @@ const ProjectInsights = observer(function ProjectInsights() {
   const openSection = (key: string) => {
     setDetail({ metric: key === "members" ? "total_users" : `total_${key}`, title: labels[key] || key });
   };
-  const filters: Record<string, string> = selectedProjects?.length ? { project_ids: selectedProjects.join(",") } : {};
+  const filters: Record<string, string> = {
+    ...(selectedProjects?.length ? { project_ids: selectedProjects.join(",") } : {}),
+    ...(selectedCycle ? { cycle_id: selectedCycle } : {}),
+    ...(selectedModule ? { module_id: selectedModule } : {}),
+  };
 
   return (
     <>
@@ -149,6 +153,7 @@ const ProjectInsights = observer(function ProjectInsights() {
           title={detail.title}
           metric={detail.metric}
           filters={filters}
+          isPeekView={isPeekView}
           onClose={() => setDetail(undefined)}
         />
       )}

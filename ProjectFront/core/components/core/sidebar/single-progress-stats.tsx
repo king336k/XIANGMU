@@ -12,11 +12,28 @@ type TSingleProgressStatsProps = {
   total: number;
   onClick?: () => void;
   selected?: boolean;
+  unit?: string;
 };
 
-export function SingleProgressStats({ title, completed, total, onClick, selected = false }: TSingleProgressStatsProps) {
+export function SingleProgressStats({
+  title,
+  completed,
+  total,
+  onClick,
+  selected = false,
+  unit = "",
+}: TSingleProgressStatsProps) {
+  const Element = onClick ? "button" : "div";
   return (
-    <div
+    <Element
+      type={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={(event) => {
+        if (onClick && ["Enter", " "].includes(event.key)) {
+          event.preventDefault();
+          onClick();
+        }
+      }}
       className={`flex w-full items-center justify-between gap-4 rounded-xs p-1 text-11 ${
         onClick ? "cursor-pointer hover:bg-surface-2" : ""
       } ${selected ? "bg-layer-1" : ""}`}
@@ -29,8 +46,15 @@ export function SingleProgressStats({ title, completed, total, onClick, selected
             {isNaN(Math.round((completed / total) * 100)) ? "0" : Math.round((completed / total) * 100)}%
           </span>
         </div>
-        <span>共 {total}</span>
+        <span className="text-success-primary">
+          完成 {completed}
+          {unit}
+        </span>
+        <span>
+          共 {total}
+          {unit}
+        </span>
       </div>
-    </div>
+    </Element>
   );
 }

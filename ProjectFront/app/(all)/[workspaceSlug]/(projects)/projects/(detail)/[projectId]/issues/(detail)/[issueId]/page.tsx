@@ -6,6 +6,7 @@
 
 import { useTheme } from "next-themes";
 import { redirect } from "react-router";
+import { statisticsReturnPath } from "@/components/quality/statistics-return-link";
 import { useTranslation } from "@plane/i18n";
 // assets
 import emptyIssueDark from "@/app/assets/empty-state/search/issues-dark.webp?url";
@@ -24,7 +25,7 @@ import type { Route } from "./+types/page";
 const issueService = new IssueService();
 const projectService = new ProjectService();
 
-export async function clientLoader({ params }: Route.ClientLoaderArgs) {
+export async function clientLoader({ params, request }: Route.ClientLoaderArgs) {
   const { workspaceSlug, projectId, issueId } = params;
 
   try {
@@ -37,7 +38,10 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
     const data = await issueService.getIssueMetaFromURL(workspaceSlug, resolvedProjectId, issueId);
 
     if (data) {
-      throw redirect(`/${workspaceSlug}/browse/${data.project_identifier}-${data.sequence_id}`);
+      const source = request ? new URL(request.url) : null;
+      const returnTo = source ? statisticsReturnPath(source.searchParams.get("return_to"), source.pathname) : null;
+      const query = returnTo ? `?${new URLSearchParams({ return_to: returnTo })}` : "";
+      throw redirect(`/${workspaceSlug}/browse/${data.project_identifier}-${data.sequence_id}${query}`);
     }
 
     return { error: true, workspaceSlug };

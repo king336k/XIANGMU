@@ -14,25 +14,22 @@ from .models import Defect
 from .views import QualityView
 
 
+def statistics_queryset(project, params, user):
+    filtered = filter_records(Defect.objects.filter(project=project), params, user)
+    # A subquery preserves exactly the filtered identities without join duplication or pagination.
+    qs = Defect.objects.filter(pk__in=filtered.values("pk"))
+    first = serializers.DateField().run_validation(params["start"]) if params.get("start") else None
+    last = serializers.DateField().run_validation(params["end"]) if params.get("end") else None
+    if first and last and first > last:
+        raise serializers.ValidationError({"end": "结束日期不能早于开始日期。"})
+    qs = qs.filter(**china_date_filter(first, last))
+    qs = with_category(qs)
+    return qs
+
+
 class DefectStatistics(QualityView):
     def get(self, request, **kwargs):
-        filtered = filter_records(Defect.objects.filter(project=self.project()), request.query_params, request.user)
-        # A subquery preserves exactly the filtered identities without join duplication or pagination.
-        qs = Defect.objects.filter(pk__in=filtered.values("pk"))
-        first = (
-            serializers.DateField().run_validation(request.query_params["start"])
-            if request.query_params.get("start")
-            else None
-        )
-        last = (
-            serializers.DateField().run_validation(request.query_params["end"])
-            if request.query_params.get("end")
-            else None
-        )
-        if first and last and first > last:
-            raise serializers.ValidationError({"end": "结束日期不能早于开始日期。"})
-        qs = qs.filter(**china_date_filter(first, last))
-        qs = with_category(qs)
+        qs = statistics_queryset(self.project(), request.query_params, request.user)
         stage_rows, response_pending = stage_statistics(qs)
 
         def groups(field):

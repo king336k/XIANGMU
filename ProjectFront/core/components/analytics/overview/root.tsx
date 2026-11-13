@@ -4,6 +4,7 @@
  * See the LICENSE file for details.
  */
 
+import { AnalyticsOwnerSummary } from "../owner-summary";
 import React from "react";
 import AnalyticsWrapper from "../analytics-wrapper";
 import TotalInsights from "../total-insights";
@@ -15,6 +16,7 @@ function Overview() {
     <AnalyticsWrapper i18nTitle="common.overview">
       <div className="flex flex-col gap-8">
         <TotalInsights analyticsType="overview" />
+        <AnalyticsOwnerSummary />
         <div className="grid grid-cols-1 gap-14 md:grid-cols-5">
           <ProjectInsights />
           <ActiveProjects />
