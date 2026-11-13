@@ -34,6 +34,7 @@ function harness() {
       ];
     },
     useEffect() {},
+    useRef: (initial) => ({ current: initial }),
   };
   const reset = () => {
     cursor = 0;

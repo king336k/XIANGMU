@@ -11,7 +11,9 @@ import { MemberScopeAccess } from "./member-scope-access";
 import { MemberPermissionsModal } from "./member-permissions-modal";
 import { AddManagedMember } from "./add-managed-member";
 import { CreateManagedAccount } from "./create-managed-account";
-type Person = DirectoryPerson & { scopes: ScopeRow[] };
+import { ModuleOwnerFields } from "./module-owner-fields";
+import type { ModuleBinding } from "./module-owner-data";
+type Person = DirectoryPerson & { scopes: ScopeRow[]; module_owners?: ModuleBinding[] };
 export function ManagedAccounts({
   workspace,
   projectId,
@@ -32,6 +34,8 @@ export function ManagedAccounts({
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Person>();
   const [identity, setIdentity] = useState<ManagedMember>();
+  const [moduleTarget, setModuleTarget] = useState<Person>();
+  const [moduleBindings, setModuleBindings] = useState<ModuleBinding[]>([]);
   const { mutate } = useSWRConfig();
   const query = new URLSearchParams({
     page: String(page),
@@ -102,6 +106,7 @@ export function ManagedAccounts({
               <tr className="border-b border-subtle text-secondary">
                 <th className="p-3">姓名与账号</th>
                 <th className="p-3">{mode === "accounts" ? "账号身份" : "已分配范围"}</th>
+                {mode === "accounts" && <th className="p-3">模块责任</th>}
                 <th className="p-3">操作</th>
               </tr>
             </thead>
@@ -139,14 +144,49 @@ export function ManagedAccounts({
                       </div>
                     )}
                   </td>
+                  {mode === "accounts" && (
+                    <td className="p-3">
+                      <div className="flex flex-wrap gap-1.5">
+                        {person.module_owners?.length ? (
+                          person.module_owners.map((binding) => (
+                            <span
+                              key={`${binding.workspace_id}:${binding.module_key}`}
+                              className={`rounded border px-2 py-1 text-11 ${binding.eligible === false ? "border-warning-subtle bg-warning-subtle text-warning-primary" : "border-accent-subtle bg-accent-subtle text-accent-primary"}`}
+                            >
+                              {binding.module_name || binding.module_key}
+                              {binding.eligible === false ? " · 权限待调整" : ""}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-12 text-secondary">未设置</span>
+                        )}
+                      </div>
+                    </td>
+                  )}
                   <td className="p-3">
-                    <button
-                      type="button"
-                      className="text-accent-primary"
-                      onClick={() => (mode === "accounts" ? setIdentity({ ...person, roles: [] }) : setEditing(person))}
-                    >
-                      {mode === "accounts" ? "管理身份" : "编辑范围"}
-                    </button>
+                    <div className="flex flex-wrap gap-x-3 gap-y-2">
+                      <button
+                        type="button"
+                        className="text-accent-primary"
+                        onClick={() =>
+                          mode === "accounts" ? setIdentity({ ...person, roles: [] }) : setEditing(person)
+                        }
+                      >
+                        {mode === "accounts" ? "管理身份" : "编辑范围"}
+                      </button>
+                      {mode === "accounts" && (
+                        <button
+                          type="button"
+                          className="text-accent-primary"
+                          onClick={() => {
+                            setModuleTarget(person);
+                            setModuleBindings(person.module_owners || []);
+                          }}
+                        >
+                          模块负责人
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -157,6 +197,33 @@ export function ManagedAccounts({
       )}
       <Paging page={page} perPage={20} count={data?.count || 0} onChange={setPage} />
       {creating && <CreateManagedAccount onSaved={refresh} onClose={() => setCreating(false)} />}
+      {moduleTarget && (
+        <Modal
+          title={`模块责任 · ${moduleTarget.display_name || moduleTarget.username}`}
+          width="wide"
+          submitLabel="保存模块责任"
+          onClose={() => setModuleTarget(undefined)}
+          onSubmit={async () => {
+            await qualityApi.write(
+              "/api/quality-auth/accounts/",
+              {
+                action: "module_owners",
+                user_id: moduleTarget.id,
+                bindings: moduleBindings.map(({ workspace_id, module_key }) => ({ workspace_id, module_key })),
+              },
+              "patch"
+            );
+            await refresh();
+          }}
+        >
+          <ModuleOwnerFields
+            key={moduleTarget.id}
+            value={moduleBindings}
+            onChange={setModuleBindings}
+            userId={moduleTarget.id}
+          />
+        </Modal>
+      )}
       {adding && mode !== "accounts" && (
         <AddManagedMember
           workspace={workspace}

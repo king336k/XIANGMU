@@ -52,7 +52,7 @@ function attachments(files, download = async () => {}) {
         load("api.ts", {
           axios: { isAxiosError: () => false },
           "@plane/constants": { API_BASE_URL: "" },
-          "@/services/api.service": { APIService: class {} },
+          "@/services/api.service": { APIService: Object },
         }).attachmentDisplayName(name),
     },
     "./attachment-viewer": { AttachmentViewer: () => null },
@@ -146,6 +146,8 @@ function diagnostics(sources, download = async () => {}) {
   const modules = load("diagnostics-panel.tsx", {
     react: {
       ...React,
+      useRef: (initial) => ({ current: initial }),
+      useEffect: () => {},
       useState(initial) {
         const i = cursor++;
         if (!(i in values)) values[i] = initial;
@@ -221,17 +223,19 @@ test("诊断页原附件打包错误就近显示，没有读取材料不展示�
 
 test("generated evidence uses recognizable names for display and download without changing storage", async () => {
   const event = "0bfa1cad-5114-4aa1-b22c-bfb71fdfb7ab";
-  for (const [original, expected] of [
-    [`feedback-${event}.json`, `feedback-version-${event}.json`],
-    [`daq-diagnostics-${event}.zip`, `daq-diagnostic-logs-${event}.zip`],
-  ]) {
-    const calls = [];
-    const tree = attachments([{ ...file, name: original }], async (...args) => {
-      calls.push(args);
-    })();
-    assert.ok(elements(tree, (node) => node.type === "p" && node.props.children === expected).length);
-    elements(tree, (node) => node.props?.["aria-label"] === `下载 ${expected}`)[0].props.onClick();
-    await new Promise((done) => setImmediate(done));
-    assert.deepEqual(calls, [["/quality/files/file-1/download/", expected]]);
-  }
+  await Promise.all(
+    [
+      [`feedback-${event}.json`, `feedback-version-${event}.json`],
+      [`daq-diagnostics-${event}.zip`, `daq-diagnostic-logs-${event}.zip`],
+    ].map(async ([original, expected]) => {
+      const calls = [];
+      const tree = attachments([{ ...file, name: original }], async (...args) => {
+        calls.push(args);
+      })();
+      assert.ok(elements(tree, (node) => node.type === "p" && node.props.children === expected).length);
+      elements(tree, (node) => node.props?.["aria-label"] === `下载 ${expected}`)[0].props.onClick();
+      await new Promise((done) => setImmediate(done));
+      assert.deepEqual(calls, [["/quality/files/file-1/download/", expected]]);
+    })
+  );
 });

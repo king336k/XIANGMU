@@ -29,6 +29,13 @@ export type TNotificationIssueLite = {
 };
 
 export type TNotificationData = {
+  defect_context?: {
+    module: { key: string; name: string } | null;
+    assignee_name: string;
+    origin: string;
+    reason?: string;
+    url: string;
+  };
   current_record?: { kind: string; status: string; label: string; available: boolean };
   quality?: { title: string; url: string };
   issue: TNotificationIssueLite | undefined;

@@ -14,6 +14,19 @@ function loadHelper() {
     ).outputText
   )(helper);
 }
+test("成员设置入口从API项目作用域生成，不依赖长短展示路径", () => {
+  loadHelper();
+  const base = "/api/workspaces/projects/projects/8532dc95-d159-4b39-bbf8-6b70cc09e485/quality/";
+  assert.equal(
+    helper.projectMembersPath(base),
+    "/projects/settings/members/?project=8532dc95-d159-4b39-bbf8-6b70cc09e485"
+  );
+  assert.equal(
+    helper.projectMembersPath("/api/workspaces/team%20x/projects/abc/quality/"),
+    "/team%20x/settings/members/?project=abc"
+  );
+  assert.equal(helper.projectMembersPath("/quality/"), undefined);
+});
 test("旧业务设置链接迁移保留项目和其他查询条件", () => {
   loadHelper();
   assert.equal(

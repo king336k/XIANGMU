@@ -35,6 +35,19 @@ function form(mode, onWrite, original = {}) {
         statusNames: { open: "待处理", in_progress: "处理中" },
         severityNames: { major: "严重" },
       };
+    if (id === "@/components/settings/management-paths") {
+      const paths = {};
+      new Function(
+        "exports",
+        ts.transpileModule(
+          readFileSync(new URL("../core/components/settings/management-paths.ts", import.meta.url), "utf8"),
+          {
+            compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+          }
+        ).outputText
+      )(paths);
+      return paths;
+    }
     if (id === "./defect-attachments") return { uploadDefectFiles: async () => {} };
     if (id === "@plane/utils") return {};
     if (id.startsWith("./")) return new Proxy({}, { get: (_, key) => (key === "fieldClass" ? "field" : () => null) });

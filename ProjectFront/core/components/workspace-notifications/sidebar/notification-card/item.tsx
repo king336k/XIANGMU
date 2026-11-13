@@ -75,6 +75,7 @@ export const NotificationItem = observer(function NotificationItem(props: TNotif
     />
   ) : null;
   const quality = notification?.data?.quality;
+  const defectContext = notification?.data?.defect_context;
   if (
     notification?.entity_name === "quality" &&
     quality &&
@@ -93,6 +94,7 @@ export const NotificationItem = observer(function NotificationItem(props: TNotif
           }}
         >
           <p className="text-13 leading-5 font-medium break-words">{quality.title}</p>
+
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-11 text-tertiary">
             <span className={notification.read_at ? "text-tertiary" : "font-medium text-accent-primary"}>
               {notification.read_at ? "已读" : "未读"}
@@ -100,6 +102,26 @@ export const NotificationItem = observer(function NotificationItem(props: TNotif
             <span>{notification.created_at && calculateTimeAgo(notification.created_at)}</span>
             {currentState}
           </div>
+          {defectContext && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-11">
+              {defectContext.module && (
+                <span className="rounded bg-accent-subtle px-2 py-0.5 text-accent-primary">
+                  {defectContext.module.name}
+                </span>
+              )}
+              <span className="text-secondary">负责人：{defectContext.assignee_name || "待分诊"}</span>
+              {defectContext.origin && (
+                <span className="text-secondary">
+                  {(
+                    { initial: "初分", triage: "待分诊", diagnostic: "诊断指派", manual: "人工改派" } as Record<
+                      string,
+                      string
+                    >
+                  )[defectContext.origin] || "已分派"}
+                </span>
+              )}
+            </div>
+          )}
         </Link>
         <NotificationOption
           workspaceSlug={workspaceSlug}

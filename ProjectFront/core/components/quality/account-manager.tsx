@@ -170,7 +170,7 @@ export function AccountManager({
               required
               name="password"
               type="password"
-              minLength={8}
+              minLength={6}
               maxLength={256}
               autoComplete="new-password"
               className={fieldClass}

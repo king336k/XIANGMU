@@ -345,7 +345,7 @@ test("评论卡片保留引用、正文折叠和私有附件地址", () => {
 test("评论页签位于回归与操作记录之间，内容全宽且不显示缺陷属性", () => {
   let index = 0;
   const { DefectDetail } = load("defect-detail.tsx", {
-    react: { useState: (value) => [index++ === 2 ? "comments" : value, () => {}] },
+    react: { useState: (value) => [index++ === 3 ? "comments" : value, () => {}] },
     "./shared": { Modal: "Modal", Badge: "Badge" },
     "./types": { can: () => false, severityNames: {} },
     "./defect-disposition": { resolutionNames: {} },

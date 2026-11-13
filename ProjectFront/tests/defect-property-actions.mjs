@@ -12,9 +12,20 @@ function load(name, mocks = {}) {
     readFileSync(new URL("../core/components/quality/" + name + ".tsx", import.meta.url), "utf8"),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }
   ).outputText;
+  const settingsPaths = {};
+  new Function(
+    "exports",
+    ts.transpileModule(
+      readFileSync(new URL("../core/components/settings/management-paths.ts", import.meta.url), "utf8"),
+      {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+      }
+    ).outputText
+  )(settingsPaths);
   new Function("require", "exports", code)(
     (id) =>
       mocks[id] ??
+      (id === "@/components/settings/management-paths" ? settingsPaths : undefined) ??
       (id.startsWith("./")
         ? new Proxy({}, { get: (_, key) => (key === "fieldClass" ? "field" : () => null) })
         : id === "lucide-react"
@@ -85,38 +96,40 @@ test("只读账号及关闭记录不显示可保存属性入口", () => {
     assert.ok(!html.includes('aria-label="编辑影响版本"'));
 });
 test("新增字段快捷保存只提交单字段和版本，不改变其他属性", async () => {
-  for (const [field, key, data] of [
-    ["affected_build", "affected_build", "v1"],
-    ["fixed_build", "fixed_build", "v2"],
-    ["case", "case_id", "case1"],
-  ]) {
-    const writes = [];
-    const api = load("defect-quick-edit", {
-      "./api": {
-        qualityApi: {
-          write: async (...args) => {
-            writes.push(args);
-            return row;
+  await Promise.all(
+    [
+      ["affected_build", "affected_build", "v1"],
+      ["fixed_build", "fixed_build", "v2"],
+      ["case", "case_id", "case1"],
+    ].map(async ([field, key, data]) => {
+      const writes = [];
+      const api = load("defect-quick-edit", {
+        "./api": {
+          qualityApi: {
+            write: async (...args) => {
+              writes.push(args);
+              return row;
+            },
           },
         },
-      },
-      "./types": { can: () => true, severityNames: {} },
-      "./shared": { Modal: () => null, Field: () => null, fieldClass: "field" },
-    });
-    const tree = api.DefectQuickEdit({
-      base: "/q/",
-      context,
-      value: row,
-      field,
-      projectUrl: "/p/",
-      onClose() {},
-      onSaved: async () => {},
-    });
-    const form = new FormData();
-    form.set(key, data);
-    await tree.props.onSubmit(form);
-    assert.deepEqual(writes[0], ["/q/defects/d/", { [key]: data, expected_version: 3 }, "patch"]);
-  }
+        "./types": { can: () => true, severityNames: {} },
+        "./shared": { Modal: () => null, Field: () => null, fieldClass: "field" },
+      });
+      const tree = api.DefectQuickEdit({
+        base: "/q/",
+        context,
+        value: row,
+        field,
+        projectUrl: "/p/",
+        onClose() {},
+        onSaved: async () => {},
+      });
+      const form = new FormData();
+      form.set(key, data);
+      await tree.props.onSubmit(form);
+      assert.deepEqual(writes[0], ["/q/defects/d/", { [key]: data, expected_version: 3 }, "patch"]);
+    })
+  );
 });
 
 test("问题内容默认展开可折叠，DAQ模板拆成紧凑属性与正文", () => {

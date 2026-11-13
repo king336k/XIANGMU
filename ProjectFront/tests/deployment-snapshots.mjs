@@ -173,7 +173,12 @@ function currentReportSummaryFileIds(sources, input) {
     result: { sources, input },
   };
   const mocks = {
-    react: { ...React, useState: (value) => [value, () => {}] },
+    react: {
+      ...React,
+      useState: (value) => [value, () => {}],
+      useRef: (value) => ({ current: value }),
+      useEffect: () => {},
+    },
     swr: {
       default: (url) => ({
         data: url.endsWith("/status/")

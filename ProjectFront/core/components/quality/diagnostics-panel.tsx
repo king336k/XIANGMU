@@ -3,7 +3,7 @@ import { Paging } from "./shared";
 import { useCollectionPagination } from "./use-collection-pagination";
 import { renderNumericDateTime } from "@plane/utils";
 // SPDX-License-Identifier: AGPL-3.0-only
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
@@ -21,6 +21,7 @@ type Job = {
   feedback?: "helpful" | "unhelpful" | "";
   feedback_note?: string;
   result: {
+    assignment?: { module: { key: string; name: string } | null; assignee: string; origin: string; reason: string };
     method?: string;
     model_status?: string;
     version?: number;
@@ -80,7 +81,17 @@ function reportLabel(job: Job) {
     return "仅规则结果";
   return names[job.status] || job.status;
 }
-export function DiagnosticsPanel({ base, defectId, context }: { base: string; defectId: string; context: Context }) {
+export function DiagnosticsPanel({
+  base,
+  defectId,
+  context,
+  onCompleted,
+}: {
+  base: string;
+  defectId: string;
+  context: Context;
+  onCompleted?: () => Promise<unknown>;
+}) {
   const pagination = useCollectionPagination(`${base}:diagnostics:${defectId}`);
   const { data, error, mutate, isLoading } = useSWR(
     `${base}defects/${defectId}/diagnostics/?${pagination.query}`,
@@ -91,6 +102,16 @@ export function DiagnosticsPanel({ base, defectId, context }: { base: string; de
   const { data: modelStatus } = useSWR(`${base.replace("/quality/", "/knowledge/")}status/`, (url: string) =>
     qualityApi.read<{ configured: boolean }>(url)
   );
+  const completed = data?.results.find((row) => row.status === "completed");
+  const completedKey = completed ? `${defectId}:${completed.id}` : "";
+  const lastCompleted = useRef("");
+  useEffect(() => {
+    if (!completedKey || !onCompleted || lastCompleted.current === completedKey) return;
+    lastCompleted.current = completedKey;
+    void onCompleted().catch(() => {
+      lastCompleted.current = "";
+    });
+  }, [completedKey, onCompleted]);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
   const [feedbackNotes, setFeedbackNotes] = useState<Record<string, string>>({});
@@ -154,6 +175,30 @@ export function DiagnosticsPanel({ base, defectId, context }: { base: string; de
         <span className="ml-auto text-11 text-secondary">{renderNumericDateTime(job.created_at)}</span>
       </summary>
       <div className="space-y-4 border-t border-subtle p-3">
+        {job.result.assignment && (
+          <div className="rounded-md border border-subtle bg-layer-1 px-3 py-2 text-12">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded bg-accent-subtle px-2 py-1 text-accent-primary">
+                {job.result.assignment.module?.name || "模块待确认"}
+              </span>
+              <span className="font-medium">{job.result.assignment.assignee || "待指派"}</span>
+              <span className="text-secondary">
+                {(
+                  { diagnostic: "诊断指派", manual: "保留人工指派", initial: "初分", triage: "待分诊" } as Record<
+                    string,
+                    string
+                  >
+                )[job.result.assignment.origin] || "待确认"}
+              </span>
+            </div>
+            {job.result.assignment.reason && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-accent-primary">指派依据</summary>
+                <p className="mt-2 break-words text-secondary">{job.result.assignment.reason}</p>
+              </details>
+            )}
+          </div>
+        )}
         {["queued", "running"].includes(job.status) && can(context, "manage_defect") && (
           <Button
             type="button"

@@ -6,6 +6,7 @@ import { Field, fieldClass, Modal } from "./shared";
 import { can, severityNames } from "./types";
 import type { Context, Defect } from "./types";
 import { PagedRecordSelect } from "./paged-record-select";
+import { projectMembersPath } from "@/components/settings/management-paths";
 import type { TestCase } from "./types";
 
 export type DefectQuickField = "severity" | "assignee" | "affected_build" | "fixed_build" | "case";
@@ -15,7 +16,6 @@ export function DefectQuickEdit({
   context,
   value,
   field,
-  projectUrl,
   onClose,
   onSaved,
 }: {
@@ -52,6 +52,7 @@ export function DefectQuickEdit({
     (assigning ? context.is_manager : context.is_manager || value.assignee_id === context.user_id) &&
     !(field === "case" && value.source_execution);
   const pending = assigning && !!value.pending_assignee_id;
+  const membersPath = projectMembersPath(base);
   return (
     <Modal
       width="compact"
@@ -148,11 +149,8 @@ export function DefectQuickEdit({
               <p className="text-12 text-secondary">接收人确认后切换负责人，确认前仍由当前负责人处理。</p>
             </>
           )}
-          {context.business_roles_enabled && (
-            <Link
-              className="text-12 text-accent-primary hover:underline"
-              to={`${projectUrl.split("/projects/")[0]}/settings/members/?project=${projectUrl.split("/projects/")[1]}`}
-            >
+          {context.business_roles_enabled && membersPath && (
+            <Link className="text-12 text-accent-primary hover:underline" to={membersPath}>
               成员与权限
             </Link>
           )}

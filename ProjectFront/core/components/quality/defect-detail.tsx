@@ -7,6 +7,7 @@ import { DefectReportEdit } from "./defect-report-edit";
 import { Pencil } from "lucide-react";
 import { qualityApi } from "./api";
 import { DefectQuickEdit } from "./defect-quick-edit";
+import { DefectReassign } from "./defect-reassign";
 import type { DefectQuickField } from "./defect-quick-edit";
 import { Badge, Modal } from "./shared";
 import { DefectAttachments } from "./defect-attachments";
@@ -78,6 +79,7 @@ export function DefectDetail({
   onChanged: (defect: Defect) => Promise<void>;
 }) {
   const [editingReport, setEditingReport] = useState(false);
+  const [reassigning, setReassigning] = useState(false);
   const [property, setProperty] = useState<DefectQuickField>();
   const [activeTab, setActiveTab] = useState(value.source_kind === "daq" ? "diagnosis" : "overview");
   const canEditReport =
@@ -90,6 +92,10 @@ export function DefectDetail({
     !value.archived_at &&
     (context.is_manager || value.assignee_id === context.user_id);
   const canEditProperties = canEdit && value.status !== "closed";
+  const canReassign =
+    !value.archived_at &&
+    value.status !== "closed" &&
+    (context.is_administrator || context.is_manager || value.assignee_id === context.user_id);
   const updateStatus = () => {
     if (value.has_verification && ["resolved", "closed"].includes(value.status)) setActiveTab("regression");
     else onEdit("workflow");
@@ -184,6 +190,40 @@ export function DefectDetail({
               </div>
             </details>
           )}
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-subtle bg-layer-1 px-3 py-2 text-12">
+            <span
+              className={`rounded px-2 py-1 font-medium ${value.module ? "bg-accent-subtle text-accent-primary" : "bg-warning-subtle text-warning-primary"}`}
+            >
+              {value.module?.name || "模块待确认"}
+            </span>
+            <span className="font-medium">{assignee || value.assignee_name || "待指派"}</span>
+            {value.assignment_origin === "diagnostic" && (
+              <span className="rounded bg-success-subtle px-2 py-1 text-success-primary">诊断指派</span>
+            )}
+            {["initial", "triage"].includes(value.assignment_origin || "") && (
+              <span className="rounded bg-warning-subtle px-2 py-1 text-warning-primary">
+                {value.assignment_origin === "initial" ? "初分" : "待分诊"}
+              </span>
+            )}
+            {value.assignment_origin === "manual" && (
+              <span className="rounded bg-layer-2 px-2 py-1 text-secondary">人工改派</span>
+            )}
+            {value.assignment_reason && (
+              <details className="min-w-0 flex-1 text-secondary">
+                <summary className="cursor-pointer text-accent-primary">指派依据</summary>
+                <p className="mt-2 break-words">{value.assignment_reason}</p>
+              </details>
+            )}
+            {canReassign && (
+              <button
+                type="button"
+                onClick={() => setReassigning(true)}
+                className="ml-auto rounded px-2 py-1 text-accent-primary hover:bg-accent-subtle"
+              >
+                {value.assignee_id ? "改派" : "指派"}
+              </button>
+            )}
+          </div>
           {value.duplicate_of_id && (
             <Link className="text-12 text-accent-primary" to={`${projectUrl}/defects?defect=${value.duplicate_of_id}`}>
               查看归并的主缺陷 →
@@ -231,7 +271,12 @@ export function DefectDetail({
               )}
             </div>
             <div hidden={activeTab !== "diagnosis"} className="platform-detail-panel">
-              <DiagnosticsPanel base={base} defectId={value.id} context={context} />
+              <DiagnosticsPanel
+                base={base}
+                defectId={value.id}
+                context={context}
+                onCompleted={async () => onChanged(await qualityApi.read<Defect>(`${base}defects/${value.id}/`))}
+              />
             </div>
             <div hidden={activeTab !== "solution"} className="platform-detail-panel space-y-5">
               <details className="rounded-md border border-subtle px-4 py-3">
@@ -285,7 +330,7 @@ export function DefectDetail({
                   text: assignee || value.assignee_name || "未分派",
                   field: "assignee",
                   action: value.assignee_id ? "转派技术负责人" : "指派技术负责人",
-                  editable: context.is_manager,
+                  editable: true,
                 },
                 {
                   label: "影响版本",
@@ -311,7 +356,7 @@ export function DefectDetail({
               ].map((item) => (
                 <div key={item.field}>
                   <h4 className="px-2 text-11 text-secondary">{item.label}</h4>
-                  {canEditProperties && item.editable ? (
+                  {(item.field === "assignee" ? canReassign : canEditProperties && item.editable) ? (
                     item.field === "disposition" ? (
                       <DefectDispositionPanel
                         base={base}
@@ -324,7 +369,9 @@ export function DefectDetail({
                       <button
                         type="button"
                         aria-label={item.action}
-                        onClick={() => setProperty(item.field as DefectQuickField)}
+                        onClick={() =>
+                          item.field === "assignee" ? setReassigning(true) : setProperty(item.field as DefectQuickField)
+                        }
                         className="group focus-visible:ring-accent-primary mt-1 inline-flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-13 hover:bg-layer-1 focus-visible:ring-2"
                       >
                         <span className="min-w-0 break-words">{item.text}</span>
@@ -379,6 +426,18 @@ export function DefectDetail({
           onClose={() => setProperty(undefined)}
           onSaved={async () => {
             await onChanged(await qualityApi.read<Defect>(`${base}defects/${value.id}/`));
+          }}
+        />
+      )}
+      {reassigning && (
+        <DefectReassign
+          base={base}
+          value={value}
+          context={context}
+          onClose={() => setReassigning(false)}
+          onSaved={async () => {
+            await onChanged(await qualityApi.read<Defect>(`${base}defects/${value.id}/`));
+            setReassigning(false);
           }}
         />
       )}

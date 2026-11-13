@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Presentation paths only. API callers continue to use the resolved immutable project ID.
+export function projectMembersPath(apiBase: string) {
+  const scope = apiBase.match(/^\/api\/workspaces\/([^/]+)\/projects\/([^/]+)\/quality\//);
+  return scope ? `/${scope[1]}/settings/members/?${new URLSearchParams({ project: scope[2] })}` : undefined;
+}
 export function movedSettingsPath(
   workspace: string,
   projectCode: string,

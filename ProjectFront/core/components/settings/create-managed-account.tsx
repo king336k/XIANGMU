@@ -5,11 +5,16 @@ import { qualityApi } from "@/components/quality/api";
 import { ScopeChoices } from "./member-scope-access";
 import { updateScopeChanges } from "./member-scope-data";
 import type { ScopeChanges } from "./member-scope-data";
+import { ModuleOwnerFields } from "./module-owner-fields";
+import { technicianWorkspaces, validModuleBindings } from "./module-owner-data";
+import type { ModuleBinding } from "./module-owner-data";
 export function CreateManagedAccount({ onSaved, onClose }: { onSaved: () => Promise<unknown>; onClose: () => void }) {
   const created = useRef(false);
   const [isCreated, setIsCreated] = useState(false);
   const [mode, setMode] = useState<"none" | "workspace" | "project">("none");
   const [pending, setPending] = useState<ScopeChanges>({});
+  const [moduleOwners, setModuleOwners] = useState<ModuleBinding[]>([]);
+  const eligibleWorkspaces = technicianWorkspaces(mode, pending);
   return (
     <Modal
       title="创建账号"
@@ -27,6 +32,7 @@ export function CreateManagedAccount({ onSaved, onClose }: { onSaved: () => Prom
             password: form.get("password"),
             grant_mode: mode,
             grants,
+            module_owners: validModuleBindings(moduleOwners, eligibleWorkspaces),
           });
           created.current = true;
           setIsCreated(true);
@@ -58,7 +64,7 @@ export function CreateManagedAccount({ onSaved, onClose }: { onSaved: () => Prom
                 required
                 name="password"
                 type="password"
-                minLength={8}
+                minLength={6}
                 maxLength={256}
                 autoComplete="new-password"
                 className={fieldClass}
@@ -103,6 +109,11 @@ export function CreateManagedAccount({ onSaved, onClose }: { onSaved: () => Prom
               }
             />
           )}
+          <ModuleOwnerFields
+            value={validModuleBindings(moduleOwners, eligibleWorkspaces)}
+            onChange={setModuleOwners}
+            eligibleWorkspaces={eligibleWorkspaces}
+          />
         </>
       )}
     </Modal>

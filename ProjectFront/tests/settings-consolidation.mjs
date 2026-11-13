@@ -84,9 +84,21 @@ test("所有新生成的成员入口指向统一页，不再生成project成员�
     assert.doesNotMatch(read(file), /t\("settings"\)|title: "设置"/, file);
   }
   for (const file of ["core/components/quality/defect-form.tsx", "core/components/quality/defect-quick-edit.tsx"]) {
-    assert.match(read(file), /\/settings\/members\/\?project=/);
+    assert.match(read(file), /projectMembersPath\(base\)/);
     assert.doesNotMatch(read(file), /quality\/\?tab=roles|\/members\/`/);
   }
+  const paths = {};
+  new Function(
+    "exports",
+    ts.transpileModule(read("core/components/settings/management-paths.ts"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText
+  )(paths);
+  assert.equal(
+    paths.projectMembersPath("/api/workspaces/space/projects/immutable-id/quality/"),
+    "/space/settings/members/?project=immutable-id"
+  );
+  assert.equal(paths.projectMembersPath("/quality/"), undefined);
   const nav = read("core/components/settings/workspace/sidebar/item-categories.tsx");
   assert.doesNotMatch(nav, /key: "accounts"|label="项目管理"/);
 });

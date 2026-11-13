@@ -266,6 +266,14 @@ export function DefectList({ rows, onEdit }: { rows: Defect[]; onEdit: (value: D
               <Badge value={row.status} />
               <Badge value={row.severity} />
               <span>负责人：{row.assignee_name || "未指派"}</span>
+              {row.module && (
+                <span className="rounded bg-accent-subtle px-2 py-1 text-11 text-accent-primary">
+                  {row.module.name}
+                </span>
+              )}
+              {row.assignment_origin === "diagnostic" && (
+                <span className="rounded bg-success-subtle px-2 py-1 text-11 text-success-primary">诊断指派</span>
+              )}
             </div>
             <dl className="grid grid-cols-2 gap-2 text-12 text-secondary">
               <div className="min-w-0">
@@ -335,7 +343,17 @@ export function DefectList({ rows, onEdit }: { rows: Defect[]; onEdit: (value: D
                 <td className="p-3">
                   <Badge value={row.status} />
                 </td>
-                <td className="p-3">{row.assignee_name || "未指派"}</td>
+                <td className="p-3">
+                  <span>{row.assignee_name || "未指派"}</span>
+                  {row.module && (
+                    <span className="mt-1 block w-fit rounded bg-accent-subtle px-2 py-0.5 text-11 text-accent-primary">
+                      {row.module.name}
+                    </span>
+                  )}
+                  {row.assignment_origin === "diagnostic" && (
+                    <span className="mt-1 block text-11 text-success-primary">诊断指派</span>
+                  )}
+                </td>
                 <td className="p-3">{row.affected_build || "未填写"}</td>
                 <td className="p-3">{row.fixed_build || (row.resolution_kind !== "fixed" ? "不适用" : "待修复")}</td>
               </tr>

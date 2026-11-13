@@ -12,6 +12,17 @@ function quick(field, value = {}, context = {}) {
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }
   ).outputText;
   new Function("require", "exports", code)((id) => {
+    if (id === "@/components/settings/management-paths") {
+      const helper = {};
+      new Function(
+        "exports",
+        ts.transpileModule(
+          readFileSync(new URL("../core/components/settings/management-paths.ts", import.meta.url), "utf8"),
+          { compilerOptions: { module: ts.ModuleKind.CommonJS } }
+        ).outputText
+      )(helper);
+      return helper;
+    }
     if (id === "./paged-record-select") return { PagedRecordSelect: () => null };
     if (id === "./api") return { qualityApi: { write: async (...args) => writes.push(args) } };
     if (id === "./types") return { can: () => true, severityNames: { major: "严重", minor: "一般" } };

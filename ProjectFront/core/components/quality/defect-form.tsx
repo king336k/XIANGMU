@@ -13,6 +13,7 @@ import { uploadDefectFiles } from "./defect-attachments";
 import type { Context, Defect, Execution, TestCase } from "./types";
 import { DefectQuickEdit } from "./defect-quick-edit";
 import { DefectDispositionPanel } from "./defect-disposition";
+import { projectMembersPath } from "@/components/settings/management-paths";
 
 export function DefectForm({
   base,
@@ -332,11 +333,8 @@ export function DefectForm({
                   ))}
               </select>
             </Field>
-            {context.is_manager && context.business_roles_enabled && (
-              <Link
-                className="text-12 text-accent-primary hover:underline"
-                to={`${projectUrl.split("/projects/")[0]}/settings/members/?project=${projectUrl.split("/projects/")[1]}`}
-              >
+            {context.is_manager && context.business_roles_enabled && projectMembersPath(base) && (
+              <Link className="text-12 text-accent-primary hover:underline" to={projectMembersPath(base)!}>
                 成员与权限 · 设置技术员
               </Link>
             )}

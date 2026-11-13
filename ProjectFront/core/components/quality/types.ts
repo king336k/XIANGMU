@@ -96,6 +96,9 @@ export type Plan = {
   assignee_name: string;
 };
 export type Defect = {
+  module?: { key: string; name: string } | null;
+  assignment_origin?: "manual" | "diagnostic" | "initial" | "triage" | "";
+  assignment_reason?: string;
   reporter?: { id: number; username: string };
   has_verification?: boolean;
   responsible_department?: string;

@@ -13,7 +13,12 @@ const load = (file, mocks) => {
     ts.transpileModule(readFileSync(new URL(`../core/components/settings/${file}`, import.meta.url), "utf8"), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
     }).outputText
-  )((id) => mocks[id] || require(id), exports);
+  )((id) => {
+    if (mocks[id]) return mocks[id];
+    if (id === "./module-owner-fields") return { ModuleOwnerFields: "ModuleOwnerFields" };
+    if (id === "./module-owner-data") return load("module-owner-data.ts", {});
+    return require(id);
+  }, exports);
   return exports;
 };
 const walk = (node) =>

@@ -126,7 +126,7 @@ export function CollaborationPanel({
       ...(value.events || []).map((event) => {
         const note = event.note?.trim() || "";
         const specific = note.match(
-          /^(验证安排|验证方式|人工验证关闭|人工验证安排|记录人工实测|接收交接|拒绝交接|取消待确认交接|补充上报信息|提交验证结果|提交验证|经理验收通过|验收关闭|退回复测|退回补测|退回修复|重新打开|重开)([：，；（]|$)/
+          /^(初步分派|诊断自动指派|人工改派|验证安排|验证方式|人工验证关闭|人工验证安排|记录人工实测|接收交接|拒绝交接|取消待确认交接|补充上报信息|提交验证结果|提交验证|经理验收通过|验收关闭|退回复测|退回补测|退回修复|重新打开|重开)([：，；（]|$)/
         )?.[1];
         const daqCreated = !event.previous_status && value.source_kind === "daq";
         const changed = event.previous_status !== event.status;

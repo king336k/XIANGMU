@@ -29,7 +29,7 @@ function detail(tab, writable = false, extra = {}) {
   let index = 0;
   const closed = [];
   const api = load("defect-detail", {
-    react: { ...React, useState: (value) => [index++ === 2 ? tab : value, () => {}] },
+    react: { ...React, useState: (value) => [index++ === 3 ? tab : value, () => {}] },
     "./shared": { Modal: "Modal", Badge: "Badge" },
     "@plane/utils": { renderNumericDateTime: () => "2026/11/12 23:35" },
     "./types": { can: () => writable, severityNames: { major: "严重" } },
