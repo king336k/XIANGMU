@@ -138,17 +138,8 @@ def create_allowed(view, defect):
 
 
 def author_allowed(view, solution):
-    if not writable(view, "solution"):
-        return False
-    if strict(view.project_id):
-        return solution.defect.assignee_id == view.request.user.id or has_role(
-            view.project_id, view.request.user.id, "PLATFORM_ADMIN"
-        )
-    return (
-        solution.created_by_id == view.request.user.id
-        or ProjectMember.objects.filter(
-            project_id=view.project_id, member=view.request.user, is_active=True, role=20
-        ).exists()
+    return (solution.created_by_id == view.request.user.id or is_administrator(view.request.user)) and writable(
+        view, "solution"
     )
 
 
@@ -221,7 +212,7 @@ class SolutionDetail(QualityView):
 
     def author(self, solution):
         if not author_allowed(self, solution):
-            raise PermissionDenied("只有当前技术负责人或获授权的方案作者、管理员可以编辑与提交。")
+            raise PermissionDenied("仅方案创建人可编辑和提交审核。")
 
     @transaction.atomic
     def patch(self, request, pk, **kwargs):

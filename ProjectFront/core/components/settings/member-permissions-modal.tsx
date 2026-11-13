@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Button } from "@plane/ui";
 import { Modal, Field, fieldClass } from "@/components/quality/shared";
 import { qualityApi, errorMessage } from "@/components/quality/api";
-import { ACCESS_LABELS, DUTY_LABELS } from "./member-management-data";
+import { accountDutyLabel, ACCESS_LABELS, DUTY_LABELS } from "./member-management-data";
 import type { ManagedMember } from "./member-management-data";
 import { MemberScopeAccess } from "./member-scope-access";
 export function MemberPermissionsModal({
@@ -193,7 +193,7 @@ export function MemberPermissionsModal({
       )}
       {tab === "administrator" && canAdmin && (
         <section className="space-y-3">
-          <p className="text-13">当前身份：{admin ? "管理员" : "普通账号"}。</p>
+          <p className="text-13">当前身份：{accountDutyLabel(person)}。</p>
           <label className="flex gap-2 text-13">
             <input key={String(admin)} required type="checkbox" name="confirm" />
             确认{admin ? "取消" : "授予"}管理员身份

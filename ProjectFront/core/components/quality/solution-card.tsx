@@ -1,3 +1,4 @@
+import { setToast, TOAST_TYPE } from "@plane/propel/toast";
 import { Button } from "@plane/ui";
 import { renderNumericDateTime } from "@plane/utils";
 import { Badge } from "./shared";
@@ -21,6 +22,18 @@ export function SolutionCard({
   onSnapshot: (revision: SolutionRevision) => void;
 }) {
   const current = currentSolutionRevision(solution);
+  const administrator =
+    context.is_administrator === true ||
+    (context.is_administrator === undefined && (context.business_roles || []).includes("PLATFORM_ADMIN"));
+  const author = administrator || Boolean(context.user_id && solution.created_by_id === context.user_id);
+  const edit = author && solution.can_edit,
+    submit = author && solution.can_submit;
+  const blocked = () => setToast({ type: TOAST_TYPE.INFO, title: "无法操作", message: "仅方案创建人可操作" });
+  const authorAction = (allowed: boolean, action: () => void) => () => {
+    if (!author) blocked();
+    else if (allowed) action();
+  };
+
   const version = solution.status === "draft" ? "草稿" : `v${current?.version || solution.submitted_version || "—"}`;
   const fields = {
     title: solution.title,
@@ -52,13 +65,26 @@ export function SolutionCard({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {solution.can_edit && (
-            <Button type="button" size="sm" variant="neutral-primary" onClick={onEdit}>
+          {(solution.can_edit || !author) && (
+            <Button
+              type="button"
+              size="sm"
+              variant="neutral-primary"
+              aria-disabled={!edit}
+              className={!edit ? "cursor-not-allowed opacity-50" : undefined}
+              onClick={authorAction(edit, onEdit)}
+            >
               {solution.status === "approved" ? "修改并重新送审" : "编辑方案"}
             </Button>
           )}
-          {solution.can_submit && (
-            <Button type="button" size="sm" onClick={onSubmit}>
+          {(solution.can_submit || !author) && (
+            <Button
+              type="button"
+              size="sm"
+              aria-disabled={!submit}
+              className={!submit ? "cursor-not-allowed opacity-50" : undefined}
+              onClick={authorAction(submit, onSubmit)}
+            >
               提交审核
             </Button>
           )}

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useState } from "react";
 import useSWR from "swr";
+import { setToast, TOAST_TYPE } from "@plane/propel/toast";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
 import { Field, fieldClass, Modal, Paging } from "./shared";
@@ -23,7 +24,13 @@ export function SolutionPanel({ base, defectId, context }: { base: string; defec
   const saved = async () => {
     await mutate();
   };
-  const administrator = context.is_administrator === true;
+  const administrator =
+    context.is_administrator === true ||
+    (context.is_administrator === undefined && (context.business_roles || []).includes("PLATFORM_ADMIN"));
+  const ownSolution = (solution: Solution) =>
+    administrator || Boolean(context.user_id && context.user_id === solution.created_by_id);
+  const rejectAuthor = () => setToast({ type: TOAST_TYPE.INFO, title: "无法操作", message: "仅方案创建人可操作" });
+
   const candidates = submitting
     ? context.members.filter((member) => {
         const contributor =
@@ -66,8 +73,20 @@ export function SolutionPanel({ base, defectId, context }: { base: string; defec
             key={solution.id}
             solution={solution}
             context={context}
-            onEdit={() => setEditing(solution)}
-            onSubmit={() => setSubmitting(solution)}
+            onEdit={() => {
+              if (!ownSolution(solution)) {
+                rejectAuthor();
+                return;
+              }
+              if (solution.can_edit) setEditing(solution);
+            }}
+            onSubmit={() => {
+              if (!ownSolution(solution)) {
+                rejectAuthor();
+                return;
+              }
+              if (solution.can_submit) setSubmitting(solution);
+            }}
             onReview={() => {
               setReviewDecision("");
               setReviewing(solution);
@@ -85,6 +104,7 @@ export function SolutionPanel({ base, defectId, context }: { base: string; defec
           submitLabel={editing?.status === "approved" ? "保存并选择审核人" : "保存草稿"}
           onClose={() => setEditing(undefined)}
           onSubmit={async (form) => {
+            if (editing && !ownSolution(editing)) throw Error("仅方案创建人可操作");
             const result = await qualityApi.write<Solution>(
               `${base}solutions/${editing ? `${editing.id}/` : ""}`,
               {
@@ -151,6 +171,7 @@ export function SolutionPanel({ base, defectId, context }: { base: string; defec
           submitLabel="提交审核"
           onClose={() => setSubmitting(null)}
           onSubmit={async (form) => {
+            if (!ownSolution(submitting)) throw Error("仅方案创建人可操作");
             const ids = form.getAll("reviewer_ids").map(String),
               count = Number(form.get("required_count"));
             if (!ids.length) throw Error("请选择审核人。");

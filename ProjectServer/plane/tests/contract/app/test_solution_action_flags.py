@@ -44,22 +44,20 @@ def test_reassigned_owner_flags_match_real_author_rule_and_readonly_boundaries(s
     project, base, people, defect, solution, manager = solution_scope
     session_client.force_authenticate(people["old"])
     old = detail(session_client, base, solution)
-    assert old.status_code == 200 and not old.data["can_edit"] and not old.data["can_submit"]
-    assert (
-        session_client.patch(
-            base + f"solutions/{solution.id}/", {"expected_version": 1, "title": "失去权限"}, format="json"
-        ).status_code
-        == 403
-    )
-    session_client.force_authenticate(people["new"])
-    current = detail(session_client, base, solution).data
-    assert current["can_edit"] and current["can_submit"] and not current["can_review"]
-    listing = session_client.get(base + "solutions/", {"defect_id": str(defect.id)})
-    assert listing.status_code == 200 and listing.data["can_create"]
+    assert old.status_code == 200 and old.data["can_edit"] and old.data["can_submit"]
     edited = session_client.patch(
-        base + f"solutions/{solution.id}/", {"expected_version": 1, "title": "接手修改"}, format="json"
+        base + f"solutions/{solution.id}/", {"expected_version": 1, "title": "作者继续维护"}, format="json"
     )
     assert edited.status_code == 200 and edited.data["can_edit"]
+    session_client.force_authenticate(people["new"])
+    current = detail(session_client, base, solution).data
+    assert not current["can_edit"] and not current["can_submit"] and not current["can_review"]
+    listing = session_client.get(base + "solutions/", {"defect_id": str(defect.id)})
+    assert listing.status_code == 200 and listing.data["can_create"]
+    denied = session_client.patch(
+        base + f"solutions/{solution.id}/", {"expected_version": 2, "title": "接手不改他人方案"}, format="json"
+    )
+    assert denied.status_code == 403
     ProjectRolePolicy.objects.filter(project=project).update(enabled=False)
     ProjectMember.objects.filter(project=project, member=people["new"]).update(role=5)
     readonly = detail(session_client, base, solution).data
@@ -235,6 +233,8 @@ def test_nonstrict_readonly_author_has_no_solution_write_hints_or_permissions(
 
 def test_contributors_cannot_self_review_and_role_downgrade_revokes_selected_reviewer(session_client, solution_scope):
     project, base, people, defect, solution, manager = solution_scope
+    solution.created_by = people["new"]
+    solution.save(update_fields=["created_by"])
     BusinessRole.objects.filter(project=project, user=people["new"]).update(additional_roles=["PROJECT_MANAGER"])
     session_client.force_authenticate(people["new"])
     own = session_client.post(
@@ -271,6 +271,8 @@ def test_canonical_admin_self_review_only_when_explicitly_selected(session_clien
     instance = Instance.objects.create(
         instance_name="测试管理", instance_id=str(uuid4()), current_version="test", last_checked_at=timezone.now()
     )
+    solution.created_by = people["new"]
+    solution.save(update_fields=["created_by"])
     InstanceAdmin.objects.create(instance=instance, user=people["new"])
     InstanceAdmin.objects.create(instance=instance, user=manager)
     session_client.force_authenticate(people["new"])

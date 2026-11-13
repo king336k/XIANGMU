@@ -105,6 +105,7 @@ export const UnifiedMembers = observer(function UnifiedMembers({
         workspace={workspace}
         projectId={projectId}
         currentUserId={user?.id || ""}
+        canAdmin={canAdmin}
         view={view}
         onViewChange={onViewChange}
       />

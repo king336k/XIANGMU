@@ -5,6 +5,8 @@ export type DirectoryPerson = {
   display_name?: string;
   source?: string;
   is_administrator?: boolean;
+  business_roles?: string[];
+  role_summary?: string;
 };
 export type AccessMembership = {
   id: string;
@@ -143,4 +145,26 @@ export function memberAccessLabel(person: ManagedMember, projectScope: boolean):
   const membership = projectScope ? person.projectMembership : person.workspaceMembership;
   if (membership?.is_active === false) return projectScope ? "已移出项目" : "已移出工作空间";
   return membership ? ACCESS_LABELS[membership.role] || "成员" : projectScope ? "未加入本项目" : "未加入工作空间";
+}
+
+export function accountDutyLabel(person: {
+  is_administrator?: boolean;
+  business_roles?: string[];
+  roles?: string[];
+}): string {
+  if (person.is_administrator) return "管理员";
+  const roles = new Set(person.business_roles || person.roles || []);
+  return (
+    Object.entries(DUTY_LABELS)
+      .filter(([role]) => roles.has(role))
+      .map(([, label]) => label)
+      .join("、") || "未分配岗位"
+  );
+}
+
+export function canSetAccountModules(person: Pick<DirectoryPerson, "is_administrator" | "business_roles">): boolean {
+  return person.is_administrator !== true && (person.business_roles || []).includes("TECHNICIAN");
+}
+export function accountModuleLabel(person: Pick<DirectoryPerson, "is_administrator" | "business_roles">): string {
+  return person.is_administrator ? "所有权限" : canSetAccountModules(person) ? "未设置" : "暂不设置";
 }

@@ -11,9 +11,6 @@ import useSWR from "swr";
 import { ContentWrapper } from "@plane/ui";
 // hooks
 import { useHome } from "@/hooks/store/use-home";
-import { useUserProfile } from "@/hooks/store/user";
-// plane web imports
-import { TourRoot } from "@/components/onboarding/tour/root";
 // local imports
 import { PersonalTodos } from "./personal-todos";
 import { DashboardWidgets } from "./home-dashboard-widgets";
@@ -22,7 +19,6 @@ import { HomePeekOverviewsRoot } from "../issues/peek-overview/peek-overviews";
 export const WorkspaceHomeView = observer(function WorkspaceHomeView() {
   // store hooks
   const { workspaceSlug } = useParams();
-  const { data: currentUserProfile, updateTourCompleted } = useUserProfile();
   const { fetchWidgets } = useHome();
 
   useSWR(
@@ -35,22 +31,9 @@ export const WorkspaceHomeView = observer(function WorkspaceHomeView() {
     }
   );
 
-  const handleTourCompleted = async () => {
-    try {
-      await updateTourCompleted();
-    } catch (error) {
-      console.error("Error updating tour completed", error);
-    }
-  };
-
   // TODO: refactor loader implementation
   return (
     <>
-      {currentUserProfile && !currentUserProfile.is_tour_completed && (
-        <div className="fixed top-0 left-0 z-20 grid h-full w-full place-items-center overflow-y-auto bg-backdrop transition-opacity">
-          <TourRoot onComplete={handleTourCompleted} />
-        </div>
-      )}
       <>
         <HomePeekOverviewsRoot />
         <ContentWrapper className="platform-content @container scrollbar-hide w-full gap-5 bg-surface-1 px-4 pb-6 sm:px-6 xl:px-8">

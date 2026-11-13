@@ -73,6 +73,40 @@ class AdministratorInput(serializers.Serializer):
     administrator = serializers.BooleanField()
 
 
+def account_duties(user_ids, project=None):
+    """Batch effective business duties; an access level never becomes a job title."""
+    members = ProjectMember.objects.filter(
+        member_id__in=user_ids,
+        is_active=True,
+        role__gte=15,
+        project__archived_at__isnull=True,
+        project__workspace__deleted_at__isnull=True,
+    )
+    if project:
+        members = members.filter(project=project)
+    members = list(members.values("project_id", "project__workspace_id", "member_id"))
+    space_rows = list(
+        WorkspaceMember.objects.filter(member_id__in=user_ids, is_active=True, role__gte=15).values(
+            "workspace_id", "member_id", "business_roles", "has_workspace_access"
+        )
+    )
+    spaces = {(row["workspace_id"], row["member_id"]): set(row["business_roles"] or []) for row in space_rows}
+    bindings = {
+        (row.project_id, row.user_id): {row.role, *(row.additional_roles or [])}
+        for row in BusinessRole.objects.filter(user_id__in=user_ids, project_id__in={m["project_id"] for m in members})
+    }
+    result = {user_id: set() for user_id in user_ids}
+    if project is None:
+        for row in space_rows:
+            if row["has_workspace_access"]:
+                result[row["member_id"]].update(row["business_roles"] or [])
+    for row in members:
+        space = (row["project__workspace_id"], row["member_id"])
+        if space in spaces:
+            result[row["member_id"]].update(spaces[space] | bindings.get((row["project_id"], row["member_id"]), set()))
+    return result
+
+
 def assigned_scopes(user, kind):
     memberships = WorkspaceMember.objects.filter(member=user, is_active=True).select_related("workspace")
     if kind == "workspace":
@@ -115,6 +149,84 @@ def assigned_scopes(user, kind):
 
 class AccountDirectory(BaseAPIView):
     @transaction.atomic
+    def delete(self, request):
+        import json
+        from django.shortcuts import get_object_or_404
+        from plane.db.models import Issue
+        from plane.license.models import Instance, InstanceConfiguration
+        from .models import Defect, TestPlan, ModuleOwner, Solution, SolutionRevision
+        from .views import Conflict
+
+        class DeleteInput(serializers.Serializer):
+            user_id = serializers.UUIDField()
+
+        data = DeleteInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        # Lock the same singleton used by administrator changes before checking
+        # actor/target, so two requests cannot remove the last administrators.
+        if not Instance.objects.select_for_update().first():
+            raise Conflict("平台尚未初始化。")
+        if not is_administrator(request.user):
+            raise PermissionDenied("只有管理员可以删除账号。")
+        target = get_object_or_404(User.objects.select_for_update(), pk=data.validated_data["user_id"], is_bot=False)
+        if target.id == request.user.id:
+            raise Conflict("不能删除当前登录账号。")
+        if not target.is_active:
+            return Response({"user_id": str(target.id), "deleted": True})
+        if PlatformAccount.objects.filter(user=target).exists():
+            raise PermissionDenied("只能删除项目管理平台账号。")
+        if is_administrator(target) and not any(
+            is_administrator(user) for user in User.objects.filter(is_active=True, is_bot=False).exclude(pk=target.pk)
+        ):
+            raise Conflict("必须保留至少一名管理员。")
+        if ModuleOwner.objects.filter(user=target).exists():
+            raise Conflict("请先移交模块责任。")
+        if (
+            Defect.objects.filter(Q(assignee=target) | Q(pending_assignee=target), archived_at__isnull=True)
+            .exclude(status="closed")
+            .exists()
+        ):
+            raise Conflict("请先移交未关闭缺陷。")
+        if (
+            Issue.issue_objects.filter(assignees=target, archived_at__isnull=True)
+            .exclude(state__group__in=["completed", "cancelled"])
+            .exists()
+        ):
+            raise Conflict("请先移交未完成任务。")
+        if (
+            TestPlan.objects.filter(assignee=target, archived_at__isnull=True)
+            .exclude(status__in=["completed", "cancelled", "failed"])
+            .exists()
+        ):
+            raise Conflict("请先移交未完成测试计划。")
+        if (
+            Solution.objects.filter(created_by=target, defect__archived_at__isnull=True)
+            .exclude(defect__status="closed")
+            .exclude(status="approved")
+            .exists()
+        ):
+            raise Conflict("请先处理未完成方案。")
+        if SolutionRevision.objects.filter(
+            solution__status="review",
+            reviewer_ids__contains=[str(target.id)],
+            solution__defect__archived_at__isnull=True,
+        ).exists():
+            raise Conflict("请先处理待审核方案。")
+        # Keep foreign keys and historical authorship intact while revoking
+        # every future login/session via both is_active and the password hash.
+        target.is_active = False
+        target.set_unusable_password()
+        target.save(update_fields=["is_active", "password"])
+        WorkspaceMember.objects.filter(member=target).update(is_active=False)
+        ProjectMember.objects.filter(member=target).update(is_active=False)
+        InstanceConfiguration.objects.create(
+            key="ACCOUNT_DELETED:" + uuid4().hex,
+            category="ACCOUNT_AUDIT",
+            value=json.dumps({"actor_id": str(request.user.id), "user_id": str(target.id)}),
+        )
+        return Response({"user_id": str(target.id), "deleted": True})
+
+    @transaction.atomic
     def patch(self, request):
         from django.shortcuts import get_object_or_404
         from .administrators import set_administrator
@@ -137,11 +249,13 @@ class AccountDirectory(BaseAPIView):
 
     def get(self, request):
         from .module_owners import module_options, owner_options, binding_directory, serialize_bindings
+
         if request.query_params.get("module_options"):
             if not is_administrator(request.user):
                 project = Project.objects.filter(
                     pk=serializers.UUIDField().run_validation(request.query_params.get("project_id")),
-                    workspace__slug=request.query_params.get("workspace_slug"), archived_at__isnull=True,
+                    workspace__slug=request.query_params.get("workspace_slug"),
+                    archived_at__isnull=True,
                 ).first()
                 if not project or not writable_member(project.id, request.user.id, project.workspace.slug):
                     raise PermissionDenied("您没有此项目的模块查看权限。")
@@ -244,15 +358,24 @@ class AccountDirectory(BaseAPIView):
         for binding in module_directory[0]:
             module_rows.setdefault(binding.user_id, []).append(binding)
         results = []
-        for user in queryset.select_related("platform_account").order_by("display_name", "id")[
-            offset : offset + per_page
-        ]:
+        page_users = list(
+            queryset.select_related("platform_account").order_by("display_name", "id")[offset : offset + per_page]
+        )
+        duties = account_duties([user.id for user in page_users], directory_project)
+        duty_labels = {"PROJECT_MANAGER": "项目经理", "TECHNICIAN": "技术员", "REGRESSION_TESTER": "测试员"}
+        for user in page_users:
+            administrator = is_administrator(user)
+            roles = [role for role in duty_labels if role in duties[user.id]]
             results.append(
                 {
                     "id": str(user.id),
                     "username": user.username,
                     "display_name": user.display_name,
-                    "is_administrator": is_administrator(user),
+                    "is_administrator": administrator,
+                    "business_roles": roles,
+                    "role_summary": "管理员"
+                    if administrator
+                    else "、".join(duty_labels[role] for role in roles) or "未分配岗位",
                     "source": "项目管理平台",
                     "scopes": assigned_scopes(user, assignment_kind) if assignment_kind else [],
                     "module_owners": serialize_bindings(module_rows.get(user.pk, []), module_directory[1]),
@@ -300,15 +423,14 @@ class AccountDirectory(BaseAPIView):
         if request.data.get("action") == "create_module":
             from .module_owners import ModuleInput, module_options, module_record
             from .models import ModuleCatalog
+
             data = ModuleInput(data=request.data)
             data.is_valid(raise_exception=True)
             values = data.validated_data
             # A stable built-in row serializes cross-key/name alias validation, including new keys.
             module_record("daq")
             ModuleCatalog.objects.select_for_update().get(pk="daq")
-            existing_aliases = {
-                alias.casefold() for row in module_options() for alias in (row["key"], row["name"])
-            }
+            existing_aliases = {alias.casefold() for row in module_options() for alias in (row["key"], row["name"])}
             if {values["key"].casefold(), values["name"].casefold()} & existing_aliases:
                 raise ValidationError({"key": "模块编号或名称已存在。"})
             try:
@@ -334,6 +456,7 @@ class AccountDirectory(BaseAPIView):
         profile, _ = Profile.objects.get_or_create(user=user)
         profile.is_onboarded = True
         profile.is_navigation_tour_completed = True
+        profile.is_tour_completed = True
         profile.language = "zh-CN"
         profile.onboarding_step = {key: True for key in profile.onboarding_step}
         profile.save()
@@ -350,12 +473,16 @@ class AccountDirectory(BaseAPIView):
                 scope = get_object_or_404(Project.objects.select_for_update(), pk=grant["id"], archived_at__isnull=True)
                 editor.save_project(request, user, scope, grant["access_role"], grant["roles"])
         from .module_owners import replace_bindings
+
         bindings = replace_bindings(request.user, user, data["module_owners"]) if data["module_owners"] else []
         return Response(
             {
-                "id": str(user.id), "username": user.username,
-                "project_assigned": bool(data["grants"]), "module_owners": bindings,
-            }, status=201
+                "id": str(user.id),
+                "username": user.username,
+                "project_assigned": bool(data["grants"]),
+                "module_owners": bindings,
+            },
+            status=201,
         )
 
 

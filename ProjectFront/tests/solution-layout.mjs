@@ -75,7 +75,7 @@ test("方案正文分段可见，仅展示真实送审版本，审核意见直�
   const html = renderToStaticMarkup(
     React.createElement(SolutionCard, {
       solution,
-      context: { members: [] },
+      context: { user_id: "tech", members: [] },
       onEdit() {},
       onSubmit() {},
       onReview() {},
@@ -100,11 +100,11 @@ test("方案正文分段可见，仅展示真实送审版本，审核意见直�
   assert.match(html, /<details[^>]*>[\s\S]*审核记录与历史版本/);
   assert.doesNotMatch(html, /<details[^>]*open/);
 });
-test("操作入口仅依据服务端角色标记，普通只读方案没有编辑送审和审核按钮", () => {
+test("创建人操作仍受服务端状态限制，审核中方案没有编辑送审和审核按钮", () => {
   const html = renderToStaticMarkup(
     React.createElement(SolutionCard, {
       solution: { ...solution, status: "review", can_edit: false, can_submit: false, can_review: false },
-      context: { members: [] },
+      context: { user_id: "tech", members: [] },
       onEdit() {},
       onSubmit() {},
       onReview() {},

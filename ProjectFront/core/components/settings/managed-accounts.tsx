@@ -4,7 +4,7 @@ import useSWR, { useSWRConfig } from "swr";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "@/components/quality/api";
 import { Modal, fieldClass, Paging } from "@/components/quality/shared";
-import { DUTY_LABELS } from "./member-management-data";
+import { accountDutyLabel, accountModuleLabel, canSetAccountModules, DUTY_LABELS } from "./member-management-data";
 import type { DirectoryPerson, ManagedMember } from "./member-management-data";
 import type { ScopeRow } from "./member-scope-data";
 import { MemberScopeAccess } from "./member-scope-access";
@@ -20,7 +20,9 @@ export function ManagedAccounts({
   currentUserId,
   view,
   onViewChange,
+  canAdmin = false,
 }: {
+  canAdmin?: boolean;
   workspace: string;
   projectId: string;
   currentUserId: string;
@@ -34,6 +36,7 @@ export function ManagedAccounts({
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Person>();
   const [identity, setIdentity] = useState<ManagedMember>();
+  const [deleting, setDeleting] = useState<Person>();
   const [moduleTarget, setModuleTarget] = useState<Person>();
   const [moduleBindings, setModuleBindings] = useState<ModuleBinding[]>([]);
   const { mutate } = useSWRConfig();
@@ -121,11 +124,7 @@ export function ManagedAccounts({
                   </td>
                   <td className="p-3">
                     {mode === "accounts" ? (
-                      person.is_administrator ? (
-                        "管理员 · 全部范围"
-                      ) : (
-                        "普通账号"
-                      )
+                      accountDutyLabel(person)
                     ) : (
                       <div className="space-y-1">
                         {person.scopes?.map((scope) => (
@@ -147,7 +146,7 @@ export function ManagedAccounts({
                   {mode === "accounts" && (
                     <td className="p-3">
                       <div className="flex flex-wrap gap-1.5">
-                        {person.module_owners?.length ? (
+                        {canSetAccountModules(person) && person.module_owners?.length ? (
                           person.module_owners.map((binding) => (
                             <span
                               key={`${binding.workspace_id}:${binding.module_key}`}
@@ -158,7 +157,7 @@ export function ManagedAccounts({
                             </span>
                           ))
                         ) : (
-                          <span className="text-12 text-secondary">未设置</span>
+                          <span className="text-12 text-secondary">{accountModuleLabel(person)}</span>
                         )}
                       </div>
                     </td>
@@ -169,12 +168,14 @@ export function ManagedAccounts({
                         type="button"
                         className="text-accent-primary"
                         onClick={() =>
-                          mode === "accounts" ? setIdentity({ ...person, roles: [] }) : setEditing(person)
+                          mode === "accounts"
+                            ? setIdentity({ ...person, roles: person.business_roles || [] })
+                            : setEditing(person)
                         }
                       >
                         {mode === "accounts" ? "管理身份" : "编辑范围"}
                       </button>
-                      {mode === "accounts" && (
+                      {mode === "accounts" && canSetAccountModules(person) && (
                         <button
                           type="button"
                           className="text-accent-primary"
@@ -184,6 +185,15 @@ export function ManagedAccounts({
                           }}
                         >
                           模块负责人
+                        </button>
+                      )}
+                      {mode === "accounts" && canAdmin && person.id !== currentUserId && (
+                        <button
+                          type="button"
+                          className="text-danger-primary hover:underline"
+                          onClick={() => setDeleting(person)}
+                        >
+                          删除账号
                         </button>
                       )}
                     </div>
@@ -196,6 +206,21 @@ export function ManagedAccounts({
         </div>
       )}
       <Paging page={page} perPage={20} count={data?.count || 0} onChange={setPage} />
+      {deleting && canAdmin && (
+        <Modal
+          title={`删除账号 · ${deleting.display_name || deleting.username}`}
+          submitLabel="删除账号"
+          width="compact"
+          onClose={() => setDeleting(undefined)}
+          onSubmit={async () => {
+            if (deleting.id === currentUserId) throw Error("不能删除当前账号");
+            await qualityApi.write("/api/quality-auth/accounts/", { user_id: deleting.id }, "delete");
+            await refresh();
+          }}
+        >
+          <p className="text-13">删除后无法登录，历史记录保留。</p>
+        </Modal>
+      )}
       {creating && <CreateManagedAccount onSaved={refresh} onClose={() => setCreating(false)} />}
       {moduleTarget && (
         <Modal
