@@ -334,6 +334,31 @@ async def analyze(payload):
         return await _analyze(payload, client, budget)
 
 
+def finalizer_transport_blocked(error):
+    """A transport establishment/submission failure cannot benefit from another model pass."""
+    phases = {
+        "ConnectTimeout": "connect",
+        "ConnectError": "connect",
+        "WriteTimeout": "write",
+        "WriteError": "write",
+        "PoolTimeout": "pool",
+    }
+    seen, cause = set(), error
+    while cause is not None and id(cause) not in seen and len(seen) < 8:
+        seen.add(id(cause))
+        if getattr(cause, "phase", None) in {"connect", "write", "pool"}:
+            return True
+        if any(
+            cls.__module__.partition(".")[0]
+            in {"httpx", "httpx2", "httpcore", "httpcore2"}
+            and cls.__name__ in phases
+            for cls in type(cause).__mro__
+        ):
+            return True
+        cause = cause.__cause__ or cause.__context__
+    return False
+
+
 async def _analyze(payload, client, budget):
     config = payload["config"]
     finalizer_timeout = min(60, budget // 3)
@@ -367,7 +392,9 @@ async def _analyze(payload, client, budget):
             timeout=budget - finalizer_timeout,
             usage=usage,
         )
-    except (UsageLimitExceeded, TimeoutError, ModelTimeoutError):
+    except (UsageLimitExceeded, TimeoutError, ModelTimeoutError) as error:
+        if finalizer_transport_blocked(error):
+            raise
         # Stop further retrieval. Finish once from the existing facts within the total deadline.
         finalizer = Agent(
             model,
