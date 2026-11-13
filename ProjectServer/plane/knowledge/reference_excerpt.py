@@ -17,11 +17,21 @@ def excerpt(text, query, limit=5000):
             terms.update(token[index : index + 2] for index in range(len(token) - 1))
     terms = sorted(terms, key=len, reverse=True)[:32]
     ranked = []
+    actions = re.compile(
+        r"排查步骤|只读排查|最小取证链|补证建议|验证标准|恢复前提|(?i:troubleshooting|verification steps)"
+    )
     for start in range(0, len(text), 600):
         end = min(len(text), start + 800)
         block = text[start:end].casefold()
         score = sum((10 + len(term) if re.search(r"[a-z0-9]", term) else len(term)) for term in terms if term in block)
         ranked.append((score, start, end))
+    # Matching a code alone omits the later procedure that makes its diagnosis useful.
+    # Keep bounded original passages rather than synthesizing advice from a keyword.
+    if any(score for score, _, _ in ranked):
+        for match in list(actions.finditer(text))[:8]:
+            start = match.start()
+            end = min(len(text), start + 800)
+            ranked.append((1, start, end))
     chosen = []
     remaining = limit
     for score, start, end in sorted(ranked, key=lambda row: (-row[0], row[1])):
