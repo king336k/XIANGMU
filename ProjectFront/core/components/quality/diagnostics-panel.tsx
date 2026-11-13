@@ -21,7 +21,12 @@ type Job = {
   feedback?: "helpful" | "unhelpful" | "";
   feedback_note?: string;
   result: {
-    severity_assessment?: { severity: string; basis: string; evidence: { reference: string; quote: string }[] };
+    severity_assessment?: {
+      severity: string;
+      basis: string;
+      evidence: { reference: string; quote: string }[];
+      method?: "model_verified" | "evidence_rules" | "pending";
+    };
     assignment?: { module: { key: string; name: string } | null; assignee: string; origin: string; reason: string };
     method?: string;
     model_status?: string;
@@ -220,6 +225,15 @@ export function DiagnosticsPanel({
                 value={job.result.severity_assessment.severity}
                 label={severityNames[job.result.severity_assessment.severity] || "待评估"}
               />
+              {job.result.severity_assessment.method && (
+                <span className="rounded bg-surface-1 px-1.5 py-0.5 text-11 text-secondary">
+                  {
+                    { model_verified: "模型判级", evidence_rules: "材料规则判级", pending: "待评估" }[
+                      job.result.severity_assessment.method
+                    ]
+                  }
+                </span>
+              )}
               <span className="text-11 text-secondary">判级依据</span>
             </summary>
             <p className="mt-2 break-words text-secondary">{job.result.severity_assessment.basis}</p>

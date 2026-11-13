@@ -270,7 +270,7 @@ def impact(text):
 
 
 def pending(code="evidence_or_assessment_unverified"):
-    return {"severity": "", "basis": PENDING, "evidence": [], "validation_code": code}
+    return {"severity": "", "basis": PENDING, "evidence": [], "validation_code": code, "method": "pending"}
 
 
 def boolean_context_fragment(quote, text):
@@ -383,45 +383,18 @@ def quote_supported(quote, text):
     return False
 
 
-def propose(job, result, materials=None):
-    """Return {severity, basis, evidence}; an empty severity means pending assessment.
-
-    Only completed jobs and their input attachment snapshot are eligible. Quotes
-    must be exact excerpts from fully scanned, hash-bound current project files.
-    Model rationale explains a supported grade but cannot establish impact.
-    Simulation can demonstrate major impact semantics, never a physical critical
-    incident. Persistence, manual overrides and stale-job guards belong to caller.
-    """
+def verified_sources(job, result, materials=None):
+    """One current-material authority gate shared by model and native-rule assessments."""
     if not isinstance(result, dict) or job.status != "completed" or job.project_id != job.defect.project_id:
-        return pending()
-    suggestion = result.get("severity_assessment")
-    if not isinstance(suggestion, dict):
-        return pending()
-    severity, basis, evidence = (suggestion.get(key) for key in ("severity", "basis", "evidence"))
-    if (
-        severity not in LEVELS
-        or not isinstance(basis, str)
-        or not basis.strip()
-        or len(basis) > 1500
-        or scan_content(basis)
-        or not isinstance(evidence, list)
-        or not 1 <= len(evidence) <= 10
-    ):
-        return pending()
-    sources, snapshot, citations = result.get("sources"), result.get("input"), result.get("citations")
+        return None, "source_integrity_unverified"
+    sources, snapshot = result.get("sources"), result.get("input")
     if not isinstance(sources, list) or not sources or len(sources) > 1000 or not isinstance(snapshot, dict):
-        return pending()
+        return None, "source_integrity_unverified"
     selected = snapshot.get("files")
     if not isinstance(selected, list) or not selected or any(not isinstance(pk, str) for pk in selected):
-        return pending()
-    if not isinstance(citations, list):
-        return pending()
-    references = [row.get("reference") if isinstance(row, dict) else row for row in citations]
-    if any(not isinstance(value, str) for value in references):
-        return pending()
-    cited = set(references)
+        return None, "source_integrity_unverified"
     if ProblemPackage.objects.filter(defect_id=job.defect_id).exclude(status="files_verified").exists():
-        return pending()
+        return None, "source_integrity_unverified"
     # String comparison avoids trusting UUID-shaped model input in ORM conversion.
     files = {
         str(row.pk): row
@@ -434,7 +407,7 @@ def propose(job, result, materials=None):
     verified = {}
     for source in sources:
         if not isinstance(source, dict):
-            return pending()
+            return None, "source_integrity_unverified"
         file_id = source.get("file_id")
         file = files.get(file_id) if isinstance(file_id, str) else None
         text, count, scanned, original = (
@@ -456,7 +429,7 @@ def propose(job, result, materials=None):
             or count > original
             or scan_content(text)
         ):
-            return pending("source_integrity_unverified")
+            return None, "source_integrity_unverified"
         entry = source.get("archive_entry")
         if entry is not None and (
             not isinstance(entry, str)
@@ -466,12 +439,12 @@ def propose(job, result, materials=None):
             or "\\" in entry
             or ".." in entry.split("/")
         ):
-            return pending()
+            return None, "source_integrity_unverified"
         if entry is None and original != file.size:
-            return pending()
+            return None, "source_integrity_unverified"
         reference = f"FILE-{file_id}" + (f":{entry}" if entry else "")
         if reference in verified:
-            return pending()
+            return None, "source_integrity_unverified"
         material = materials.get(reference) if isinstance(materials, dict) else None
         if (
             isinstance(material, dict)
@@ -480,10 +453,37 @@ def propose(job, result, materials=None):
         ):
             text = material["content"]
         elif source.get("preview_truncated") or source.get("truncated") or len(text.encode()) < original:
-            return pending()
+            return None, "source_integrity_unverified"
         if len(text) > 256 * 1024 or scan_content(text):
-            return pending()
+            return None, "source_integrity_unverified"
         verified[reference] = text
+    return verified, "verified"
+
+
+def model_proposal(result, verified):
+    """Verify the model's own assessment against already authorized current material."""
+    suggestion = result.get("severity_assessment")
+    if not isinstance(suggestion, dict):
+        return pending("model_assessment_missing_or_invalid")
+    severity, basis, evidence = (suggestion.get(key) for key in ("severity", "basis", "evidence"))
+    if (
+        severity not in LEVELS
+        or not isinstance(basis, str)
+        or not basis.strip()
+        or len(basis) > 1500
+        or scan_content(basis)
+        or not isinstance(evidence, list)
+        or not 1 <= len(evidence) <= 10
+    ):
+        return pending("model_assessment_missing_or_invalid")
+    snapshot = result["input"]
+    citations = result.get("citations")
+    if not isinstance(citations, list):
+        return pending("quote_context_unverified")
+    references = [row.get("reference") if isinstance(row, dict) else row for row in citations]
+    if any(not isinstance(value, str) for value in references):
+        return pending("quote_context_unverified")
+    cited = set(references)
     quotes, safe_evidence, seen = [], [], set()
     for row in evidence:
         if not isinstance(row, dict):
@@ -547,3 +547,99 @@ def propose(job, result, materials=None):
     if severity == "critical":
         basis = "材料所述当前严重影响，待现场确认；" + basis.strip()[:1450]
     return {"severity": severity, "basis": basis.strip(), "evidence": safe_evidence}
+
+
+def rules_proposal(result, verified):
+    """Grade finite native observations and complete normal contexts, never unbounded model prose."""
+    all_text = "\n".join(verified.values())
+    if "critical" in impact(all_text):
+        return pending("critical_requires_review")
+    evidence = []
+    native_state = re.compile(r"\b(?:raw_status[=:]\s*(?:failed|interrupted)|failure_class[=:]\s*raw_failed)\b")
+    native_start = re.compile(
+        r"\bFATAL\]?\s+(?:pico_video\s+)?failed to start:\s*media (?:encoder|backend) admission failed:", re.I
+    )
+    for reference, text in verified.items():
+        lines = observations(text)
+
+        def native_line(line):
+            return not NEGATED.search(line) and (
+                source_fault_modules(line) or native_state.search(line) or native_start.search(line)
+            )
+
+        def native_levels(line):
+            if not native_line(line):
+                return set()
+            # A finite local fault tag grants its own impact only. Unrelated
+            # claims on the same line cannot promote that tag's authority.
+            raw_failure = native_state.search(line) or re.search(
+                r"MCAP write failed|C\+\+ CaptureService raw MCAP integrity check failed|"
+                r"CaptureService raw accounting missing/invalid counter|"
+                r"MCAP metadata message count conflicts with CaptureService write accounting|"
+                r"recording primary routes exceed encoder capacity",
+                line,
+                re.I,
+            )
+            raw_counts = re.search(r"\bMCAP\b", line, re.I) and re.search(
+                r"\b(?:queue_drops|write_errors|lost_frames)\s*[:=]\s*[1-9]\d*\b", line, re.I
+            )
+            preflight_blocked = re.search(r"\bstatus\s*[:=]\s*blocked\b", line, re.I) and any(
+                re.search(r"\b" + re.escape(code) + r"\b", line) for code in SOURCE_DAQ_CODES
+            )
+            return {"major" if raw_failure or raw_counts or preflight_blocked or native_start.search(line) else "minor"}
+
+        known = any(native_line(line) for line in lines)
+        normal = normal_context("\n".join(lines))
+        if not known and not normal:
+            continue
+        candidates = [text] if len(text) <= 1500 else text.splitlines()
+        for quote in candidates:
+            if len(quote) > 1500 or not impact(quote) or not quote_supported(quote, text):
+                continue
+            allowed = set().union(*(native_levels(line) for line in observations(quote)))
+            claimed = impact(quote)
+            if known and (not allowed or max(map(LEVELS.index, claimed)) > max(map(LEVELS.index, allowed))):
+                continue
+            if not known and not normal_context("\n".join(observations(quote))):
+                continue
+            evidence.append({"reference": reference, "quote": quote})
+            if len(evidence) >= 10:
+                break
+        if len(evidence) >= 10:
+            break
+    if not evidence:
+        return pending("rules_impact_not_supported")
+    supported = set().union(*(impact(row["quote"]) for row in evidence))
+    if not supported or "critical" in supported:
+        return pending("rules_impact_not_supported")
+    grade = max(supported, key=LEVELS.index)
+    assessment = {
+        "severity": grade,
+        "basis": "依据已校验当前材料中的有限源码契约与直接影响观测判级；规则判断范围以所列引用为准。",
+        "evidence": evidence,
+    }
+    return model_proposal(
+        {
+            **result,
+            "severity_assessment": assessment,
+            "citations": [{"reference": row["reference"]} for row in evidence],
+        },
+        verified,
+    )
+
+
+def propose(job, result, materials=None):
+    """Return an attributed, evidence-bound assessment without persisting or taking safety actions."""
+    verified, code = verified_sources(job, result, materials)
+    if verified is None:
+        return pending(code)
+    model = model_proposal(result, verified)
+    if model["severity"]:
+        return {**model, "method": "model_verified", "validation_code": "verified", "model_rejection_code": ""}
+    rules = rules_proposal(result, verified)
+    return {
+        **rules,
+        "method": "evidence_rules" if rules["severity"] else "pending",
+        "validation_code": "verified" if rules["severity"] else rules["validation_code"],
+        "model_rejection_code": model["validation_code"],
+    }

@@ -201,3 +201,24 @@ test("诊断报告显示严重程度依据与引用原句，空值明确待评�
   assert.ok(pending.includes("待评估"));
   assert.ok(!pending.includes("undefined"));
 });
+
+test("判级方法分别标明模型、材料规则与待评估，旧报告不补造方法", () => {
+  const row = { id: "method", status: "completed", mode: "auto", created_at: "now" };
+  for (const [method, label] of [
+    ["model_verified", "模型判级"],
+    ["evidence_rules", "材料规则判级"],
+    ["pending", "待评估"],
+  ]) {
+    const html = render([
+      { ...row, result: { severity_assessment: { severity: "major", basis: "按当前材料核验", evidence: [], method } } },
+    ]);
+    assert.ok(html.includes(label), method);
+    assert.ok(html.includes("本次判级建议"));
+    if (method === "evidence_rules") assert.ok(!html.includes("模型判级"));
+  }
+  const old = render([
+    { ...row, result: { severity_assessment: { severity: "minor", basis: "旧版依据", evidence: [] } } },
+  ]);
+  assert.ok(old.includes("旧版依据"));
+  assert.ok(!old.includes("模型判级") && !old.includes("材料规则判级") && !old.includes("undefined"));
+});

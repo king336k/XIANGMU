@@ -80,6 +80,14 @@ def assess(job, result):
     return propose(job, result)
 
 
+def assess_model(job, result):
+    """Keep model-reference rejection checks separate from independently sourced rule decisions."""
+    from plane.quality.diagnostic_severity import model_proposal, pending, verified_sources
+
+    verified, code = verified_sources(job, result)
+    return pending(code) if verified is None else model_proposal(result, verified)
+
+
 @pytest.mark.parametrize(
     "text,requested,expected",
     [
@@ -134,7 +142,7 @@ def assess(job, result):
 )
 def test_evidence_sets_severity_bounds(incident, text, requested, expected):
     job, result, _ = incident(text, requested)
-    got = assess(job, result)
+    got = assess_model(job, result)
     assert got["severity"] == expected
     assert got["basis"]
     if expected:
@@ -224,7 +232,7 @@ def test_invalid_or_unverifiable_model_suggestion_stays_pending(incident, invali
         result["sources"][0]["excerpt"] += "\npassword=unsafe-example"
     elif invalid == "archive_path":
         result["sources"][0]["archive_entry"] = "../../outside.log"
-    assert assess(job, result)["severity"] == ""
+    assert assess_model(job, result)["severity"] == ""
 
 
 def test_model_answer_title_and_knowledge_cannot_establish_severity(incident):
@@ -241,7 +249,7 @@ def test_quote_selection_cannot_hide_active_major_impact(incident):
         "trivial",
         quote="INFO [VR_RAW_HAND_RECOVERED] hand=left",
     )
-    assert assess(job, result)["severity"] == ""
+    assert assess_model(job, result)["severity"] == ""
 
 
 def test_proposal_has_no_mutation_side_effect(incident):
@@ -361,7 +369,7 @@ def test_json_sub_observation_cannot_borrow_a_different_path_with_matching_grade
     current = {"status": "failed", "failure_reason": "derived_failed"}
     text = json.dumps({"status": "ok", "history": [historical], "routes": [current]})
     job, result, _ = incident(text, "minor", quote=json.dumps(historical))
-    assert assess(job, result)["severity"] == ""
+    assert assess_model(job, result)["severity"] == ""
 
 
 def test_untrusted_observation_field_shapes_remain_pending_without_crashing(incident):
@@ -419,9 +427,9 @@ NORMAL_CONTEXTS = [
 @pytest.mark.parametrize("text", NORMAL_CONTEXTS)
 def test_complete_normal_context_can_support_trivial_but_does_not_hide_raw_failure(incident, text):
     job, result, _ = incident(text, "trivial")
-    assert assess(job, result)["severity"] == "trivial"
+    assert assess_model(job, result)["severity"] == "trivial"
     job, result, _ = incident(text + "\nERROR MCAP write failed write_errors=1", "trivial")
-    assert assess(job, result)["severity"] == ""
+    assert assess_model(job, result)["severity"] == ""
 
 
 @pytest.mark.parametrize(
@@ -548,7 +556,7 @@ def test_context_quote_cannot_hide_its_own_negation_even_beside_a_supported_fail
     job, result, _ = incident(first + "\nINFO 尚未确认 ERROR MCAP write failed", "major", quote=first)
     reference = result["citations"][0]["reference"]
     result["severity_assessment"]["evidence"].append({"reference": reference, "quote": context})
-    assert assess(job, result)["severity"] == ""
+    assert assess_model(job, result)["severity"] == ""
 
 
 def test_nonimpact_manifest_boolean_field_fragment_retains_provenance_without_blocking_grade(incident):
@@ -581,6 +589,72 @@ def test_manifest_context_fragments_need_current_same_object_boolean_values(inci
     job, result, _ = incident(native + "\n" + text, "minor", quote=native)
     reference = result["citations"][0]["reference"]
     result["severity_assessment"]["evidence"].append({"reference": reference, "quote": quote})
-    got = assess(job, result)
+    got = assess_model(job, result)
     assert got["severity"] == ""
     assert got["validation_code"] == "quote_context_unverified"
+
+
+@pytest.mark.parametrize("suggestion", [None, {}, {"severity": "", "basis": "", "evidence": []}])
+def test_native_verified_impact_can_be_graded_independently_of_missing_model_suggestion(incident, suggestion):
+    job, result, _ = incident("ERROR raw_status=failed failure_class=raw_failed")
+    result["severity_assessment"] = suggestion
+    got = assess(job, result)
+    assert got["severity"] == "major"
+    assert got["method"] == "evidence_rules"
+    assert got["model_rejection_code"] == "model_assessment_missing_or_invalid"
+    assert got["evidence"][0]["quote"] == result["sources"][0]["excerpt"]
+
+
+def test_wrong_model_suggestion_is_separate_from_source_rule_grade(incident):
+    job, result, _ = incident("ERROR raw_status=failed", "trivial")
+    result["severity_assessment"]["evidence"][0]["quote"] = "invented failure"
+    got = assess(job, result)
+    assert got["severity"] == "major" and got["method"] == "evidence_rules"
+    assert got["model_rejection_code"] == "quote_context_unverified"
+    assert got["evidence"][0]["quote"] == "ERROR raw_status=failed"
+
+
+@pytest.mark.parametrize(
+    "text", ["ERROR arbitrary failure", "INFO irrecoverable_data_loss=true", "ERROR 已确认设备损坏"]
+)
+def test_rules_never_upgrade_unknown_or_lower_critical_to_major(incident, text):
+    job, result, _ = incident(text)
+    result.pop("severity_assessment")
+    got = assess(job, result)
+    assert got["severity"] == "" and got["method"] == "pending"
+
+
+def test_rules_preserve_hash_gate_even_without_model_suggestion(incident):
+    job, result, _ = incident("ERROR raw_status=failed")
+    result.pop("severity_assessment")
+    result["sources"][0]["sha256"] = "0" * 64
+    got = assess(job, result)
+    assert got["severity"] == "" and got["method"] == "pending"
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("ERROR DAQ_MCAP_MAX_MESSAGES_PER_FILE must be an unsigned decimal integer", "minor"),
+        ("WARN [VR_INPUT_MODE_CONFLICT] selected_mode=hand pico_input=controller", "minor"),
+        (NORMAL_CONTEXTS[1], "trivial"),
+        ("ERROR raw_status=failed\nINFO [VR_RAW_HAND_RECOVERED] hand=left", "major"),
+    ],
+)
+def test_rules_use_observed_impact_when_model_empty_or_incorrect(incident, text, expected):
+    job, result, _ = incident(text)
+    result["severity_assessment"] = {"severity": "", "basis": "", "evidence": []}
+    got = assess(job, result)
+    assert got["severity"] == expected and got["method"] == "evidence_rules"
+    assert got["validation_code"] == "verified"
+    assert got["model_rejection_code"]
+    assert all(row["quote"] in text for row in got["evidence"])
+
+
+@pytest.mark.parametrize("separator", ["\n", " "])
+def test_native_local_failure_cannot_lend_authority_to_unrecognized_core_impact_claim(incident, separator):
+    text = "WARN [VR_RAW_HAND_INVALID] hand=left" + separator + "ERROR core_function_blocked=true"
+    job, result, _ = incident(text)
+    result.pop("severity_assessment")
+    got = assess(job, result)
+    assert got["severity"] != "major"
