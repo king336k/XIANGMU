@@ -27,13 +27,6 @@ export function SingleProgressStats({
   return (
     <Element
       type={onClick ? "button" : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onKeyDown={(event) => {
-        if (onClick && ["Enter", " "].includes(event.key)) {
-          event.preventDefault();
-          onClick();
-        }
-      }}
       className={`flex w-full items-center justify-between gap-4 rounded-xs p-1 text-11 ${
         onClick ? "cursor-pointer hover:bg-surface-2" : ""
       } ${selected ? "bg-layer-1" : ""}`}
