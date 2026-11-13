@@ -242,7 +242,11 @@ class MaterialPageTests(unittest.TestCase):
 
         class Finalizer:
             def __init__(self, *args, **kwargs):
-                pass
+                self.output_validators = []
+
+            def output_validator(self, function):
+                self.output_validators.append(function)
+                return function
 
             async def run(self, prompt, **kwargs):
                 captured["final"] = prompt

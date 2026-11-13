@@ -13,7 +13,7 @@ from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pydantic_ai.exceptions import ModelTimeoutError
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
-from pydantic_ai import Agent, capture_run_messages
+from pydantic_ai import Agent, ModelRetry, capture_run_messages
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models import Model
 from pydantic_ai.models.wrapper import WrapperModel
@@ -109,6 +109,23 @@ class EvidenceTraceModel(WrapperModel):
             raise
         event["status"] = "completed"
         return response
+
+
+def register_reference_validator(agent, payload):
+    allowed = {"DESCRIPTION"}
+    allowed.update(row["reference"] for row in payload["evidence"] + payload["references"])
+
+    @agent.output_validator
+    def task_reference_contract(report: Report) -> Report:
+        citations = set(report.citations)
+        invalid = not citations.issubset(allowed) or not set(report.confidence_references).issubset(citations)
+        invalid |= any(
+            row.reference not in allowed or row.reference not in citations or not row.reference.startswith("FILE-")
+            for row in report.severity_assessment.evidence
+        )
+        if invalid:
+            raise ModelRetry("引用校验未通过：请仅使用本任务材料清单中的编号，修正citations及其关联引用后重新提交。")
+        return report
 
 
 def create_agent(model, payload):
@@ -292,6 +309,7 @@ def create_agent(model, payload):
         ][:5]
         return read_evidence(matches)
 
+    register_reference_validator(agent, payload)
     return agent
 
 
@@ -303,9 +321,15 @@ async def analyze(payload):
         budget = 300
     finalizer_timeout = min(60, budget // 3)
     request_timeout = budget - finalizer_timeout
+    try:
+        connect_timeout = min(60, max(5, int(os.environ.get("DIAGNOSTIC_CONNECT_TIMEOUT_SECONDS", "30"))))
+    except (TypeError, ValueError):
+        connect_timeout = 30
+    http_client = DefaultAsyncHttpxClient(timeout=request_timeout)
+    http_client.timeout.connect = min(request_timeout, connect_timeout)
     async with AsyncOpenAI(
         base_url=config["base_url"], api_key=config["api_key"],
-        http_client=DefaultAsyncHttpxClient(timeout=request_timeout), max_retries=0,
+        http_client=http_client, max_retries=0,
     ) as client:
         return await _analyze(payload, client, budget)
 
@@ -314,6 +338,8 @@ async def _analyze(payload, client, budget):
     config = payload["config"]
     finalizer_timeout = min(60, budget // 3)
     request_timeout = budget - finalizer_timeout
+    phase_timeout = type(client.timeout)(request_timeout, connect=min(client.timeout.connect, request_timeout))
+    final_timeout = type(client.timeout)(finalizer_timeout, connect=min(client.timeout.connect, finalizer_timeout))
     model = OpenAIChatModel(config["model"], provider=OpenAIProvider(openai_client=client))
     trace = payload.setdefault("evidence_trace", {"version": 1, "reads": [], "finalizer": {"used": False}})
     if isinstance(model, Model):
@@ -337,7 +363,7 @@ async def _analyze(payload, client, budget):
         result = await agent.run(
             prompt,
             usage_limits=UsageLimits(request_limit=5, tool_calls_limit=10, output_tokens_limit=6500),
-            model_settings={"timeout": request_timeout, "max_tokens": 2500},
+            model_settings={"timeout": phase_timeout, "max_tokens": 2500},
             timeout=budget - finalizer_timeout,
             usage=usage,
         )
@@ -357,6 +383,7 @@ async def _analyze(payload, client, budget):
             "给出model_confidence（0到1或null）模型自评而非正确概率；若有分值，必须同时填写"
             "evidence_assessment(supported/partial/insufficient)、confidence_basis和confidence_references。",
         )
+        register_reference_validator(finalizer, payload)
         final_prompt = json.dumps(
             {"initial_materials": json.loads(prompt), "read_evidence": payload.get("_read_pages", [])},
             ensure_ascii=False,
@@ -373,7 +400,7 @@ async def _analyze(payload, client, budget):
         result = await finalizer.run(
             final_prompt,
             usage_limits=UsageLimits(request_limit=1, output_tokens_limit=2500),
-            model_settings={"timeout": finalizer_timeout, "max_tokens": 2500},
+            model_settings={"timeout": final_timeout, "max_tokens": 2500},
             timeout=finalizer_timeout,
             usage=finalizer_usage,
         )

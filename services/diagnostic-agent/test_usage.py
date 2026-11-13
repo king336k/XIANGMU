@@ -27,6 +27,11 @@ class UsageTests(unittest.TestCase):
         class FakeAgent:
             def __init__(self, fail=False):
                 self.fail = fail
+                self.output_validators = []
+
+            def output_validator(self, function):
+                self.output_validators.append(function)
+                return function
 
             async def run(self, prompt, **kwargs):
                 usage = kwargs.get("usage")
