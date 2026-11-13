@@ -355,3 +355,33 @@ def test_optional_image_deadline_does_not_mark_completed_log_incomplete(material
     assert [row["file_id"] for row in sources] == [str(log.id)]
     assert sources[0]["scan_incomplete"] is False
     assert next(row for row in coverage if row["file_id"] == str(second.id))["status"] == "not_read"
+
+
+def test_trace_preserves_duplicate_read_attempts_without_private_page_content():
+    from plane.quality.diagnostic_model import validated_evidence_trace
+
+    read = {
+        "reference": "FILE-local",
+        "offset": 0,
+        "length": 5,
+        "bytes": 5,
+        "sha256": "b" * 64,
+        "total_chars": 5,
+        "truncated": False,
+    }
+    trace = {
+        "version": 1,
+        "initial_prompt": {"bytes": 10, "sha256": "a" * 64},
+        "reads": [read],
+        "read_attempts": [
+            {**read, "status": "read", "first_read_index": 0},
+            {**read, "status": "already_read", "first_read_index": 0, "content": "PRIVATE-PAGE"},
+        ],
+        "finalizer": {"used": False},
+    }
+    safe = validated_evidence_trace(trace, {"FILE-local": {}})
+    assert len(safe["read_attempts"]) == 2
+    assert safe["read_attempts"][1]["status"] == "already_read"
+    assert "PRIVATE" not in json.dumps(safe)
+    trace["read_attempts"][1]["sha256"] = "c" * 64
+    assert validated_evidence_trace(trace, {"FILE-local": {}}) is None

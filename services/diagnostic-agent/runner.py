@@ -218,6 +218,7 @@ def create_agent(model, payload):
     ]
     trace = payload.setdefault("evidence_trace", {"version": 1, "reads": [], "finalizer": {"used": False}})
     trace.setdefault("reads", [])
+    read_attempts = trace.setdefault("read_attempts", [])
     read_pages = payload.setdefault("_read_pages", [])
 
     @agent.tool_plain(sequential=True)
@@ -240,7 +241,7 @@ def create_agent(model, payload):
                 continue
             page = content[offset : offset + length]
             encoded = page.encode()
-            if len(trace["reads"]) >= 60 or sum(item["bytes"] for item in trace["reads"]) + len(encoded) > 1024 * 1024:
+            if len(read_attempts) >= 60:
                 result.append({"reference": reference, "error": "本次材料读取预算耗尽"})
                 continue
             end = offset + len(page)
@@ -254,6 +255,30 @@ def create_agent(model, payload):
                 "total_chars": len(content),
                 "truncated": truncated,
             }
+            first_read_index = next(
+                (
+                    index for index, previous in enumerate(trace["reads"])
+                    if all(previous[key] == event[key] for key in ("reference", "offset", "length", "sha256"))
+                ),
+                None,
+            )
+            if first_read_index is not None:
+                read_attempts.append({**event, "status": "already_read", "first_read_index": first_read_index})
+                result.append(
+                    {
+                        **event,
+                        "status": "already_read",
+                        "first_read_index": first_read_index,
+                        "trace_index": first_read_index,
+                        "next_offset": end,
+                        "instruction": "本页正文已在本次会话此前的工具返回中。请据已有材料形成报告；仍缺证据时读取新范围或明确缺口。",
+                    }
+                )
+                continue
+            if sum(item["bytes"] for item in trace["reads"]) + len(encoded) > 1024 * 1024:
+                result.append({"reference": reference, "error": "本次材料读取预算耗尽"})
+                continue
+            read_attempts.append({**event, "status": "read", "first_read_index": len(trace["reads"])})
             read_pages.append(
                 {"reference": reference, "offset": offset, "content": page, "trace_index": len(trace["reads"])}
             )

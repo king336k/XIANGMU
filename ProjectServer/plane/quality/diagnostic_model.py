@@ -365,6 +365,32 @@ def validated_evidence_trace(value, allowed):
         safe_reads.append(
             {key: row[key] for key in ["reference", "offset", "length", "bytes", "sha256", "total_chars", "truncated"]}
         )
+    safe_attempts = []
+    if "read_attempts" in value:
+        attempts = value["read_attempts"]
+        if not isinstance(attempts, list) or len(attempts) > 60:
+            return None
+        for attempt in attempts:
+            if not isinstance(attempt, dict) or attempt.get("status") not in {"read", "already_read"}:
+                return None
+            index = attempt.get("first_read_index")
+            if not integer(index, len(reads) - 1):
+                return None
+            original = reads[index]
+            fields = ["reference", "offset", "length", "bytes", "sha256", "total_chars", "truncated"]
+            if any(
+                type(attempt.get(key)) is not type(original.get(key)) or attempt.get(key) != original.get(key)
+                for key in fields
+            ):
+                return None
+            if index in read_mapping:
+                safe_attempts.append(
+                    {
+                        **{key: attempt[key] for key in fields},
+                        "status": attempt["status"],
+                        "first_read_index": read_mapping[index],
+                    }
+                )
     if sum(row["bytes"] for row in reads) > 1024 * 1024:
         return None
     if not isinstance(finalizer, dict) or type(finalizer.get("used")) is not bool:
@@ -413,5 +439,6 @@ def validated_evidence_trace(value, allowed):
         "model_requests": safe_requests,
         "initial_prompt": {key: initial[key] for key in ["bytes", "sha256"]},
         "reads": safe_reads,
+        **({"read_attempts": safe_attempts} if "read_attempts" in value else {}),
         "finalizer": safe_finalizer,
     }
