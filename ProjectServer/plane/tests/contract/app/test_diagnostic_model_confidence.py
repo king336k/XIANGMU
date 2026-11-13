@@ -139,5 +139,34 @@ def test_agent_connection_failure_is_a_provider_error_without_exposing_message(m
     with pytest.raises(ValueError, match="^AGENT_PROVIDER_UNAVAILABLE$"):
         analyze_diagnostic(
             {"api_key": "fixture-private-key", "base_url": "https://api.openai.com/v1", "model": "fixture"},
-            "neutral", [{"file_id": "local", "name": "log", "read_bytes": 10, "excerpt": "Connection refused"}], [],
+            "neutral",
+            [{"file_id": "local", "name": "log", "read_bytes": 10, "excerpt": "Connection refused"}],
+            [],
+        )
+
+
+@pytest.mark.parametrize(
+    "cause,expected,exception",
+    [
+        ({"error_type": "ReadTimeout"}, "AGENT_PROVIDER_TIMEOUT", TimeoutError),
+        ({"error_type": "APIConnectionError"}, "AGENT_PROVIDER_UNAVAILABLE", ValueError),
+        ({"error_type": "ModelHTTPError", "status_code": 401}, "AGENT_PROVIDER_AUTH", ValueError),
+    ],
+)
+def test_nested_safe_agent_failure_keeps_provider_classification(mocker, monkeypatch, cause, expected, exception):
+    import subprocess
+
+    monkeypatch.setenv("DIAGNOSTIC_AGENT_PYTHON", "fixture-python")
+    mocker.patch(
+        "plane.quality.diagnostic_model.subprocess.run",
+        side_effect=subprocess.CalledProcessError(
+            1, ["runner"], stderr=json.dumps({"error_type": "RuntimeError", "error_chain": [cause]})
+        ),
+    )
+    with pytest.raises(exception, match=f"^{expected}$"):
+        analyze_diagnostic(
+            {"api_key": "fixture-private-key", "base_url": "https://api.openai.com/v1", "model": "fixture"},
+            "neutral",
+            [{"file_id": "local", "name": "log", "read_bytes": 10, "excerpt": "Connection refused"}],
+            [],
         )

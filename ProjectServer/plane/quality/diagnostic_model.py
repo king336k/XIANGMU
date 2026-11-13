@@ -137,6 +137,19 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
                     continue
                 if not isinstance(diagnostic, dict):
                     continue
+                chain = diagnostic.get("error_chain")
+                if isinstance(chain, list):
+                    causes = [row for row in chain[:8] if isinstance(row, dict)]
+                    kinds = {row.get("error_type") for row in causes if isinstance(row.get("error_type"), str)}
+                    statuses = [row["status_code"] for row in causes if type(row.get("status_code")) is int]
+                    if any(value in {401, 403} for value in statuses):
+                        raise ValueError("AGENT_PROVIDER_AUTH") from error
+                    if kinds & types:
+                        raise TimeoutError("AGENT_PROVIDER_TIMEOUT") from error
+                    if kinds & {"ModelConnectionError", "APIConnectionError"} or any(
+                        value in {408, 429} or value >= 500 for value in statuses
+                    ):
+                        raise ValueError("AGENT_PROVIDER_UNAVAILABLE") from error
                 if diagnostic.get("error_type") in types:
                     raise TimeoutError("AGENT_PROVIDER_TIMEOUT") from error
                 if diagnostic.get("error_type") in {"ModelConnectionError", "APIConnectionError"}:
