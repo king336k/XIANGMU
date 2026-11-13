@@ -7,6 +7,16 @@ from plane.tests.contract.app.test_module_owners import routing as routing
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 MATRIX = [
     {
+        "id": "teleop_media_main_admission_source",
+        "line": "FATAL failed to start: media encoder admission failed: selected media backend is unavailable",
+        "expected_modules": ["teleop"],
+    },
+    {
+        "id": "generic_other_service_start_is_not_teleop",
+        "line": "FATAL failed to start: unrelated fixture unavailable",
+        "expected_modules": [],
+    },
+    {
         "id": "forced_stop_source_warning",
         "line": "WARN 录制已强制停止，本段数据可能不完整：fixture backend stop failure",
         "expected_modules": ["daq"],
