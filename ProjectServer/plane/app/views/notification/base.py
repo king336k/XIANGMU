@@ -27,6 +27,7 @@ from plane.utils.paginator import BasePaginator
 from plane.utils.order_queryset import NOTIFICATION_ORDER_BY_ALLOWLIST, sanitize_order_by
 from plane.app.permissions import allow_permission, ROLE
 from plane.quality.notifications import serialize_with_current_status
+from plane.quality.permissions import is_administrator
 
 # Module imports
 from ..base import BaseAPIView, BaseViewSet
@@ -37,6 +38,13 @@ class NotificationViewSet(BaseViewSet, BasePaginator):
     serializer_class = NotificationSerializer
 
     def get_queryset(self):
+        quality_projects = Q()
+        if not is_administrator(self.request.user):
+            quality_projects = Q(entity_name="quality") & ~Q(
+                project_id__in=ProjectMember.objects.filter(
+                    member=self.request.user, is_active=True, workspace__slug=self.kwargs.get("slug")
+                ).values("project_id")
+            )
         return (
             super()
             .get_queryset()
@@ -44,14 +52,7 @@ class NotificationViewSet(BaseViewSet, BasePaginator):
                 workspace__slug=self.kwargs.get("slug"),
                 receiver_id=self.request.user.id,
             )
-            .exclude(
-                Q(entity_name="quality")
-                & ~Q(
-                    project_id__in=ProjectMember.objects.filter(
-                        member=self.request.user, is_active=True, workspace__slug=self.kwargs.get("slug")
-                    ).values("project_id")
-                )
-            )
+            .exclude(quality_projects)
             .select_related("workspace", "project", "triggered_by", "receiver")
         )
 
@@ -71,17 +72,14 @@ class NotificationViewSet(BaseViewSet, BasePaginator):
             workspace__slug=self.kwargs.get("slug"),
         )
 
+        quality_filter = Q(entity_name="quality")
+        if not is_administrator(request.user):
+            quality_filter &= Q(project_id__in=ProjectMember.objects.filter(
+                member=request.user, is_active=True, workspace__slug=slug
+            ).values("project_id"))
         notifications = (
             Notification.objects.filter(workspace__slug=slug, receiver_id=request.user.id)
-            .filter(
-                Q(entity_name="issue")
-                | Q(
-                    entity_name="quality",
-                    project_id__in=ProjectMember.objects.filter(
-                        member=request.user, is_active=True, workspace__slug=slug
-                    ).values("project_id"),
-                )
-            )
+            .filter(Q(entity_name="issue") | quality_filter)
             .annotate(is_inbox_issue=Exists(intake_issue))
             .annotate(is_intake_issue=Exists(intake_issue))
             .annotate(

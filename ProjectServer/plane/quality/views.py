@@ -48,6 +48,13 @@ class QualityPermission(BasePermission):
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
+        if type(view).__name__ in {
+            "QualityContext", "DefectList", "DefectDetail", "DiagnosticList", "DiagnosticDetail"
+        } and is_administrator(request.user):
+            return Project.objects.filter(
+                pk=view.project_id, workspace__slug=view.workspace_slug,
+                archived_at__isnull=True, workspace__deleted_at__isnull=True,
+            ).exists()
         if not WorkspaceMember.objects.filter(
             workspace__slug=view.workspace_slug, member=request.user, is_active=True
         ).exists():
@@ -331,6 +338,7 @@ class ExecutionList(QualityView):
 def defect_queryset():
     return Defect.objects.select_related(
         "assignee",
+        "module",
         "case",
         "daq_report",
         "repair_issue",
@@ -443,6 +451,7 @@ class DefectDetail(QualityView):
             raise ValidationError({"case_id": "测试产生的缺陷不能改变来源用例。"})
         if (
             not strict(self.project_id)
+            and not is_administrator(request.user)
             and not ProjectMember.objects.filter(
                 project_id=self.project_id, member=request.user, role=20, is_active=True
             ).exists()
@@ -561,6 +570,9 @@ class DefectDetail(QualityView):
             invalidate_knowledge(defect, request.user)
         for key, value in data.items():
             setattr(defect, key, value)
+        if "assignee_id" in data and data["assignee_id"] != previous_assignee:
+            defect.assignment_origin = "manual"
+            defect.assignment_reason = "人工选择负责人。"
         defect.edit_version += 1
         defect.save()
         if old_status != "closed" and new_status == "closed":
@@ -584,6 +596,112 @@ class DefectDetail(QualityView):
 
         if data:
             defect_notice(defect, request.user, "缺陷处理已更新", [previous_assignee])
+        return Response(DefectSerializer(defect_queryset().get(pk=defect.pk)).data)
+
+
+class DefectReassignPermission(QualityPermission):
+    def has_permission(self, request, view):
+        from .permissions import writable_member
+
+        return bool(
+            request.user.is_authenticated
+            and (
+                is_administrator(request.user)
+                or writable_member(
+                    view.project_id, request.user.id, view.workspace_slug
+                )
+            )
+        )
+
+
+class DefectReassign(QualityView):
+    permission_classes = [DefectReassignPermission]
+
+    @transaction.atomic
+    def post(self, request, pk, **kwargs):
+        from rest_framework import serializers
+        from rest_framework.exceptions import PermissionDenied
+        from .module_owners import StrictInput, eligible_technician, module_record
+        from .permissions import writable_member
+        from .data_regression import manager
+
+        class ReassignInput(StrictInput):
+            expected_version = serializers.IntegerField(min_value=1)
+            assignee_id = serializers.UUIDField(allow_null=True)
+            reason = serializers.CharField(max_length=2000)
+            module_key = serializers.RegexField(
+                r"^[a-z][a-z0-9_-]{0,63}$", required=False, allow_null=True
+            )
+
+        data = self.input(ReassignInput)
+        defect = get_object_or_404(
+            Defect.objects.select_for_update(),
+            pk=pk,
+            project_id=self.project_id,
+            project__workspace__slug=self.workspace_slug,
+            project__archived_at__isnull=True,
+        )
+        administrator = is_administrator(request.user)
+        allowed = administrator or (
+            writable_member(self.project_id, request.user.id, self.workspace_slug)
+            and (
+                defect.assignee_id == request.user.id
+                or manager(self.project_id, request.user)
+            )
+        )
+        if not allowed:
+            raise PermissionDenied("只有当前负责人、项目经理或管理员可以改派。")
+        if defect.edit_version != data["expected_version"]:
+            raise Conflict()
+        if (
+            defect.archived_at
+            or defect.status == "closed"
+            or defect.pending_assignee_id
+        ):
+            raise Conflict("缺陷已结束、归档或存在待确认交接，请先处理当前状态。")
+        target = data["assignee_id"]
+        if target and not eligible_technician(defect.project, target):
+            raise ValidationError({"assignee_id": "请选择当前项目的有效技术员。"})
+        module = defect.module
+        if "module_key" in data:
+            module = module_record(data["module_key"]) if data["module_key"] else None
+        previous = defect.assignee
+        if (
+            defect.assignee_id == target
+            and defect.module_id == getattr(module, "key", None)
+            and defect.assignment_origin == "manual"
+        ):
+            return Response(DefectSerializer(defect_queryset().get(pk=defect.pk)).data)
+        defect.assignee_id = target
+        defect.module = module
+        defect.assignment_origin = "manual"
+        defect.assignment_reason = data["reason"]
+        defect.edit_version += 1
+        defect.save()
+        current_name = (
+            defect.assignee.display_name or defect.assignee.username
+            if target
+            else "未指派"
+        )
+        previous_name = (
+            previous.display_name or previous.username if previous else "未指派"
+        )
+        DefectEvent.objects.create(
+            project=defect.project,
+            defect=defect,
+            created_by=request.user,
+            previous_status=defect.status,
+            status=defect.status,
+            note=(
+                f"人工改派：{previous_name} → {current_name}；"
+                f"模块：{module.name if module else '未确认'}；原因：{data['reason']}"
+            ),
+        )
+        from .notifications import defect_notice
+
+        defect_notice(
+            defect, request.user, "缺陷负责人已改派", [previous.id] if previous else []
+        )
         return Response(DefectSerializer(defect_queryset().get(pk=defect.pk)).data)
 
 
@@ -633,8 +751,12 @@ class QualityContext(QualityView):
         ).select_related("member")
         issues = Issue.objects.filter(project=project).order_by("-created_at")[:200]
         duties = roles_for(project.id, request.user.id)
-        capabilities = capabilities_for(project.id, request.user.id, duties)
         administrator = is_administrator(request.user)
+        if administrator:
+            duties.add("PLATFORM_ADMIN")
+        capabilities = capabilities_for(project.id, request.user.id, duties)
+        if administrator:
+            capabilities = {key: True for key in capabilities}
         member_rows = []
         for member in members:
             member_duties = roles_for(project.id, member.member_id)
@@ -663,7 +785,7 @@ class QualityContext(QualityView):
                 "work_item_options_url": (
                     f"/api/workspaces/{project.workspace.slug}/projects/{project.id}/quality/work-item-options/"
                 ),
-                "can_write": ProjectMember.objects.filter(
+                "can_write": administrator or ProjectMember.objects.filter(
                     project=project, member=request.user, is_active=True, role__gte=15
                 ).exists()
                 and WorkspaceMember.objects.filter(
@@ -678,7 +800,9 @@ class QualityContext(QualityView):
                 and WorkspaceMember.objects.filter(
                     workspace=project.workspace, member=request.user, is_active=True, role__gte=15
                 ).exists(),
-                "is_manager": (strict(project.id) and capable(project.id, request.user.id, "manage_test"))
+                "is_manager": administrator or (
+                    strict(project.id) and capable(project.id, request.user.id, "manage_test")
+                )
                 or ProjectMember.objects.filter(project=project, member=request.user, is_active=True, role=20).exists()
                 and not strict(project.id)
                 and WorkspaceMember.objects.filter(

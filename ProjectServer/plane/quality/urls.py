@@ -52,6 +52,7 @@ from .defect_verification import (
 )
 
 urlpatterns = [
+    path("defects/<uuid:pk>/reassign/", views.DefectReassign.as_view()),
     path("verification-results/", DefectVerificationResults.as_view()),
     path("defects/<uuid:pk>/verification/", DefectVerification.as_view()),
     path("defects/<uuid:pk>/verification/result/", DefectVerificationResult.as_view()),

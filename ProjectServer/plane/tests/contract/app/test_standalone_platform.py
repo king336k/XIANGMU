@@ -18,6 +18,16 @@ pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 
 @pytest.fixture
 def standalone(workspace, settings, mocker):
+    # Accepted feedback now requires a configured, legal triage administrator.
+    admin = User.objects.create(username="standalone-triage", email="standalone-triage@test.invalid")
+    instance = Instance.objects.create(
+        instance_name="standalone-triage",
+        instance_id=str(uuid4()),
+        current_version="test",
+        last_checked_at=timezone.now(),
+        is_setup_done=True,
+    )
+    InstanceAdmin.objects.create(instance=instance, user=admin)
     project = Project.objects.create(workspace=workspace, name="独立反馈项目", identifier="SOLO")
     settings.QUALITY_DAQ_REPORT_KEYS = {
         "test-incidents": {
@@ -119,13 +129,7 @@ def test_daq_grants_require_administrator_and_apply_to_every_device(standalone, 
     client = APIClient()
     client.force_authenticate(create_user)
     assert client.get(path).status_code == 403
-    instance = Instance.objects.create(
-        instance_name="独立平台",
-        instance_id=str(uuid4()),
-        current_version="test",
-        last_checked_at=timezone.now(),
-        is_setup_done=True,
-    )
+    instance = Instance.objects.get()
     InstanceAdmin.objects.create(instance=instance, user=create_user)
     loaded = client.get(path)
     assert loaded.status_code == 200, loaded.content
@@ -248,13 +252,7 @@ def test_daq_grant_list_paginates_and_searches_across_workspaces(standalone, cre
     project, _ = standalone
     other_ws = Workspace.objects.create(name="another", slug="another", owner=create_user)
     other = Project.objects.create(workspace=other_ws, name="跨工作区项目", identifier="CROSS")
-    instance = Instance.objects.create(
-        instance_name="独立平台",
-        instance_id=str(uuid4()),
-        current_version="test",
-        last_checked_at=timezone.now(),
-        is_setup_done=True,
-    )
+    instance = Instance.objects.get()
     InstanceAdmin.objects.create(instance=instance, user=create_user)
     client = APIClient()
     client.force_authenticate(create_user)

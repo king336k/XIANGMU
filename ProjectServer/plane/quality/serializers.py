@@ -291,6 +291,7 @@ class DefectSerializer(AuthoredRecordSerializer):
         from .defect_content import defect_content
 
         data["title"], data["description"] = defect_content(data["title"], data["description"])
+        data["module"] = {"key": instance.module_id, "name": instance.module.name} if instance.module_id else None
         data["has_verification"] = instance.verification_rounds.exists()
         data["source_kind"] = (
             "daq"
@@ -372,6 +373,8 @@ class DefectSerializer(AuthoredRecordSerializer):
             "resolution",
             "assignee_id",
             "assignee_name",
+            "assignment_origin",
+            "assignment_reason",
             "repair_issue_id",
             "repair_issue_name",
             "repair_issue_sequence",

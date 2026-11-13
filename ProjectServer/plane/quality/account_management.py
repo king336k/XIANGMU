@@ -2,7 +2,7 @@
 """Separate login identities from per-project duties; ordinary account creation grants no resources."""
 
 from uuid import uuid4
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -16,6 +16,7 @@ from .models import (
     BusinessRoleEvent,
 )
 from .permissions import ROLE_NAMES, writable_member, has_role, is_administrator
+from .module_owners import OwnerBinding
 
 
 def account_admin(request):
@@ -53,9 +54,10 @@ class AccountGrant(serializers.Serializer):
 
 class LocalInput(serializers.Serializer):
     username = serializers.RegexField(r"^[a-zA-Z0-9_.-]{2,128}$")
-    password = serializers.CharField(min_length=8, max_length=256, write_only=True, trim_whitespace=False)
+    password = serializers.CharField(min_length=6, max_length=256, write_only=True, trim_whitespace=False)
     grant_mode = serializers.ChoiceField(choices=["none", "workspace", "project"], default="none")
     grants = AccountGrant(many=True, allow_empty=True, max_length=100, default=list)
+    module_owners = OwnerBinding(many=True, allow_empty=True, max_length=100, default=list)
 
     def validate(self, data):
         if (data["grant_mode"] == "none") != (not data["grants"]):
@@ -117,6 +119,16 @@ class AccountDirectory(BaseAPIView):
         from django.shortcuts import get_object_or_404
         from .administrators import set_administrator
 
+        if request.data.get("action") == "module_owners":
+            from .module_owners import OwnerInput, replace_bindings
+
+            if not is_administrator(request.user):
+                raise PermissionDenied("只有管理员可以配置模块负责人。")
+            data = OwnerInput(data=request.data)
+            data.is_valid(raise_exception=True)
+            target = get_object_or_404(User, pk=data.validated_data["user_id"], is_active=True, is_bot=False)
+            bindings = replace_bindings(request.user, target, data.validated_data["bindings"])
+            return Response({"user_id": str(target.id), "module_owners": bindings})
         data = AdministratorInput(data=request.data)
         data.is_valid(raise_exception=True)
         target = get_object_or_404(User, pk=data.validated_data["user_id"], is_active=True, is_bot=False)
@@ -124,6 +136,16 @@ class AccountDirectory(BaseAPIView):
         return Response({"user_id": str(target.id), "is_administrator": is_administrator(target)})
 
     def get(self, request):
+        from .module_owners import module_options, owner_options, binding_directory, serialize_bindings
+        if request.query_params.get("module_options"):
+            if not is_administrator(request.user):
+                project = Project.objects.filter(
+                    pk=serializers.UUIDField().run_validation(request.query_params.get("project_id")),
+                    workspace__slug=request.query_params.get("workspace_slug"), archived_at__isnull=True,
+                ).first()
+                if not project or not writable_member(project.id, request.user.id, project.workspace.slug):
+                    raise PermissionDenied("您没有此项目的模块查看权限。")
+            return Response({"module_options": module_options()})
         try:
             kind, account = account_admin(request)
         except PermissionDenied:
@@ -217,6 +239,10 @@ class AccountDirectory(BaseAPIView):
                 )
             )
         count = queryset.count()
+        module_directory = binding_directory() if kind == "local" else ([], set())
+        module_rows = {}
+        for binding in module_directory[0]:
+            module_rows.setdefault(binding.user_id, []).append(binding)
         results = []
         for user in queryset.select_related("platform_account").order_by("display_name", "id")[
             offset : offset + per_page
@@ -229,6 +255,7 @@ class AccountDirectory(BaseAPIView):
                     "is_administrator": is_administrator(user),
                     "source": "项目管理平台",
                     "scopes": assigned_scopes(user, assignment_kind) if assignment_kind else [],
+                    "module_owners": serialize_bindings(module_rows.get(user.pk, []), module_directory[1]),
                     "in_project": bool(
                         directory_project
                         and ProjectMember.objects.filter(
@@ -245,6 +272,8 @@ class AccountDirectory(BaseAPIView):
         return Response(
             {
                 "can_manage": True,
+                "module_options": module_options(),
+                "module_owner_options": owner_options(module_directory) if kind == "local" else [],
                 "can_manage_administrators": is_administrator(request.user),
                 "results": results,
                 "count": count,
@@ -268,6 +297,26 @@ class AccountDirectory(BaseAPIView):
     def post(self, request):
         if not is_administrator(request.user):
             raise PermissionDenied("只有管理员可以创建平台账号。")
+        if request.data.get("action") == "create_module":
+            from .module_owners import ModuleInput, module_options, module_record
+            from .models import ModuleCatalog
+            data = ModuleInput(data=request.data)
+            data.is_valid(raise_exception=True)
+            values = data.validated_data
+            # A stable built-in row serializes cross-key/name alias validation, including new keys.
+            module_record("daq")
+            ModuleCatalog.objects.select_for_update().get(pk="daq")
+            existing_aliases = {
+                alias.casefold() for row in module_options() for alias in (row["key"], row["name"])
+            }
+            if {values["key"].casefold(), values["name"].casefold()} & existing_aliases:
+                raise ValidationError({"key": "模块编号或名称已存在。"})
+            try:
+                with transaction.atomic():
+                    module = ModuleCatalog.objects.create(key=values["key"], name=values["name"])
+            except IntegrityError:
+                raise ValidationError({"key": "模块编号或名称已存在。"})
+            return Response({"key": module.key, "name": module.name}, status=201)
         data = LocalInput(data=request.data)
         data.is_valid(raise_exception=True)
         data = data.validated_data
@@ -300,8 +349,13 @@ class AccountDirectory(BaseAPIView):
             else:
                 scope = get_object_or_404(Project.objects.select_for_update(), pk=grant["id"], archived_at__isnull=True)
                 editor.save_project(request, user, scope, grant["access_role"], grant["roles"])
+        from .module_owners import replace_bindings
+        bindings = replace_bindings(request.user, user, data["module_owners"]) if data["module_owners"] else []
         return Response(
-            {"id": str(user.id), "username": user.username, "project_assigned": bool(data["grants"])}, status=201
+            {
+                "id": str(user.id), "username": user.username,
+                "project_assigned": bool(data["grants"]), "module_owners": bindings,
+            }, status=201
         )
 
 

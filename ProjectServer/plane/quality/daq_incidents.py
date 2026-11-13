@@ -174,7 +174,6 @@ def verify_incident_authority(link):
     record = signed_record(link)
     if record is None:
         raise PermissionDenied("异常来源签名无效。")
-    data = record["payload"]
     return record["payload"]
 
 
@@ -297,6 +296,8 @@ class DaqIncidents(DaqView):
             record = signed_record(link)
             if record is None or record["requestHash"] != fingerprint(data):
                 raise Conflict("同一事件编号不能对应不同内容。")
+            from .module_routing import initial_assign
+            link.defect = initial_assign(link.defect, request.user)
             return Response(receipt(link, self))
         from .defect_content import defect_content
 
@@ -346,6 +347,8 @@ class DaqIncidents(DaqView):
                 ensure_ascii=False,
             ),
         )
+        from .module_routing import initial_assign
+        link.defect = initial_assign(defect, request.user)
         return Response(receipt(link, self), status=201)
 
 

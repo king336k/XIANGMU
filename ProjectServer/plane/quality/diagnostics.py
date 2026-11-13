@@ -187,6 +187,9 @@ class DiagnosticSerializer(serializers.ModelSerializer):
 
 
 def writable(view, defect):
+    from .permissions import is_administrator
+    if is_administrator(view.request.user):
+        return
     if not manager(view.project_id, view.request.user) and defect.assignee_id != view.request.user.id:
         raise PermissionDenied("由当前技术负责人或项目经理发起诊断。")
 

@@ -70,10 +70,14 @@ def registered_evidence(project, user, report_id):
 
 @pytest.fixture
 def reporting(workspace, settings, mocker):
-    from plane.license.models import InstanceConfiguration
+    from plane.license.models import InstanceConfiguration, Instance, InstanceAdmin
     from plane.db.models import User
     from django.utils import timezone
 
+    instance = Instance.objects.create(
+        instance_name="reporting", instance_id=str(uuid4()), current_version="test", last_checked_at=timezone.now()
+    )
+    InstanceAdmin.objects.create(instance=instance, user=workspace.owner)
     destination = Project.objects.create(workspace=workspace, name="已授权反馈项目", identifier="ANYDEST")
     settings.QUALITY_DAQ_REPORT_KEYS = {
         "test-incidents": {
@@ -540,7 +544,9 @@ def test_report_only_progress_returns_status_without_internal_materials_or_diagn
     assert response.status_code == 200, response.content
     assert set(response.data) == {"defect", "source", "timeline", "comments"}
     assert all(set(item) == {"id", "actor", "action", "created_at", "status"} for item in response.data["timeline"])
-    assert set(response.data["defect"]) == {"id", "code", "title", "status", "created_at", "updated_at"}
+    assert set(response.data["defect"]) == {
+        "id", "code", "title", "status", "created_at", "updated_at", "module", "assignee_name", "assignment_origin"
+    }
     assert response.data["defect"]["status"] == "resolved"
     assert b"internal-" not in response.content and b"KN-PRIVATE" not in response.content
     fetched = call(f"/api/quality-auth/daq-reports/{report_id}/files/{file.id}/download/")
@@ -591,9 +597,11 @@ def test_report_timeline_uses_real_actors_and_state_changes_without_internal_not
     response = call(f"/api/quality-auth/daq-reports/{report_id}/")
     assert response.status_code == 200, response.content
     timeline = response.data["timeline"]
-    assert [row["action"] for row in timeline] == ["提交反馈", "开始处理", "提交回归", "验收关闭", "重新打开"]
-    assert [row["actor"] for row in timeline[1:]] == ["本次技术员", "本次技术员", "本次经理", "本次经理"]
-    assert [row["id"] for row in timeline[1:]] == [str(event.id) for event in events]
+    assert [row["action"] for row in timeline] == [
+        "提交反馈", "初步分派负责人", "开始处理", "提交回归", "验收关闭", "重新打开"
+    ]
+    assert [row["actor"] for row in timeline[2:]] == ["本次技术员", "本次技术员", "本次经理", "本次经理"]
+    assert [row["id"] for row in timeline[2:]] == [str(event.id) for event in events]
     assert all(row["created_at"] for row in timeline)
     assert str(opaque.id) not in {row["id"] for row in timeline}
     assert b"private-event-body-sentinel" not in response.content
@@ -670,3 +678,24 @@ def test_report_only_detail_returns_public_replies_without_internal_notes_or_cro
     defect.status = "closed"
     defect.save()
     assert len(call(f"/api/quality-auth/daq-reports/{defect.id}/").data["comments"]) == 1
+
+def test_no_legal_owner_rejects_report_without_creating_defect_then_same_event_recovers(reporting):
+    from plane.tests.contract.app.test_daq_reporting import call
+    from plane.license.models import Instance, InstanceAdmin
+
+    project, user, payload, _ = reporting
+    InstanceAdmin.objects.all().delete()
+    before = Defect.objects.count()
+    request = {**payload, "hubProjectId": str(project.id)}
+    response = call("/api/quality-auth/daq-reports/", request, "POST")
+    assert response.status_code == 503 and "负责人未配置" in str(response.data), response.content
+    assert Defect.objects.count() == before
+    instance = Instance.objects.create(
+        instance_name="recovery", instance_id=str(uuid4()), current_version="test", last_checked_at=timezone.now()
+    )
+    InstanceAdmin.objects.create(instance=instance, user=project.workspace.owner)
+    response = call("/api/quality-auth/daq-reports/", request, "POST")
+    assert response.status_code == 201, response.content
+    defect = Defect.objects.get(pk=response.data["issueId"])
+    assert defect.assignee_id == project.workspace.owner_id and defect.assignment_origin == "triage"
+    assert not ProjectMember.objects.filter(project=project, member=user).exists()

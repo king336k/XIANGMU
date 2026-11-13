@@ -283,6 +283,9 @@ class DaqOwnReportDetail(ReportingView):
                     "status": defect.status,
                     "created_at": defect.created_at,
                     "updated_at": defect.updated_at,
+                    "module": {"key": defect.module_id, "name": defect.module.name} if defect.module_id else None,
+                    "assignee_name": (defect.assignee.display_name or defect.assignee.username) if defect.assignee_id else "",
+                    "assignment_origin": defect.assignment_origin,
                 },
                 "source": receipt(link, self),
                 "timeline": report_timeline(defect),
@@ -338,6 +341,15 @@ def report_timeline(defect):
                 "status": event.status,
             }
         )
+    # Only the assignment action is public; internal reasons and diagnostic
+    # material references remain in the project platform's authorized views.
+    for event in defect.events.select_related("created_by").filter(
+        Q(note__startswith="诊断自动指派：") | Q(note__startswith="人工改派：") | Q(note__startswith="初步分派：")
+    ).order_by("created_at", "id"):
+        timeline.append({"id": str(event.id), "actor": actor_name(event.created_by),
+                         "action": ("诊断指派负责人" if event.note.startswith("诊断自动指派")
+                                    else "初步分派负责人" if event.note.startswith("初步分派") else "改派负责人"),
+                         "created_at": event.created_at, "status": event.status})
     from .models import TestExecution
 
     result_actions = {"passed": "回归通过", "failed": "回归失败", "blocked": "回归未完成", "inconclusive": "回归未完成"}

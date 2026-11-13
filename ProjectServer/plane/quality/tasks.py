@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Bounded background diagnostics: no command execution, no business-state mutation."""
+"""Bounded diagnostics with evidence-gated, single-owner assignment after completion."""
 
 import time
 from celery import shared_task
 from openai import APITimeoutError
 from django.db import transaction
 from django.utils import timezone
-from .models import DiagnosticJob
+from .models import DiagnosticJob, Defect
 from .diagnostic_materials import inspect, redact, diagnostic_search_query
 from .diagnostic_model import analyze_diagnostic
 from .diagnostic_rules import evaluate
@@ -21,7 +21,7 @@ def run_diagnostic(job_id):
         job = DiagnosticJob.objects.select_for_update().select_related("defect", "project").filter(pk=job_id).first()
         if not job or job.status != "queued":
             return
-        from .permissions import writable_member, capable
+        from .permissions import writable_member, capable, is_administrator
         from .data_regression import manager
 
         from .daq_reporting import report_only_diagnostic_access
@@ -36,14 +36,18 @@ def run_diagnostic(job_id):
         )
         from .diagnostics import automatic_source_available
 
-        if report_only:
+        administrator = not automatic and is_administrator(job.created_by_id)
+        if report_only or administrator:
             allowed = True
         if automatic and not automatic_source_available(job.defect):
             allowed = False
         if (
             not job.created_by_id
             or not job.created_by.is_active
-            or (not report_only and not writable_member(job.project_id, job.created_by_id, job.project.workspace.slug))
+            or (
+                not report_only and not administrator
+                and not writable_member(job.project_id, job.created_by_id, job.project.workspace.slug)
+            )
             or not allowed
         ):
             job.status = "failed"
@@ -116,7 +120,9 @@ def run_diagnostic(job_id):
                 try:
                     from .diagnostic_context import diagnostic_context
                     context_references = diagnostic_context(job, report_only=report_only)
-                    answer = analyze_diagnostic(config, model_text, sources, [*references, *context_references], materials)
+                    answer = analyze_diagnostic(
+                        config, model_text, sources, [*references, *context_references], materials
+                    )
                     result["context_references"] = context_references
                     result.update(answer, method="hybrid", notice="规则与模型分析", model_status="completed")
                 except (TimeoutError, APITimeoutError):
@@ -136,6 +142,8 @@ def run_diagnostic(job_id):
         status, code = "failed", "DIAGNOSTIC_FAILED"
     result["duration_ms"] = round((time.monotonic() - started) * 1000)
     with transaction.atomic():
+        # Match scheduling's defect -> job lock order before any assignment write.
+        Defect.objects.select_for_update().get(pk=job.defect_id)
         current = DiagnosticJob.objects.select_for_update().get(pk=job_id)
         if current.status != "running":
             return
@@ -146,6 +154,7 @@ def run_diagnostic(job_id):
             not current.created_by.is_active
             or (
                 not report_only_diagnostic_access(current)
+                and not (not automatic and is_administrator(current.created_by_id))
                 and not writable_member(current.project_id, current.created_by_id, current.project.workspace.slug)
             )
             or (automatic and not automatic_source_available(current.defect))
@@ -155,6 +164,17 @@ def run_diagnostic(job_id):
             current.status, current.result, current.error_code = status, result, code
         current.completed_at = timezone.now()
         current.save()
+        if current.status == "completed":
+            from .module_routing import route_completed
+            route_completed(current, materials)
+            assigned = Defect.objects.select_related("module", "assignee").get(pk=current.defect_id)
+            current.result = {**current.result, "assignment": {
+                "module": {"key": assigned.module_id, "name": assigned.module.name} if assigned.module_id else None,
+                "assignee": (assigned.assignee.display_name or assigned.assignee.username)
+                if assigned.assignee_id else "",
+                "origin": assigned.assignment_origin, "reason": assigned.assignment_reason,
+            }}
+            current.save(update_fields=["result"])
 
 
 @shared_task(name="plane.quality.tasks.sync_project_versions")

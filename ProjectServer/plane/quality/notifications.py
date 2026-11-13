@@ -1,25 +1,24 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Transactional in-app notifications; no mail or third-party delivery."""
 
-from plane.db.models import Notification, ProjectMember
-from .models import BusinessRole
-from .permissions import strict
-from django.db.models import Q
+from plane.db.models import Notification, ProjectMember, User
+from .permissions import strict, roles_for, is_administrator, writable_member
 
 
 def managers(project):
-    qs = ProjectMember.objects.filter(project=project, is_active=True)
-    if strict(project.id):
-        qs = qs.filter(
-            member_id__in=BusinessRole.objects.filter(project=project).filter(
-                Q(role__in=["PLATFORM_ADMIN", "PROJECT_MANAGER"])
-                | Q(additional_roles__contains=["PLATFORM_ADMIN"])
-                | Q(additional_roles__contains=["PROJECT_MANAGER"])
-            ).values("user_id")
+    rows = ProjectMember.objects.filter(
+        project=project, is_active=True, role__gte=15, member__is_active=True, member__is_bot=False
+    ).select_related("member")
+    return [
+        row.member_id
+        for row in rows
+        if writable_member(project.id, row.member_id, project.workspace.slug)
+        and (
+            bool(roles_for(project.id, row.member_id) & {"PROJECT_MANAGER", "PLATFORM_ADMIN"})
+            if strict(project.id)
+            else row.role == 20
         )
-    else:
-        qs = qs.filter(role=20)
-    return qs.values_list("member_id", flat=True)
+    ]
 
 
 def notify(project, actor, receivers, entity_id, title, path):
@@ -31,11 +30,19 @@ def notify(project, actor, receivers, entity_id, title, path):
             member_id__in={value for value in receivers if value},
             member__member_workspace__workspace=project.workspace,
             member__member_workspace__is_active=True,
+            member__member_workspace__role__gte=15,
+            member__is_active=True,
+            member__is_bot=False,
         )
         .exclude(member=actor)
         .values_list("member_id", flat=True)
         .distinct()
     )
+    allowed = set(allowed)
+    wanted = {value for value in receivers if value and value != getattr(actor, "id", None)}
+    for user in User.objects.filter(pk__in=wanted - allowed, is_active=True, is_bot=False):
+        if is_administrator(user):
+            allowed.add(user.pk)
     url = f"/{project.workspace.slug}/projects/{project.id}/{path}"
     for receiver in allowed:
         Notification.objects.create(
@@ -98,8 +105,15 @@ def serialize_with_current_status(notifications, request):
             member__member_workspace__is_active=True,
         ).values_list("project_id", flat=True)
     )
+    if any(row.entity_name == "quality" and row.project_id not in projects for row in rows) and is_administrator(
+        request.user
+    ):
+        projects.update(row.project_id for row in rows if row.entity_name == "quality")
     ids = {row.entity_identifier for row in rows if row.project_id in projects and row.entity_identifier}
-    defects = {row.id: row for row in Defect.objects.filter(id__in=ids, project_id__in=projects)}
+    defects = {
+        row.id: row
+        for row in Defect.objects.filter(id__in=ids, project_id__in=projects).select_related("module", "assignee")
+    }
     plans = {row.id: row for row in TestPlan.objects.filter(id__in=ids, project_id__in=projects)}
     issues = {row.id: row for row in Issue.objects.filter(id__in=ids, project_id__in=projects).select_related("state")}
     requirements = {row.issue_id: row for row in Requirement.objects.filter(issue_id__in=ids, project_id__in=projects)}
@@ -176,8 +190,22 @@ def serialize_with_current_status(notifications, request):
                     else defaults.get(issue.state.name, issue.state.name),
                     "available": True,
                 }
+        defect_context = None
+        if record and record.get("kind") == "defect":
+            defect = defects.get(row.entity_identifier)
+            if defect:
+                defect_context = {
+                    "module": {"key": defect.module_id, "name": defect.module.name} if defect.module_id else None,
+                    "assignee_name": (defect.assignee.display_name or defect.assignee.username)
+                    if defect.assignee_id
+                    else "",
+                    "origin": defect.assignment_origin,
+                    "reason": defect.assignment_reason,
+                    "url": (row.data or {}).get("quality", {}).get("url", ""),
+                }
         item["data"] = {
             **(item.get("data") or {}),
+            **({"defect_context": defect_context} if defect_context else {}),
             "current_record": record
             or {"kind": "record", "status": "unavailable", "label": "记录已移除或不可访问", "available": False},
         }

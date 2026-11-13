@@ -134,7 +134,27 @@ class TestExecution(QualityRecord):
         constraints = [models.UniqueConstraint(fields=["item", "request_id"], name="quality_execution_request_unique")]
 
 
+class ModuleCatalog(models.Model):
+    key = models.CharField(max_length=64, primary_key=True)
+    name = models.CharField(max_length=120, unique=True)
+
+
+class ModuleOwner(models.Model):
+    workspace = models.ForeignKey("db.Workspace", on_delete=models.CASCADE)
+    module = models.ForeignKey(ModuleCatalog, on_delete=models.PROTECT)
+    user = models.ForeignKey("db.User", on_delete=models.CASCADE)
+    created_by = models.ForeignKey("db.User", on_delete=models.SET_NULL, null=True, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["workspace", "module"], name="quality_workspace_module_owner_unique")
+        ]
+
+
 class Defect(QualityRecord):
+    module = models.ForeignKey(ModuleCatalog, on_delete=models.PROTECT, null=True, blank=True)
+    assignment_origin = models.CharField(max_length=16, blank=True)
+    assignment_reason = models.CharField(max_length=2000, blank=True)
     responsible_department = models.CharField(max_length=128, blank=True)
     component = models.CharField(max_length=128, blank=True)
     resolution_kind = models.CharField(max_length=24, default="fixed")

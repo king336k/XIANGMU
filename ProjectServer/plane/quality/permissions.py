@@ -323,6 +323,7 @@ def permission_for(view, request):
         "ExecutionDefect": "report",
         "DefectList": "report",
         "DefectDetail": "manage_defect",
+        "DefectReassign": "manage_defect",
         "DefectReportEdit": "report",
         "SourceDefect": "report",
         "DefectAttachments": "package",
