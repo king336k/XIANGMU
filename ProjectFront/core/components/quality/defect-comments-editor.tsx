@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useRef, useState } from "react";
+import { v4 as uuidv4 } from "uuid";
 import { LiteTextEditorWithRef } from "@plane/editor";
 import type { EditorRefApi, TFileHandler } from "@plane/editor";
 import { Bold, Code2, Heading2, Italic, List, ListOrdered, Paperclip, Quote, Smile, X } from "lucide-react";
@@ -91,13 +92,13 @@ export function DefectCommentsEditor({
     if (busy || uploading || (!sanitizeHTML(html) && !files.length)) return;
     setBusy(true);
     setError("");
-    const body = {
-      content_html: html || "<p></p>",
-      reply_to: reply?.id || null,
-      attachment_ids: files.map((file) => file.id),
-    };
-    intent.current = discussionIntent(intent.current, body, () => crypto.randomUUID());
     try {
+      const body = {
+        content_html: html || "<p></p>",
+        reply_to: reply?.id || null,
+        attachment_ids: files.map((file) => file.id),
+      };
+      intent.current = discussionIntent(intent.current, body, uuidv4);
       await qualityApi.write(endpoint, { ...body, request_id: intent.current.requestId });
       editor.current?.clearEditor();
       setHtml("");
@@ -298,11 +299,7 @@ export function DefectCommentsEditor({
         <span role={uploading ? "status" : undefined} className="text-11 text-secondary">
           {uploading ? "正在上传附件…" : "粘贴图片或拖入文件 · 最多10个，单个20MB · Ctrl+Enter 发布"}
         </span>
-        <Button
-          type="button"
-          disabled={busy || uploading || (!sanitizeHTML(html) && !files.length)}
-          onClick={() => void publish()}
-        >
+        <Button type="button" disabled={busy || uploading || (!sanitizeHTML(html) && !files.length)} onClick={publish}>
           {busy ? "正在发布…" : "发布评论"}
         </Button>
       </footer>

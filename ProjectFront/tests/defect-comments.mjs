@@ -54,7 +54,11 @@ test("评论检索编码、重试发布意图和附件总量覆盖边界", () =>
   );
   assert.doesNotThrow(() => helpers.validateDiscussionFiles([], [{ name: "ok", size: 20 * 1024 * 1024 }]));
 });
-function editorHarness() {
+function editorHarness({
+  failFirst = true,
+  uuidFactory = () => "12345678-1234-4234-8234-123456789abc",
+  intentFactory = helpers.discussionIntent,
+} = {}) {
   let cursor = 0,
     rcursor = 0,
     attempt = 0,
@@ -93,14 +97,15 @@ function editorHarness() {
     "@plane/editor": { LiteTextEditorWithRef: Editor },
     "@plane/ui": { Button },
     "@plane/utils": { sanitizeHTML: (v) => v.replace(/<[^>]*>/g, "").trim() },
-    "./defect-comments-data": helpers,
+    uuid: { v4: uuidFactory },
+    "./defect-comments-data": { ...helpers, discussionIntent: intentFactory },
     "./api": {
       errorMessage: (e) => e.message,
       qualityApi: {
         write: async (url, body) => {
           writes.push([url, body]);
           if (url.endsWith("/files/")) return { id: "file1", name: "记录.txt", size: 4, content_type: "text/plain" };
-          if (++attempt === 1) throw Error("网络中断");
+          if (++attempt === 1 && failFirst) throw Error("网络中断");
           return { id: "comment" };
         },
       },
@@ -339,4 +344,53 @@ test("表情在没有文字选区的当前光标处插入", () => {
   assert.deepEqual(h.inserted, ["👍"]);
   tree = h.render();
   assert.ok(!nodes(tree).some((n) => n.type === "button" && n.props["aria-label"] === "插入 👍"));
+});
+
+test("HTTP环境无crypto.randomUUID仍可发布评论并解除busy", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: { randomUUID: undefined } });
+  try {
+    const h = editorHarness({ failFirst: false });
+    let tree = h.render();
+    nodes(tree)
+      .find((n) => n.type === Editor)
+      .props.onChange({}, "<p>HTTP评论</p>");
+    tree = h.render();
+    await nodes(tree)
+      .find((n) => n.type === Button)
+      .props.onClick();
+    await new Promise((r) => setTimeout(r, 0));
+    tree = h.render();
+    assert.equal(h.writes.length, 1);
+    assert.equal(h.writes[0][1].request_id, "12345678-1234-4234-8234-123456789abc");
+    assert.equal(h.clear, 1);
+    assert.equal(nodes(tree).find((n) => n.type === Button).props.children, "发布评论");
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "crypto", descriptor);
+    else delete globalThis.crypto;
+  }
+});
+test("编号生成异常保留草稿并解除busy，展示错误后可重试", async () => {
+  const h = editorHarness({
+    failFirst: false,
+    intentFactory: () => {
+      throw Error("编号生成失败");
+    },
+  });
+  let tree = h.render();
+  nodes(tree)
+    .find((n) => n.type === Editor)
+    .props.onChange({}, "<p>不能丢失的草稿</p>");
+  tree = h.render();
+  await nodes(tree)
+    .find((n) => n.type === Button)
+    .props.onClick();
+  await new Promise((r) => setTimeout(r, 0));
+  tree = h.render();
+  assert.equal(h.writes.length, 0);
+  assert.equal(h.clear, 0);
+  assert.equal(nodes(tree).find((n) => n.type === Editor).props.initialValue, "<p>不能丢失的草稿</p>");
+  assert.equal(nodes(tree).find((n) => n.type === Button).props.children, "发布评论");
+  assert.equal(nodes(tree).find((n) => n.type === Button).props.disabled, false);
+  assert.ok(nodes(tree).some((n) => n.props?.role === "alert" && n.props.children === "编号生成失败"));
 });
