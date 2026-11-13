@@ -132,6 +132,9 @@ export type Defect = {
   id: string;
   title: string;
   severity: string;
+  severity_origin?: "manual" | "diagnostic" | "pending";
+  severity_reason?: string;
+  severity_job_id?: string | null;
   description: string;
   status: string;
   affected_build: string;
@@ -207,6 +210,7 @@ export const statusNames: Record<string, string> = {
   closed: "已关闭",
 };
 export const severityNames: Record<string, string> = {
+  "": "待评估",
   critical: "致命",
   major: "严重",
   minor: "一般",

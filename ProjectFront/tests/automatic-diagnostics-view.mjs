@@ -25,10 +25,11 @@ function render(rows) {
     if (id === "@plane/ui") return { Button: (props) => React.createElement("button", props) };
     if (id === "@/components/knowledge/assistant-markdown")
       return { AssistantMarkdown: ({ content }) => React.createElement("p", null, content) };
-    if (id === "./types") return { can: () => false };
+    if (id === "./types") return { can: () => false, severityNames: { "": "待评估", major: "严重", minor: "一般" } };
     if (id === "./use-collection-pagination")
       return { useCollectionPagination: () => ({ query: "page=1", paging: {} }) };
-    if (id === "./shared") return { Paging: () => null };
+    if (id === "./shared")
+      return { Paging: () => null, Badge: ({ label }) => React.createElement("span", null, label) };
     if (id === "./deployment-snapshots") return { DeploymentSnapshots: () => null };
     if (id === "./api") return { qualityApi: {}, errorMessage: String };
     if (id === "lucide-react") return new Proxy({}, { get: () => () => null });
@@ -176,4 +177,27 @@ test("已读取材料独立折叠默认展开，评价显示选择及改进说�
   assert.match(html, /aria-pressed="true"/);
   assert.match(html, /已反馈：需改进/);
   assert.match(html, /这是验收/);
+});
+
+test("诊断报告显示严重程度依据与引用原句，空值明确待评估", () => {
+  const base = { id: "severity", status: "completed", mode: "auto", created_at: "now" };
+  const html = render([
+    {
+      ...base,
+      result: {
+        severity_assessment: {
+          severity: "major",
+          basis: "原始数据完整性拒绝",
+          evidence: [{ reference: "FILE-log", quote: "MCAP write failed" }],
+        },
+      },
+    },
+  ]);
+  for (const value of ["本次判级建议", "严重", "原始数据完整性拒绝", "FILE-log", "MCAP write failed"])
+    assert.ok(html.includes(value), value);
+  const pending = render([
+    { ...base, result: { severity_assessment: { severity: "", basis: "缺少运行证据", evidence: [] } } },
+  ]);
+  assert.ok(pending.includes("待评估"));
+  assert.ok(!pending.includes("undefined"));
 });

@@ -4,6 +4,8 @@ import { createRequire } from "node:module";
 import test from "node:test";
 const require = createRequire(new URL("../package.json", import.meta.url));
 const ts = require("typescript");
+const walk = (n) =>
+  !n || typeof n !== "object" ? [] : Array.isArray(n) ? n.flatMap(walk) : [n, ...walk(n.props?.children)];
 function quick(field, value = {}, context = {}) {
   const writes = [],
     exports = {};
@@ -25,7 +27,7 @@ function quick(field, value = {}, context = {}) {
     }
     if (id === "./paged-record-select") return { PagedRecordSelect: () => null };
     if (id === "./api") return { qualityApi: { write: async (...args) => writes.push(args) } };
-    if (id === "./types") return { can: () => true, severityNames: { major: "严重", minor: "一般" } };
+    if (id === "./types") return { can: () => true, severityNames: { "": "待评估", major: "严重", minor: "一般" } };
     if (id === "./shared") return { Modal: () => {}, Field: () => {}, fieldClass: "field" };
     if (id === "react-router") return { Link: () => {} };
     if (id === "@/components/common/project-route-link") return { ProjectRouteLink: () => {} };
@@ -81,4 +83,15 @@ test("已关闭、归档、待交接、无技术员及非经理不提供错误�
     [{}, { is_manager: false }],
   ])
     assert.equal(quick("assignee", value, context).tree.props.onSubmit, undefined);
+});
+
+test("严重程度可保留待评估空值，保存不转换成默认严重", async () => {
+  const { tree, writes } = quick("severity", { severity: "" });
+  const select = walk(tree).find((n) => n.type === "select" && n.props.name === "severity");
+  assert.equal(select.props.defaultValue, "");
+  assert.ok(walk(select).some((n) => n.type === "option" && n.props.value === "" && n.props.children === "待评估"));
+  const form = new FormData();
+  form.set("severity", "");
+  await tree.props.onSubmit(form);
+  assert.deepEqual(writes[0], ["/q/defects/d/", { severity: "", expected_version: 4 }, "patch"]);
 });

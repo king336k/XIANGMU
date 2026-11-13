@@ -60,10 +60,13 @@ const context = {
 const modules = load("defect-detail", {
   "./types": {
     can: (c, k) => !!c.capabilities?.[k],
-    severityNames: { major: "严重" },
+    severityNames: { "": "待评估", major: "严重" },
     statusNames: { open: "待处理" },
   },
-  "./shared": { Modal: ({ children }) => React.createElement("main", null, children), Badge: () => null },
+  "./shared": {
+    Modal: ({ children }) => React.createElement("main", null, children),
+    Badge: ({ label }) => React.createElement("span", null, label),
+  },
   "./defect-disposition": {
     resolutionNames: { fixed: "按修复回归处理" },
     DefectDispositionPanel: ({ trigger }) =>
@@ -164,4 +167,18 @@ test("普通描述和不完整模板保留原文，不丢额外行或空行", ()
     assert.ok(html.includes(description));
     assert.equal((html.match(/<dt/g) || []).length, 0);
   }
+});
+
+test("待评估属性保留明确文字，自动判级依据可查看", () => {
+  const html = detail({ ...row, severity: "", severity_origin: "pending", severity_reason: "等待材料" });
+  assert.ok(html.includes("待评估"));
+  const automatic = detail({
+    ...row,
+    severity: "major",
+    severity_origin: "diagnostic",
+    severity_reason: "原始写入失败",
+    severity_job_id: "job-one",
+  });
+  assert.ok(automatic.includes("自动判级"));
+  assert.ok(automatic.includes("原始写入失败"));
 });

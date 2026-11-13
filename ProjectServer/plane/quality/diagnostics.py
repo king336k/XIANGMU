@@ -173,6 +173,8 @@ class DiagnosticSerializer(serializers.ModelSerializer):
                         "confidence_references": [],
                         "suggested_actions": [],
                         "verification_steps": [],
+                        "severity_assessment": {"severity": "", "basis": "引用已失效，待重新评估。", "evidence": []},
+                        "severity_proposal": {},
                     }
                 )
         data["result"].pop("input", None)

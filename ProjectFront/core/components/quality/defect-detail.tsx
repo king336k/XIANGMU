@@ -315,7 +315,7 @@ export function DefectDetail({
               {[
                 {
                   label: "严重程度",
-                  text: severityNames[value.severity],
+                  text: <Badge value={value.severity} label={severityNames[value.severity] || "待评估"} />,
                   field: "severity",
                   action: "调整严重程度",
                   editable: true,
@@ -382,6 +382,24 @@ export function DefectDetail({
                     )
                   ) : (
                     <p className="mt-1.5 px-2 text-13 break-words">{item.text}</p>
+                  )}
+                  {item.field === "severity" && value.severity_origin === "diagnostic" && (
+                    <details className="mt-1 px-2 text-11 text-secondary">
+                      <summary className="cursor-pointer" title={value.severity_reason || undefined}>
+                        自动判级
+                      </summary>
+                      <p
+                        className="mt-1 break-words"
+                        title={value.severity_job_id ? `诊断任务 ${value.severity_job_id}` : undefined}
+                      >
+                        {value.severity_reason || "依据待补充"}
+                      </p>
+                    </details>
+                  )}
+                  {item.field === "severity" && value.severity_origin === "manual" && (
+                    <p className="mt-1 px-2 text-11 text-secondary" title={value.severity_reason || undefined}>
+                      人工设置
+                    </p>
                   )}
                   {item.field === "case" && value.source_execution && (
                     <p className="mt-1 px-2 text-11 text-secondary">来自测试执行，保留来源用例</p>

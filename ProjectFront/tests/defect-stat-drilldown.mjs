@@ -192,3 +192,27 @@ test("已关闭卡片直接展示数量和绿色状态，关闭率作为补充",
     )
   );
 });
+
+test("待评估严重程度按空值计数并用unassessed下钻", () => {
+  let selected;
+  const exp = load("defect-statistics", {
+    ...common,
+    "./types": { statusNames: {}, severityNames: { "": "待评估", major: "严重" } },
+    react: {
+      ...React,
+      useState: () => [
+        undefined,
+        (v) => {
+          selected = v;
+        },
+      ],
+    },
+    swr: { default: () => ({ data: { ...data, by_severity: [{ value: "", count: 2 }] } }) },
+  });
+  const tree = exp.DefectStatistics({ base: "/q/", params: new URLSearchParams() });
+  const distribution = walk(tree).find((n) => n.type === "Distribution" && n.props.title === "严重程度");
+  assert.equal(distribution.props.rows.find((n) => n.key === "").count, 2);
+  assert.ok(distribution.props.rows.find((n) => n.key === "").color);
+  distribution.props.onSelect("");
+  assert.deepEqual(selected, { title: "待评估", filters: { severity: "unassessed" }, expectedCount: 2 });
+});

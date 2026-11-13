@@ -134,6 +134,8 @@ def filter_records(queryset, params, user):
             try:
                 if key == "assignee_id" and raw == "unassigned":
                     filters[lookup + "__isnull"] = True
+                elif key == "severity" and raw == "unassessed":
+                    filters[lookup] = ""
                 else:
                     destination = (
                         source_filters

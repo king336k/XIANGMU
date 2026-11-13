@@ -28,6 +28,7 @@ const categoryNames: Record<string, string> = {
   manual: "平台新建",
 };
 const severityColors: Record<string, string> = {
+  "": "var(--text-color-secondary)",
   critical: "var(--text-color-danger-primary)",
   major: "var(--text-color-warning-primary)",
   minor: "var(--text-color-accent-primary)",
@@ -165,7 +166,7 @@ export function DefectStatistics({
           onSelect={(value) =>
             setDetail({
               title: severityNames[value],
-              filters: { severity: value },
+              filters: { severity: value || "unassessed" },
               expectedCount: data.by_severity.find((row) => row.value === value)?.count,
             })
           }

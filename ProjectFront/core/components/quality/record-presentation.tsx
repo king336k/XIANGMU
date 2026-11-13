@@ -65,7 +65,7 @@ export function RecordPresentation({
     const label = field === "severity" ? "调整严重程度" : "指派负责人";
     const content =
       field === "severity" ? (
-        <Badge value={row.severity || "major"} />
+        <Badge value={row.severity ?? ""} />
       ) : (
         <Badge value={row.values[1] === "未指派" ? "pending" : "in_progress"} label={row.values[1] || "未指派"} />
       );
@@ -107,10 +107,10 @@ export function RecordPresentation({
         {row.subtitle && <p className="text-11 break-words text-secondary">{row.subtitle}</p>}
         <div className="flex flex-wrap items-center gap-2 text-11">
           {statusLabel(row)}
-          {row.severity && fieldLabel(row, "severity")}
-          {row.severity && fieldLabel(row, "assignee")}
+          {row.severity !== undefined && fieldLabel(row, "severity")}
+          {row.severity !== undefined && fieldLabel(row, "assignee")}
           <span className="text-secondary">
-            {(row.severity ? row.values.slice(2) : row.values).filter(Boolean).join(" · ")}
+            {(row.severity !== undefined ? row.values.slice(2) : row.values).filter(Boolean).join(" · ")}
           </span>
         </div>
         {renderActions && <div className="flex flex-wrap gap-2">{renderActions(row.id)}</div>}
@@ -213,9 +213,9 @@ export function RecordPresentation({
                 <td className="p-3 whitespace-nowrap">{statusLabel(row)}</td>
                 {columns.map((column, index) => (
                   <td key={column} className="p-3">
-                    {column === "严重程度" && row.severity
+                    {column === "严重程度" && row.severity !== undefined
                       ? fieldLabel(row, "severity")
-                      : column === "负责人" && row.severity
+                      : column === "负责人" && row.severity !== undefined
                         ? fieldLabel(row, "assignee")
                         : row.values[index] || "—"}
                   </td>

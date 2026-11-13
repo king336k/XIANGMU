@@ -487,6 +487,7 @@ class DefectDetail(QualityView):
         verification_method = data.pop("verification_method", "regression")
         verification_note = data.pop("verification_note", "")
         previous_assignee = defect.assignee_id
+        previous_severity = defect.severity
         old_status = defect.status
         new_status = data.get("status", old_status)
         allowed = {
@@ -575,6 +576,10 @@ class DefectDetail(QualityView):
             invalidate_knowledge(defect, request.user)
         for key, value in data.items():
             setattr(defect, key, value)
+        if "severity" in data:
+            defect.severity_origin = "manual" if defect.severity else "pending"
+            defect.severity_reason = "人工调整严重程度。" if defect.severity else "等待下次诊断评估。"
+            defect.severity_job = None
         if "assignee_id" in data and data["assignee_id"] != previous_assignee:
             defect.assignment_origin = "manual"
             defect.assignment_reason = "人工选择负责人。"
@@ -598,7 +603,11 @@ class DefectDetail(QualityView):
                 note=(
                     f"人工验证关闭（{defect.fixed_build}）：{verification_note}"
                     if new_status == "closed" and verification_method == "manual"
-                    else scope_note or data.get("resolution", "更新缺陷")
+                    else scope_note
+                    or (
+                        f"人工调整严重程度：{previous_severity or '待评估'} → {defect.severity or '待评估'}"
+                        if "severity" in data else data.get("resolution", "更新缺陷")
+                    )
                 ),
                 created_by=request.user,
             )

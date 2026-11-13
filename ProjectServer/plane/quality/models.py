@@ -170,6 +170,11 @@ class Defect(QualityRecord):
     )
     title = models.CharField(max_length=255)
     severity = models.CharField(max_length=16, default="major")
+    severity_origin = models.CharField(max_length=16, default="manual")
+    severity_reason = models.CharField(max_length=2000, blank=True)
+    severity_job = models.ForeignKey(
+        "DiagnosticJob", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
     description = models.TextField(blank=True)
     affected_build = models.CharField(max_length=120, blank=True)
     fixed_build = models.CharField(max_length=120, blank=True)

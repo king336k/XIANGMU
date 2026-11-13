@@ -162,6 +162,11 @@ def test_revocation_hides_report_only_history_and_confidence(current, mocker, re
         reason="隔离测试",
     )
     job, refs = execute(current, mocker)
+    job.result.update(
+        severity_assessment={"severity": "major", "basis": "受控引用依据", "evidence": []},
+        severity_proposal={"severity": "major", "basis": "旧模型建议", "evidence": []},
+    )
+    job.save(update_fields=["result"])
     assert f"KN-{article.id}-v1" in knowledge_ids(refs)
     if revocation == "article_tag":
         article.tags = []
@@ -184,6 +189,8 @@ def test_revocation_hides_report_only_history_and_confidence(current, mocker, re
     assert result["model_confidence"] is None
     assert result["confidence_basis"] == "" and result["confidence_references"] == []
     assert result["suggested_actions"] == [] and result["verification_steps"] == []
+    assert result["severity_assessment"]["severity"] == "" and result["severity_assessment"]["evidence"] == []
+    assert result["severity_proposal"] == {}
 
 
 def test_report_only_knowledge_injection_does_not_grant_editorial_api_access(current, mocker):

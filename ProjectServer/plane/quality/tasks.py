@@ -207,6 +207,14 @@ def run_diagnostic(job_id):
             from .module_routing import route_completed
 
             route_completed(current, materials)
+            from .diagnostic_severity_apply import apply_severity
+
+            assessment = apply_severity(current, current.result, materials)
+            current.result = {
+                **current.result,
+                "severity_proposal": current.result.get("severity_assessment", {}),
+                "severity_assessment": assessment,
+            }
             assigned = Defect.objects.select_related("module", "assignee").get(pk=current.defect_id)
             current.result = {
                 **current.result,

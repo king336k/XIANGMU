@@ -71,7 +71,9 @@ class DefectInput(serializers.Serializer):
     expected_version = serializers.IntegerField(min_value=1, required=False)
     case_id = serializers.UUIDField(required=False, allow_null=True)
     title = serializers.CharField(max_length=255, required=False)
-    severity = serializers.ChoiceField(choices=("critical", "major", "minor", "trivial"), required=False)
+    severity = serializers.ChoiceField(
+        choices=("critical", "major", "minor", "trivial"), allow_blank=True, required=False
+    )
     description = serializers.CharField(max_length=20000, allow_blank=True, required=False)
     affected_build = serializers.CharField(max_length=120, allow_blank=True, required=False)
     fixed_build = serializers.CharField(max_length=120, allow_blank=True, required=False)
@@ -381,6 +383,9 @@ class DefectSerializer(AuthoredRecordSerializer):
             "case_title",
             "title",
             "severity",
+            "severity_origin",
+            "severity_reason",
+            "severity_job_id",
             "manual_verification_allowed",
             "verification_scope",
             "requires_data_regression",

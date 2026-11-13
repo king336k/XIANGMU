@@ -297,7 +297,8 @@ class DaqReports(DaqView):
                 raise Conflict("同一上报编号不能对应不同内容。")
             return Response(receipt(existing, self))
         defect = Defect.objects.create(
-            project=project, created_by=request.user, title=data["title"], description=data["description"]
+            project=project, created_by=request.user, title=data["title"], description=data["description"],
+            severity="", severity_origin="pending",
         )
         report = DaqReport.objects.create(
             project=project,

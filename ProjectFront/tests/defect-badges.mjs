@@ -145,3 +145,51 @@ test("DAQ来源分类以中文显示，保留原始业务标题内容", () => {
   assert.equal(exports.defectDisplayTitle("DataAnomaly: 上传后缺少日志"), "数据异常：上传后缺少日志");
   assert.equal(exports.defectDisplayTitle("页面提示调整"), "页面提示调整");
 });
+
+test("真实严重程度字典包含灰色待评估，不借用严重默认值", () => {
+  const exp = {};
+  new Function(
+    "exports",
+    ts.transpileModule(readFileSync(new URL("../core/components/quality/types.ts", import.meta.url), "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS },
+    }).outputText
+  )(exp);
+  assert.equal(exp.severityNames[""], "待评估");
+  const { Badge } = load("record-badge", { "./types": { ...names, severityNames: exp.severityNames } });
+  const html = renderToStaticMarkup(React.createElement(Badge, { value: "" }));
+  assert.ok(html.includes("待评估") && html.includes("text-secondary"));
+  assert.ok(!html.includes("text-warning-primary"));
+});
+
+test("空严重程度在三种布局保持待评估标签和独立编辑入口", () => {
+  const severityNames = { ...names.severityNames, "": "待评估" };
+  const badge = load("record-badge", { "./types": { ...names, severityNames } });
+  const { RecordPresentation } = load("record-presentation", {
+    "./record-badge": badge,
+    "./table-header-filter": { TableHeaderFilter: ({ label }) => label },
+  });
+  for (const layout of ["list", "table", "board"]) {
+    const changed = [];
+    const props = {
+      rows: [{ id: "pending", title: "待判级反馈", status: "open", severity: "", values: ["待评估", "技术员", "v1"] }],
+      layout,
+      kind: "defects",
+      columns: ["严重程度", "负责人", "影响版本"],
+      onOpen() {},
+      canChangeField: () => true,
+      onFieldChange: (id, field) => changed.push([id, field]),
+    };
+    const tree = RecordPresentation(props);
+    clickMatching(tree, ["调整严重程度：待判级反馈", "指派负责人：待判级反馈"]);
+    assert.deepEqual(
+      changed,
+      [
+        ["pending", "severity"],
+        ["pending", "assignee"],
+      ],
+      layout
+    );
+    const html = renderToStaticMarkup(React.createElement(RecordPresentation, props));
+    assert.ok(html.includes("待评估"), layout);
+  }
+});

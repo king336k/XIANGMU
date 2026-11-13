@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { Paging } from "./shared";
+import { Paging, Badge } from "./shared";
 import { useCollectionPagination } from "./use-collection-pagination";
 import { renderNumericDateTime } from "@plane/utils";
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
-import { can } from "./types";
+import { can, severityNames } from "./types";
 import { AssistantMarkdown } from "@/components/knowledge/assistant-markdown";
 import { DeploymentSnapshots } from "./deployment-snapshots";
 import { FileText, ChevronRight, RotateCw, CircleCheck, Download } from "lucide-react";
@@ -21,6 +21,7 @@ type Job = {
   feedback?: "helpful" | "unhelpful" | "";
   feedback_note?: string;
   result: {
+    severity_assessment?: { severity: string; basis: string; evidence: { reference: string; quote: string }[] };
     assignment?: { module: { key: string; name: string } | null; assignee: string; origin: string; reason: string };
     method?: string;
     model_status?: string;
@@ -210,6 +211,28 @@ export function DiagnosticsPanel({
               </details>
             )}
           </div>
+        )}
+        {job.result.severity_assessment && (
+          <details className="rounded-md border border-subtle bg-layer-1 px-3 py-2 text-12">
+            <summary className="flex cursor-pointer items-center gap-2">
+              <span>本次判级建议</span>
+              <Badge
+                value={job.result.severity_assessment.severity}
+                label={severityNames[job.result.severity_assessment.severity] || "待评估"}
+              />
+              <span className="text-11 text-secondary">判级依据</span>
+            </summary>
+            <p className="mt-2 break-words text-secondary">{job.result.severity_assessment.basis}</p>
+            {job.result.severity_assessment.evidence?.map((item) => (
+              <blockquote
+                key={`${item.reference}:${item.quote}`}
+                className="mt-2 border-l border-subtle pl-2 text-11 text-secondary"
+              >
+                <span className="break-all">{item.reference}</span>
+                <p className="mt-1 break-words whitespace-pre-wrap">{item.quote}</p>
+              </blockquote>
+            ))}
+          </details>
         )}
         {["queued", "running"].includes(job.status) && can(context, "manage_defect") && (
           <Button

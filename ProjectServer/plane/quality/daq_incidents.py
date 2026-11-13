@@ -308,6 +308,8 @@ class DaqIncidents(DaqView):
             title=title,
             description=description,
             verification_scope="functional",
+            severity="",
+            severity_origin="pending",
         )
         link = SourceLink.objects.create(
             project=project,
