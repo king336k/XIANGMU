@@ -122,7 +122,8 @@ class DefectCollaboration(QualityView):
         defect = self.obj(Defect, pk)
         from .collaboration_admin import internal_access
 
-        comments = defect.comments.select_related("created_by")
+        # Rich discussions have their own tab; retain only legacy notes/public replies in operation history.
+        comments = defect.comments.filter(request_id__isnull=True).select_related("created_by")
         if not internal_access(self.project_id, request.user, self.workspace_slug):
             comments = comments.filter(visibility="public")
         return self.listing(comments, CommentSerializer)

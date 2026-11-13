@@ -336,6 +336,31 @@ class DefectComment(QualityRecord):
     defect = models.ForeignKey(Defect, on_delete=models.PROTECT, related_name="comments")
     content = models.TextField()
     visibility = models.CharField(max_length=16, default="public")
+    content_html = models.TextField(blank=True)
+    request_id = models.UUIDField(null=True, blank=True)
+    request_hash = models.CharField(max_length=64, blank=True)
+    reply_to = models.ForeignKey("self", on_delete=models.PROTECT, null=True, blank=True, related_name="replies")
+
+    class Meta(QualityRecord.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["defect", "created_by", "request_id"], name="quality_comment_request_unique"
+            )
+        ]
+
+
+class CommentAttachment(QualityRecord):
+    """Private discussion files never enter DAQ evidence or diagnostic packages."""
+
+    defect = models.ForeignKey(Defect, on_delete=models.PROTECT, related_name="comment_files")
+    comment = models.ForeignKey(
+        DefectComment, on_delete=models.PROTECT, null=True, blank=True, related_name="attachments"
+    )
+    name = models.CharField(max_length=255)
+    size = models.PositiveBigIntegerField()
+    sha256 = models.CharField(max_length=64)
+    storage_key = models.CharField(max_length=64)
+    content_type = models.CharField(max_length=100)
 
 
 class CollaborationSettings(QualityRecord):

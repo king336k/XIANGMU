@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from django.urls import path
-from . import attachments, requirements
+from . import attachments, requirements, discussion
 from .attachment_archive import DefectAttachmentArchive
 from .roles import RoleList, RolePolicy
 from . import views, plans
@@ -123,6 +123,14 @@ urlpatterns = [
     path("reports/<uuid:pk>/download/", reports.ReportDownload.as_view()),
     path("source-defects/", sources.SourceDefect.as_view()),
     path("defects/<uuid:pk>/collaboration/", sources.DefectCollaboration.as_view()),
+    path("defects/<uuid:pk>/comments/", discussion.DefectDiscussion.as_view()),
+    path("defects/<uuid:pk>/comments/files/", discussion.DiscussionFiles.as_view()),
+    path("defects/<uuid:pk>/comments/files/<uuid:file_id>/download/", discussion.DiscussionFile.as_view()),
+    path(
+        "defects/<uuid:pk>/comments/files/<uuid:file_id>/preview/",
+        discussion.DiscussionFile.as_view(),
+        {"preview": True},
+    ),
     path("defects/<uuid:pk>/sources/", sources.DefectSources.as_view()),
     path("packages/", sources.PackageList.as_view()),
     path("packages/preflight/", sources.PackagePreflight.as_view()),
