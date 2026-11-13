@@ -269,15 +269,55 @@ def impact(text):
     return found
 
 
-def pending():
-    return {"severity": "", "basis": PENDING, "evidence": []}
+def pending(code="evidence_or_assessment_unverified"):
+    return {"severity": "", "basis": PENDING, "evidence": [], "validation_code": code}
+
+
+def boolean_context_fragment(quote, text):
+    """Allow literal provenance flags together only when one current JSON object contains them."""
+    try:
+        fields = json.loads("{" + quote + "}")
+    except (ValueError, TypeError, RecursionError):
+        return False
+    if not isinstance(fields, dict) or not fields or not all(type(value) is bool for value in fields.values()):
+        return False
+    visits = 0
+
+    def current(value, depth=0):
+        nonlocal visits
+        visits += 1
+        if depth > 24 or visits > 10000:
+            return False
+        if isinstance(value, dict):
+            if all(type(value.get(key)) is bool and value[key] == expected for key, expected in fields.items()):
+                return True
+            return any(
+                current(child, depth + 1)
+                for key, child in value.items()
+                if key
+                not in {"history", "examples", "example", "documentation", "previous", "preceding_lines", "startupLog"}
+            )
+        if isinstance(value, list):
+            return any(current(child, depth + 1) for child in value[:100])
+        return False
+
+    for candidate in [text, *text.splitlines()]:
+        if quote not in candidate:
+            continue
+        try:
+            document = json.loads(candidate)
+        except (ValueError, TypeError, RecursionError):
+            continue
+        if current(document):
+            return True
+    return False
 
 
 def quote_supported(quote, text):
     """A quoted substring must retain its own line/JSON observation's qualifications."""
     claimed = impact(quote)
-    if not claimed:
-        return False
+    if not claimed and boolean_context_fragment(quote, text):
+        return True
     try:
         document = json.loads(text)
     except (ValueError, TypeError, RecursionError):
@@ -303,7 +343,9 @@ def quote_supported(quote, text):
                 return any(current_node(item, human, depth + 1) for item in value[:100])
             if not isinstance(value, dict):
                 return False
-            if any(NEGATED.search(value[key]) for key in ("context", "description") if isinstance(value.get(key), str)):
+            if claimed and any(
+                NEGATED.search(value[key]) for key in ("context", "description") if isinstance(value.get(key), str)
+            ):
                 return False
             if value == selected and claimed.issubset(impact(json.dumps(value, ensure_ascii=False))):
                 return True
@@ -333,7 +375,9 @@ def quote_supported(quote, text):
         if context.lstrip().startswith("{") and quote.strip() != context.strip():
             offset = text.find(quote, offset + 1)
             continue
-        if claimed.issubset(impact(context)):
+        if not claimed and quote.strip() == context.strip():
+            return True
+        if claimed and claimed.issubset(impact(context)):
             return True
         offset = text.find(quote, offset + 1)
     return False
@@ -412,7 +456,7 @@ def propose(job, result, materials=None):
             or count > original
             or scan_content(text)
         ):
-            return pending()
+            return pending("source_integrity_unverified")
         entry = source.get("archive_entry")
         if entry is not None and (
             not isinstance(entry, str)
@@ -449,7 +493,6 @@ def propose(job, result, materials=None):
             not isinstance(reference, str)
             or reference not in verified
             or reference not in cited
-            or reference in seen
             or not isinstance(quote, str)
             or not quote.strip()
             or len(quote) > 1500
@@ -457,11 +500,17 @@ def propose(job, result, materials=None):
             or scan_content(quote)
             or not quote_supported(quote, verified[reference])
         ):
-            return pending()
-        seen.add(reference)
-        quotes.append(quote)
+            return pending("quote_context_unverified")
+        pair = (reference, quote)
+        if pair in seen:
+            continue
+        seen.add(pair)
+        # Context can explain scope without independently establishing impact.
+        # Never concatenate non-impact snippets into a new grade-bearing claim.
+        if impact(quote):
+            quotes.append(quote)
         safe_evidence.append({"reference": reference, "quote": quote})
-    observed = impact("\n".join(quotes))
+    observed = set().union(*(impact(quote) for quote in quotes))
     all_text = "\n".join(verified.values())
     broader = impact(all_text)
     if not observed or not broader or not observed.issubset(broader):

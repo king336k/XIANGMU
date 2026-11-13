@@ -492,3 +492,95 @@ def test_complete_current_human_observations_array_quote_preserves_normal_combin
     text = json.dumps({"observations": items, "padding": "x" * 1800})
     job, result, _ = incident(text, "trivial", quote=json.dumps(items))
     assert assess(job, result)["severity"] == "trivial"
+
+
+def test_current_failure_with_complete_nonimpact_manifest_context_is_assessable(incident):
+    import json
+
+    job, result, _ = incident("ERROR DAQ_MCAP_MAX_MESSAGES_PER_FILE must be an unsigned decimal integer", "minor")
+    manifest = json.dumps({"synthetic": True, "robot_execution": "not_performed", "scope": "source_contract_replay"})
+    context_job, context_result, context_file = incident(manifest, "minor")
+    # Keep the manifest in the same current feedback/project, using real verified file rows.
+    context_file.package.defect = job.defect
+    context_file.package.save(update_fields=["defect"])
+    result["input"]["files"] += context_result["input"]["files"]
+    result["sources"] += context_result["sources"]
+    result["citations"] += context_result["citations"]
+    context_ref = context_result["citations"][0]["reference"]
+    result["severity_assessment"]["evidence"].append({"reference": context_ref, "quote": manifest})
+    got = assess(job, result)
+    assert got["severity"] == "minor"
+    assert len(got["evidence"]) == 2
+    assert context_job.defect_id != job.defect_id  # Input selection, not another job result, establishes ownership.
+
+
+def test_two_distinct_relevant_quotes_from_one_current_file_are_valid(incident):
+    first = "ERROR failure_reason=packet_timeline_failed"
+    second = "INFO raw_status=finalized"
+    job, result, _ = incident(first + "\n" + second, "minor", quote=first)
+    reference = result["citations"][0]["reference"]
+    result["severity_assessment"]["evidence"].append({"reference": reference, "quote": second})
+    got = assess(job, result)
+    assert got["severity"] == "minor"
+    assert [row["quote"] for row in got["evidence"]] == [first, second]
+
+
+def test_identical_evidence_pairs_are_deduplicated_after_validation(incident):
+    job, result, _ = incident("ERROR raw_status=failed", "major")
+    result["severity_assessment"]["evidence"] *= 2
+    got = assess(job, result)
+    assert got["severity"] == "major"
+    assert len(got["evidence"]) == 1
+
+
+def test_context_only_evidence_cannot_construct_an_impact_grade(incident):
+    job, result, _ = incident(
+        "INFO raw_status=finalized\nINFO synthetic=true", "minor", quote="INFO raw_status=finalized"
+    )
+    reference = result["citations"][0]["reference"]
+    result["severity_assessment"]["evidence"].append({"reference": reference, "quote": "INFO synthetic=true"})
+    assert assess(job, result)["severity"] == ""
+
+
+@pytest.mark.parametrize("context", ["MCAP write failed", "ERROR MCAP write failed"])
+def test_context_quote_cannot_hide_its_own_negation_even_beside_a_supported_failure(incident, context):
+    first = "ERROR raw_status=failed"
+    job, result, _ = incident(first + "\nINFO 尚未确认 ERROR MCAP write failed", "major", quote=first)
+    reference = result["citations"][0]["reference"]
+    result["severity_assessment"]["evidence"].append({"reference": reference, "quote": context})
+    assert assess(job, result)["severity"] == ""
+
+
+def test_nonimpact_manifest_boolean_field_fragment_retains_provenance_without_blocking_grade(incident):
+    import json
+
+    native = "ERROR DAQ_MCAP_MAX_MESSAGES_PER_FILE must be an unsigned decimal integer"
+    manifest = json.dumps(
+        {"robot_commands_executed": False, "recording_started": False, "product_files_modified": False}
+    )
+    quote = '"robot_commands_executed": false, "recording_started": false, "product_files_modified": false'
+    job, result, _ = incident(native + "\n" + manifest, "minor", quote=native)
+    reference = result["citations"][0]["reference"]
+    result["severity_assessment"]["evidence"].append({"reference": reference, "quote": quote})
+    got = assess(job, result)
+    assert got["severity"] == "minor"
+    assert got["evidence"][1]["quote"] == quote
+
+
+@pytest.mark.parametrize(
+    "text,quote",
+    [
+        ('{"history":{"recording_started":false}}', '"recording_started":false'),
+        ('{"recording_started":true}', '"recording_started":false'),
+        ('{"raw_status":"failed"}', '"raw_status":"failed"'),
+        ('{"a":false,"nested":{"b":false}}', '"a":false,"b":false'),
+    ],
+)
+def test_manifest_context_fragments_need_current_same_object_boolean_values(incident, text, quote):
+    native = "ERROR DAQ_MCAP_MAX_MESSAGES_PER_FILE must be an unsigned decimal integer"
+    job, result, _ = incident(native + "\n" + text, "minor", quote=native)
+    reference = result["citations"][0]["reference"]
+    result["severity_assessment"]["evidence"].append({"reference": reference, "quote": quote})
+    got = assess(job, result)
+    assert got["severity"] == ""
+    assert got["validation_code"] == "quote_context_unverified"
