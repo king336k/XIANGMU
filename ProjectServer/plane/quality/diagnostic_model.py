@@ -55,6 +55,10 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
             "reference": f"FILE-{row['file_id']}" + (f":{row['archive_entry']}" if row.get("archive_entry") else ""),
             "title": row["name"],
             "read_bytes": row["read_bytes"],
+            "file_bytes": row.get("file_bytes"),
+            "archive_entry": row.get("archive_entry"),
+            "original_bytes_scope": "archive_entry" if row.get("archive_entry") else "attachment",
+            "scanned_bytes": row.get("scanned_bytes"),
             "content": row.get("excerpt", ""),
         }
         for row in sources

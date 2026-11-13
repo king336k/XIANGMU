@@ -196,6 +196,7 @@ SOURCE_TELEOP_PHRASES = (
     "[PICO_RECENTER] failed",
     "[RESET_ERROR] type=feedback_unavailable",
     "[pico_video] video session open failed",
+    "[pico_video] media failure stage=",
 )
 SOURCE_TELEOP_WARN_TAGS = ("[VR_INPUT_MODE_CONFLICT]", "[VR_RAW_HAND_INVALID]", "[VR_RAW_HAND_INVALID_BEGIN]")
 

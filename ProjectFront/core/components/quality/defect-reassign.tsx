@@ -28,9 +28,10 @@ export function DefectReassign({
       : null,
     (url: string) => qualityApi.read<{ module_options: { key: string; name: string }[] }>(url)
   );
-  const members = context.members.filter((member) =>
-    (member.business_roles || [member.business_role]).includes("TECHNICIAN")
-  );
+  const members = context.members.filter((member) => {
+    const roles = member.business_roles || [member.business_role];
+    return roles.includes("TECHNICIAN") || (!module && (member.is_administrator || roles.includes("PROJECT_MANAGER")));
+  });
   const allowed =
     !value.archived_at &&
     value.status !== "closed" &&
@@ -62,7 +63,14 @@ export function DefectReassign({
         <select
           aria-label="责任模块"
           value={module}
-          onChange={(event) => setModule(event.target.value)}
+          onChange={(event) => {
+            const next = event.target.value;
+            setModule(next);
+            const selected = context.members.find((member) => member.id === assignee);
+            if (next && selected && !(selected.business_roles || [selected.business_role]).includes("TECHNICIAN")) {
+              setAssignee("");
+            }
+          }}
           className={fieldClass}
         >
           <option value="">待确认</option>

@@ -25,3 +25,9 @@ def test_success_and_history_are_not_current_source_fault(value):
 )
 def test_explicit_clear_or_example_is_not_an_active_alarm(line):
     assert source_fault_modules(line) == set()
+
+
+def test_pico_video_media_failure_has_same_owner_at_error_severity():
+    from plane.quality.module_routing import source_fault_modules
+
+    assert source_fault_modules("ERROR [pico_video] media failure stage=encode_submit") == {"teleop"}

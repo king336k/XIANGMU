@@ -50,8 +50,10 @@ class QualityPermission(BasePermission):
             return False
         if is_administrator(request.user):
             return Project.objects.filter(
-                pk=view.project_id, workspace__slug=view.workspace_slug,
-                archived_at__isnull=True, workspace__deleted_at__isnull=True,
+                pk=view.project_id,
+                workspace__slug=view.workspace_slug,
+                archived_at__isnull=True,
+                workspace__deleted_at__isnull=True,
             ).exists()
         if not WorkspaceMember.objects.filter(
             workspace__slug=view.workspace_slug, member=request.user, is_active=True
@@ -203,9 +205,7 @@ def plan_queryset():
     )
     return TestPlan.objects.select_related(
         "assignee", "data_regression__binding", "defect_verification__defect"
-    ).prefetch_related(
-        Prefetch("items", queryset=items), "workflow_events__created_by"
-    )
+    ).prefetch_related(Prefetch("items", queryset=items), "workflow_events__created_by")
 
 
 class PlanList(QualityView):
@@ -334,6 +334,7 @@ class ExecutionList(QualityView):
         )
         if verification:
             from .defect_verification import sync_plan, audit
+
             sync_plan(verification)
             audit(verification.defect, request.user, f"记录用例实测第{verification.round_no}轮：{execution.result}")
         return Response(ExecutionSerializer(execution).data, status=201)
@@ -580,6 +581,7 @@ class DefectDetail(QualityView):
         defect.edit_version += 1
         defect.save()
         from .defect_verification import latest, sync_plan
+
         verification = latest(defect)
         if verification:
             sync_plan(verification)
@@ -614,10 +616,7 @@ class DefectReassignPermission(QualityPermission):
         return bool(
             request.user.is_authenticated
             and (
-                is_administrator(request.user)
-                or writable_member(
-                    view.project_id, request.user.id, view.workspace_slug
-                )
+                is_administrator(request.user) or writable_member(view.project_id, request.user.id, view.workspace_slug)
             )
         )
 
@@ -637,9 +636,7 @@ class DefectReassign(QualityView):
             expected_version = serializers.IntegerField(min_value=1)
             assignee_id = serializers.UUIDField(allow_null=True)
             reason = serializers.CharField(max_length=2000)
-            module_key = serializers.RegexField(
-                r"^[a-z][a-z0-9_-]{0,63}$", required=False, allow_null=True
-            )
+            module_key = serializers.RegexField(r"^[a-z][a-z0-9_-]{0,63}$", required=False, allow_null=True)
 
         data = self.input(ReassignInput)
         defect = get_object_or_404(
@@ -652,27 +649,30 @@ class DefectReassign(QualityView):
         administrator = is_administrator(request.user)
         allowed = administrator or (
             writable_member(self.project_id, request.user.id, self.workspace_slug)
-            and (
-                defect.assignee_id == request.user.id
-                or manager(self.project_id, request.user)
-            )
+            and (defect.assignee_id == request.user.id or manager(self.project_id, request.user))
         )
         if not allowed:
             raise PermissionDenied("只有当前负责人、项目经理或管理员可以改派。")
         if defect.edit_version != data["expected_version"]:
             raise Conflict()
-        if (
-            defect.archived_at
-            or defect.status == "closed"
-            or defect.pending_assignee_id
-        ):
+        if defect.archived_at or defect.status == "closed" or defect.pending_assignee_id:
             raise Conflict("缺陷已结束、归档或存在待确认交接，请先处理当前状态。")
         target = data["assignee_id"]
-        if target and not eligible_technician(defect.project, target):
-            raise ValidationError({"assignee_id": "请选择当前项目的有效技术员。"})
         module = defect.module
         if "module_key" in data:
             module = module_record(data["module_key"]) if data["module_key"] else None
+        from plane.db.models import User
+        from .models import PlatformAccount
+
+        local_human = target and User.objects.filter(pk=target, is_active=True, is_bot=False).exists()
+        local_human = local_human and not PlatformAccount.objects.filter(user_id=target).exists()
+        triage_target = (
+            module is None
+            and local_human
+            and (is_administrator(target) or has_role(self.project_id, target, "PROJECT_MANAGER"))
+        )
+        if target and not triage_target and not eligible_technician(defect.project, target):
+            raise ValidationError({"assignee_id": "请选择有效技术员；模块未确认时也可交项目经理或管理员分诊。"})
         previous = defect.assignee
         if (
             defect.assignee_id == target
@@ -686,14 +686,8 @@ class DefectReassign(QualityView):
         defect.assignment_reason = data["reason"]
         defect.edit_version += 1
         defect.save()
-        current_name = (
-            defect.assignee.display_name or defect.assignee.username
-            if target
-            else "未指派"
-        )
-        previous_name = (
-            previous.display_name or previous.username if previous else "未指派"
-        )
+        current_name = defect.assignee.display_name or defect.assignee.username if target else "未指派"
+        previous_name = previous.display_name or previous.username if previous else "未指派"
         DefectEvent.objects.create(
             project=defect.project,
             defect=defect,
@@ -707,9 +701,7 @@ class DefectReassign(QualityView):
         )
         from .notifications import defect_notice
 
-        defect_notice(
-            defect, request.user, "缺陷负责人已改派", [previous.id] if previous else []
-        )
+        defect_notice(defect, request.user, "缺陷负责人已改派", [previous.id] if previous else [])
         return Response(DefectSerializer(defect_queryset().get(pk=defect.pk)).data)
 
 
@@ -793,7 +785,8 @@ class QualityContext(QualityView):
                 "work_item_options_url": (
                     f"/api/workspaces/{project.workspace.slug}/projects/{project.id}/quality/work-item-options/"
                 ),
-                "can_write": administrator or ProjectMember.objects.filter(
+                "can_write": administrator
+                or ProjectMember.objects.filter(
                     project=project, member=request.user, is_active=True, role__gte=15
                 ).exists()
                 and WorkspaceMember.objects.filter(
@@ -808,9 +801,8 @@ class QualityContext(QualityView):
                 and WorkspaceMember.objects.filter(
                     workspace=project.workspace, member=request.user, is_active=True, role__gte=15
                 ).exists(),
-                "is_manager": administrator or (
-                    strict(project.id) and capable(project.id, request.user.id, "manage_test")
-                )
+                "is_manager": administrator
+                or (strict(project.id) and capable(project.id, request.user.id, "manage_test"))
                 or ProjectMember.objects.filter(project=project, member=request.user, is_active=True, role=20).exists()
                 and not strict(project.id)
                 and WorkspaceMember.objects.filter(

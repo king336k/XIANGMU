@@ -130,3 +130,24 @@ test("普通旁观成员、已关闭和已归档缺陷不提供改派提交，�
     "function"
   );
 });
+
+test("模块待确认时可交经理或管理员分诊，确认模块后只选技术员", () => {
+  const members = [
+    { id: "tech", name: "技术员", business_roles: ["TECHNICIAN"] },
+    { id: "manager", name: "经理", business_roles: ["PROJECT_MANAGER"] },
+    { id: "admin", name: "管理员", is_administrator: true },
+    { id: "tester", name: "测试员", business_roles: ["REGRESSION_TESTER"] },
+  ];
+  const options = (tree) => all(tree).find((n) => n.type === "select" && n.props["aria-label"] === "技术负责人");
+  const values = (tree) =>
+    all(options(tree))
+      .filter((n) => n.type === "option")
+      .map((n) => n.props.value);
+  assert.deepEqual(values(harness({ is_manager: true, members }, { module: null }).render()), [
+    "",
+    "tech",
+    "manager",
+    "admin",
+  ]);
+  assert.deepEqual(values(harness({ is_manager: true, members }).render()), ["", "tech"]);
+});

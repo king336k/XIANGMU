@@ -272,3 +272,25 @@ class MaterialPageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class EvidenceRepresentationTests(unittest.TestCase):
+    def test_redacted_text_bytes_are_explicitly_not_original_attachment_bytes(self):
+        data = payload("脱敏后的摘要")
+        data["evidence"][0]["file_bytes"] = 485
+        data["evidence"][0]["scanned_bytes"] = 485
+        read_tool(data)
+        index = data["_evidence_index"][0]
+        self.assertEqual(index.get("original_file_bytes"), 485)
+        self.assertEqual(index.get("bytes_scope"), "redacted_material_text_not_original_file")
+        self.assertNotEqual(index["total_bytes"], index["original_file_bytes"])
+
+
+    def test_zip_entry_source_size_is_not_the_zip_attachment_size(self):
+        data = payload("条目摘要")
+        data["evidence"][0].update(file_bytes=485, archive_entry="logs/sample.log", original_bytes_scope="archive_entry")
+        tool = read_tool(data)
+        index = data["_evidence_index"][0]
+        self.assertEqual(index["original_bytes_scope"], "archive_entry")
+        self.assertEqual(index["archive_entry"], "logs/sample.log")
+        self.assertEqual(tool(["FILE-local:logs/system.log"])[0]["original_bytes_scope"], "archive_entry")

@@ -113,6 +113,11 @@ def create_agent(model, payload):
             "根因须由本次同一事件的观测支持；新时刻或新端口的补充观测不可追溯证明旧事件。证据不足就保留未定位。"
             "先依据已提供摘要分析；异常正文不完整时使用find_evidence字面查找，或按材料error_offsets、offset/length分页读相关上下文。一次批量最多6份；next_offset可继续取下一页，不重复读取同范围。"
             "不得编造来源；缺材料时给出具体待补项。"
+            "材料索引total_chars和total_bytes是脱敏/摘要文本的字符数及字节数，绝不是原文件大小。"
+            "original_file_bytes才是原始来源字节数；scope=attachment为上传文件，scope=archive_entry为解压条目。"
+            "解压条目不能与整ZIP回执大小比较；read_bytes、scanned_bytes也是不同读取口径。"
+            "脱敏、JSON重排、删除末尾换行、摘要会改变文本长度，这不是文件版本不一致或上传损坏的证据。"
+            "只有原附件同口径元数据之间明确冲突才报材料完整性警告，不能把文本表示与原附件大小相比较后要求核对版本。"
             "摘要不超过500个中文字符，排查和验证各最多4条；先给结论和依据，不重复叙述材料。"
             "citations必须使用材料清单提供的编号。"
             "返回model_confidence（0到1有限数字或null），只是模型自评而不是正确概率；"
@@ -135,6 +140,11 @@ def create_agent(model, payload):
             "reference": reference,
             "title": row.get("title", ""),
             "content": retained,
+            "original_file_bytes": row.get("file_bytes"),
+            "archive_entry": row.get("archive_entry"),
+            "original_bytes_scope": row.get("original_bytes_scope", "archive_entry" if row.get("archive_entry") else "attachment"),
+            "scanned_bytes": row.get("scanned_bytes"),
+            "source_read_bytes": row.get("read_bytes"),
             "material_truncated": bool(material.get("truncated")) or len(retained.encode()) < len(raw),
         }
     allowed["DESCRIPTION"] = {
@@ -149,6 +159,12 @@ def create_agent(model, payload):
             "title": row["title"],
             "total_chars": len(row["content"]),
             "total_bytes": len(row["content"].encode()),
+            "bytes_scope": "redacted_material_text_not_original_file",
+            "original_file_bytes": row.get("original_file_bytes"),
+            "original_bytes_scope": row.get("original_bytes_scope"),
+            "archive_entry": row.get("archive_entry"),
+            "source_read_bytes": row.get("source_read_bytes"),
+            "scanned_bytes": row.get("scanned_bytes"),
             "material_truncated": row["material_truncated"],
             "error_offsets": [
                 max(0, match.start() - 300)
@@ -214,6 +230,10 @@ def create_agent(model, payload):
                     "next_offset": end,
                     "total_chars": len(content),
                     "total_bytes": len(content.encode()),
+                    "bytes_scope": "redacted_material_text_not_original_file",
+                    "original_file_bytes": row.get("original_file_bytes"),
+                    "original_bytes_scope": row.get("original_bytes_scope"),
+                    "archive_entry": row.get("archive_entry"),
                     "truncated": truncated,
                     "material_truncated": row["material_truncated"],
                     "trace_index": len(trace["reads"]) - 1,
