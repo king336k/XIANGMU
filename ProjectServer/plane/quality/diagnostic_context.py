@@ -5,23 +5,97 @@ import re
 from .diagnostic_materials import redact
 
 
-def select_reviews(description, rows):
-    def words(value):
-        return set(re.findall(r"[a-z0-9_]{3,}", value.lower()) + re.findall(r"(?=([\u4e00-\u9fff]{2}))", value))
+def review_signature(sources):
+    """Use inspected fault content, never a shared report template, to reuse feedback."""
+    from .diagnostic_materials import diagnostic_search_query
+    from .module_routing import log_failure
+    from plane.knowledge.retrieval import scan_content
 
-    current = words(description)
+    faults = []
+    for source in sources[:100] if isinstance(sources, (list, tuple)) else []:
+        if not isinstance(source, dict) or not source.get("file_id") or not source.get("sha256"):
+            continue
+        if source.get("scan_incomplete", True) or source.get("preview_truncated", True):
+            continue
+        excerpt = source.get("excerpt", "")
+        if not isinstance(excerpt, str):
+            continue
+        for line in excerpt[:8192].replace("\\n", "\n").splitlines()[:100]:
+            if re.search(
+                r"\b(?:no|not|never|history|historical|previous|example|sample)\b|不存在|未出现|未发生|没有|已恢复|历史|示例",
+                line,
+                re.I,
+            ):
+                continue
+            if log_failure(line) and not scan_content(line):
+                # Keep the concrete message beside aggregate failure_class/status codes.
+                native = re.sub(
+                    r"\b(?:module|scope|component|provenance|synthetic|simulated|failure_class)=[^\s]+", "", line
+                )
+                native = re.sub(r"\b[a-z_][a-z0-9_]*=(?:[0-9.]+|true|false)\b", "", native, flags=re.I)
+                faults.append({"excerpt": native})
+    query = diagnostic_search_query("", faults) + " " + " ".join(row["excerpt"] for row in faults)
+    ignored = {
+        "error",
+        "failed",
+        "failure",
+        "exception",
+        "timeout",
+        "connection",
+        "refused",
+        "timed",
+        "out",
+        "synthetic",
+        "simulated",
+        "replay",
+        "true",
+        "false",
+        "provenance",
+        "synthetic_fault_harness",
+        "exception_message",
+        "module",
+        "scope",
+        "daq",
+        "teleop",
+        "invalid",
+        "history",
+        "observations",
+        "raw_failed",
+        "derived_failed",
+        "record_topic_health_failed",
+        "failure_class",
+        "warn",
+        "warning",
+    }
+    return {word for word in re.findall(r"[a-z][a-z0-9_-]{2,100}", query.lower()) if word not in ignored}
+
+
+def select_reviews(rows, *, defect_id, sources=None):
+    current = review_signature(sources)
     selected = []
     for row in rows:
         note = row.get("feedback_note", "").strip()
-        previous = words(row.get("description", ""))
-        if not note or not current or not previous:
+        if not note:
             continue
-        score = len(current & previous) / max(1, len(current | previous))
-        if score < 0.15:
+        same_defect = defect_id is not None and str(row.get("defect_id")) == str(defect_id)
+        previous = review_signature(row.get("sources")) if not same_defect else set()
+        shared = current & previous
+        stable_code = any(
+            re.fullmatch(
+                r"(?:e-[a-z0-9-]{4,}|[a-z][a-z0-9_]*_(?:quota_exceeded|integrity_failed|timestamp_invalid))", word
+            )
+            for word in shared
+        )
+        score = len(shared) / max(1, len(current | previous))
+        specific_token = any(
+            "_" in word and len(word) >= 8 or word.endswith(("error", "exception")) and len(word) > 10
+            for word in shared
+        )
+        if not same_defect and not (score >= 0.6 and (stable_code or len(shared) >= 3 and specific_token)):
             continue
         selected.append(
             (
-                score,
+                2 if same_defect else score,
                 {
                     "reference": f"REVIEW-{row['id']}",
                     "title": "历史人工评价（待结合本次证据复核）",
@@ -32,7 +106,7 @@ def select_reviews(description, rows):
     return [value for _, value in sorted(selected, key=lambda item: item[0], reverse=True)[:3]]
 
 
-def diagnostic_context(job, report_only=False):
+def diagnostic_context(job, report_only=False, sources=None):
     from .models import DiagnosticJob, PackageFile
     from .daq_incidents import trusted_incident, signed_record
     from .deployment_snapshots import read_feedback
@@ -202,7 +276,69 @@ def diagnostic_context(job, report_only=False):
     if report_only:
         candidates = candidates.filter(created_by_id=job.created_by_id)
     rows = []
-    for previous in candidates.select_related("defect")[:30]:
+    # Preserve this defect's reviews even when a busy project has newer unrelated feedback.
+    own = candidates.filter(defect=defect).select_related("defect")[:3]
+    others = candidates.exclude(defect=defect).select_related("defect")[:30]
+    previous_jobs = [*own, *others]
+    permitted_defects = {str(previous.defect_id) for previous in previous_jobs}
+    if report_only:
+        from django.db.models import Prefetch
+        from .models import SourceLink, DefectEvent
+
+        if not record or record.get("authorityMode") != "report_only":
+            return references
+        permitted_defects = set()
+        links = (
+            SourceLink.objects.filter(project=job.project, defect_id__in=[p.defect_id for p in previous_jobs])
+            .select_related("defect")
+            .prefetch_related(
+                Prefetch(
+                    "defect__events",
+                    queryset=DefectEvent.objects.filter(status="open", previous_status=""),
+                    to_attr="_incident_signature_events",
+                )
+            )
+        )
+        for prior_link in links:
+            prior_record = signed_record(prior_link)
+            if (
+                prior_record
+                and prior_record.get("authorityMode") == "report_only"
+                and (prior_record.get("sourceInstance"), prior_record.get("externalActor"))
+                == (record.get("sourceInstance"), record.get("externalActor"))
+            ):
+                permitted_defects.add(str(prior_link.defect_id))
+    from uuid import UUID
+
+    source_ids = set()
+    for previous in previous_jobs:
+        for source in previous.result.get("sources", [])[:100]:
+            if isinstance(source, dict):
+                try:
+                    source_ids.add(UUID(source.get("file_id", "")))
+                except (ValueError, TypeError, AttributeError):
+                    pass
+    verified_files = {
+        (str(file.id), file.sha256, str(file.package.defect_id))
+        for file in PackageFile.objects.filter(
+            project=job.project,
+            id__in=source_ids,
+            package__status="files_verified",
+            package__defect_id__in=permitted_defects,
+        ).select_related("package")
+    }
+
+    def verified_sources(previous):
+        return [
+            source
+            for source in previous.result.get("sources", [])[:100]
+            if isinstance(source, dict)
+            and (source.get("file_id"), source.get("sha256"), str(previous.defect_id)) in verified_files
+        ]
+
+    for previous in previous_jobs:
+        if str(previous.defect_id) not in permitted_defects:
+            continue
         if not previous.result.get("feedback_review", {}).get("actor_id"):
             continue
         rows.append(
@@ -210,8 +346,15 @@ def diagnostic_context(job, report_only=False):
                 "id": str(previous.id),
                 "feedback": previous.feedback,
                 "feedback_note": previous.feedback_note,
-                "description": previous.defect.title + "\n" + previous.defect.description,
+                "defect_id": str(previous.defect_id),
+                "sources": verified_sources(previous),
             }
         )
-    references.extend(select_reviews(defect.title + "\n" + defect.description, rows))
+    current_files = {(str(file.id), file.sha256) for file in files}
+    current_sources = [
+        source
+        for source in sources or []
+        if isinstance(source, dict) and (source.get("file_id"), source.get("sha256")) in current_files
+    ]
+    references.extend(select_reviews(rows, defect_id=defect.id, sources=current_sources))
     return references

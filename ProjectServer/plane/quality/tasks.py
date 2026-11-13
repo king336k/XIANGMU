@@ -138,7 +138,7 @@ def run_diagnostic(job_id):
                     DiagnosticJob.objects.filter(pk=job.pk, status="running").update(result=result)
                     from .diagnostic_context import diagnostic_context
 
-                    context_references = diagnostic_context(job, report_only=report_only)
+                    context_references = diagnostic_context(job, report_only=report_only, sources=sources)
                     answer = analyze_diagnostic(
                         config, model_text, sources, [*references, *context_references], materials
                     )

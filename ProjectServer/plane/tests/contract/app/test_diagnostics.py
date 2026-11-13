@@ -156,3 +156,120 @@ def test_report_only_review_context_never_uses_other_collector(session_client, d
     mocker.patch('plane.quality.diagnostics.enqueue')
     current = session_client.post(base + f"defects/{defect['id']}/diagnostics/", {'request_id': str(uuid4()), 'mode': 'rules'}, format='json').data
     assert len(diagnostic_context(DiagnosticJob.objects.get(pk=current['id']), report_only=True)) == 1
+
+
+def test_cross_defect_review_uses_current_materials_not_shared_description(diagnostics, create_user):
+    from plane.quality.models import Defect, DiagnosticJob
+    from plane.quality.diagnostic_context import diagnostic_context
+
+    base, project, defect = diagnostics
+    source = {
+        "file_id": "verified",
+        "sha256": "a" * 64,
+        "scan_incomplete": False,
+        "preview_truncated": False,
+        "excerpt": "ERROR storage_quota_exceeded limit=12 used=13",
+    }
+    other = Defect.objects.create(
+        project=project, created_by=create_user, title=defect["title"], description=defect["description"]
+    )
+    from plane.quality.models import ProblemPackage, PackageFile
+
+    package = ProblemPackage.objects.create(
+        project=project,
+        defect=other,
+        created_by=create_user,
+        name="日志",
+        source_system="test",
+        external_id=str(uuid4()),
+        status="files_verified",
+    )
+    file = PackageFile.objects.create(
+        project=project,
+        package=package,
+        created_by=create_user,
+        name="observations.log",
+        size=50,
+        sha256=source["sha256"],
+        storage_key="synthetic",
+    )
+    source["file_id"] = str(file.id)
+    reviewed = DiagnosticJob.objects.create(
+        project=project,
+        defect=other,
+        created_by=create_user,
+        status="completed",
+        mode="rules",
+        request_id=uuid4(),
+        feedback="unhelpful",
+        feedback_note="核对父预算",
+        result={"feedback_review": {"actor_id": str(create_user.id)}, "sources": [source]},
+    )
+    current = DiagnosticJob.objects.create(
+        project=project, defect_id=defect["id"], created_by=create_user, mode="rules", request_id=uuid4()
+    )
+    current_package = ProblemPackage.objects.create(
+        project=project,
+        defect_id=defect["id"],
+        created_by=create_user,
+        name="本次日志",
+        source_system="test",
+        external_id=str(uuid4()),
+        status="files_verified",
+    )
+    current_file = PackageFile.objects.create(
+        project=project,
+        package=current_package,
+        created_by=create_user,
+        name="observations.log",
+        size=50,
+        sha256=source["sha256"],
+        storage_key="synthetic-current",
+    )
+    current_source = {**source, "file_id": str(current_file.id)}
+    different = {**current_source, "excerpt": "ERROR invalid video_input_mode custom_fixture galbot"}
+    assert len(diagnostic_context(current, sources=[different])) == 1
+    refs = diagnostic_context(
+        current, sources=[{**current_source, "excerpt": "ERROR storage_quota_exceeded limit=50 used=51"}]
+    )
+    assert refs[-1]["reference"] == f"REVIEW-{reviewed.id}"
+
+
+def test_this_defect_review_is_not_evicted_by_newer_unrelated_project_feedback(diagnostics, create_user):
+    from plane.quality.models import Defect, DiagnosticJob
+    from plane.quality.diagnostic_context import diagnostic_context
+
+    base, project, defect = diagnostics
+    reviewed = DiagnosticJob.objects.create(
+        project=project,
+        defect_id=defect["id"],
+        created_by=create_user,
+        status="completed",
+        mode="rules",
+        request_id=uuid4(),
+        feedback="unhelpful",
+        feedback_note="核对当前配置",
+        result={"feedback_review": {"actor_id": str(create_user.id)}},
+    )
+    other = Defect.objects.create(project=project, created_by=create_user, title="无关问题", description="无关材料")
+    DiagnosticJob.objects.bulk_create(
+        [
+            DiagnosticJob(
+                project=project,
+                defect=other,
+                created_by=create_user,
+                status="completed",
+                mode="rules",
+                request_id=uuid4(),
+                feedback="helpful",
+                feedback_note="另一个问题的评价",
+                result={"feedback_review": {"actor_id": str(create_user.id)}},
+            )
+            for _ in range(35)
+        ]
+    )
+    current = DiagnosticJob.objects.create(
+        project=project, defect_id=defect["id"], created_by=create_user, mode="rules", request_id=uuid4()
+    )
+    refs = diagnostic_context(current)
+    assert [ref["reference"] for ref in refs if ref["reference"].startswith("REVIEW-")] == [f"REVIEW-{reviewed.id}"]

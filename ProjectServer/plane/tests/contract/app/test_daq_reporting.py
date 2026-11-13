@@ -699,3 +699,46 @@ def test_no_legal_owner_rejects_report_without_creating_defect_then_same_event_r
     defect = Defect.objects.get(pk=response.data["issueId"])
     assert defect.assignee_id == project.workspace.owner_id and defect.assignment_origin == "triage"
     assert not ProjectMember.objects.filter(project=project, member=user).exists()
+
+
+def test_review_context_separates_collectors_sharing_one_service_actor(reporting):
+    from plane.quality.models import DiagnosticJob
+    from plane.quality.diagnostic_context import diagnostic_context
+
+    destination, user, payload, state = reporting
+    base = "/api/quality-auth/daq-reports/"
+    first = call(base, {**payload, "hubProjectId": str(destination.id), "eventId": str(uuid4())}, "POST", actor=16)
+    second = call(base, {**payload, "hubProjectId": str(destination.id), "eventId": str(uuid4())}, "POST", actor=17)
+    third = call(base, {**payload, "hubProjectId": str(destination.id), "eventId": str(uuid4())}, "POST", actor=16)
+    assert first.status_code == second.status_code == third.status_code == 201
+    d1 = Defect.objects.get(pk=first.data["issueId"])
+    d2 = Defect.objects.get(pk=second.data["issueId"])
+    d3 = Defect.objects.get(pk=third.data["issueId"])
+    assert d1.created_by_id == d2.created_by_id == d3.created_by_id
+    file = registered_evidence(destination, d1.created_by, d1.id)
+    source = {
+        "file_id": str(file.id),
+        "sha256": file.sha256,
+        "scan_incomplete": False,
+        "preview_truncated": False,
+        "excerpt": "ERROR storage_quota_exceeded limit=12 used=13",
+    }
+    reviewed = DiagnosticJob.objects.create(
+        project=destination,
+        defect=d1,
+        created_by=d1.created_by,
+        status="completed",
+        mode="auto",
+        request_id=uuid4(),
+        feedback="unhelpful",
+        feedback_note="仅账号16的私有评价",
+        result={"sources": [source], "feedback_review": {"actor_id": "reviewer"}},
+    )
+    for target, expected in [(d2, False), (d3, True)]:
+        current = DiagnosticJob.objects.create(
+            project=destination, defect=target, created_by=target.created_by, mode="auto", request_id=uuid4()
+        )
+        current_file = registered_evidence(destination, target.created_by, target.id)
+        current_source = {**source, "file_id": str(current_file.id), "sha256": current_file.sha256}
+        refs = diagnostic_context(current, report_only=True, sources=[current_source])
+        assert any(ref["reference"] == f"REVIEW-{reviewed.id}" for ref in refs) is expected
