@@ -17,6 +17,7 @@ import { DeploymentSnapshots } from "./deployment-snapshots";
 import { DefectTeam } from "./defect-team";
 import { SolutionPanel } from "./solution-panel";
 import { DefectVerificationScope } from "./defect-verification-scope";
+import { DefectComments } from "./defect-comments";
 import { can, severityNames } from "./types";
 import type { Context, Defect } from "./types";
 
@@ -195,6 +196,7 @@ export function DefectDetail({
             ["diagnosis", "诊断"],
             ["solution", "处理方案"],
             ["regression", "回归测试"],
+            ["comments", "评论"],
             ["history", "操作记录"],
           ].map(([key, title]) => (
             <button
@@ -210,7 +212,11 @@ export function DefectDetail({
           ))}
         </nav>
         <div
-          className={activeTab === "regression" ? "defect-page-regression" : "record-detail-grid defect-page-panels"}
+          className={
+            ["regression", "comments"].includes(activeTab)
+              ? "defect-page-regression"
+              : "record-detail-grid defect-page-panels"
+          }
         >
           <div className="min-w-0 space-y-6">
             <div hidden={activeTab !== "overview"} className="space-y-5">
@@ -245,11 +251,19 @@ export function DefectDetail({
                 onChanged={onChanged}
               />
             </div>
+            <div hidden={activeTab !== "comments"} className="platform-detail-panel min-w-0">
+              <DefectComments
+                key={`${value.id}:${context.user_id}`}
+                base={base}
+                defectId={value.id}
+                active={activeTab === "comments"}
+              />
+            </div>
             <div hidden={activeTab !== "history"} className="platform-detail-panel space-y-5">
               <CollaborationPanel base={base} value={value} context={context} onChanged={onChanged} />
             </div>
           </div>
-          {activeTab !== "regression" && (
+          {!["regression", "comments"].includes(activeTab) && (
             <aside aria-label="缺陷属性" className="space-y-4 border-subtle">
               {[
                 {
