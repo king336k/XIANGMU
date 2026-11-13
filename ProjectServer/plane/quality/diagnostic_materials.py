@@ -411,6 +411,34 @@ def diagnostic_search_query(text, sources):
                     signatures.append(signature)
     if signatures:
         return " ".join(dict.fromkeys(signatures))[:2000]
+    # Normal/status observations also carry mechanism identity; generic report templates do not.
+    status_tokens = []
+    fields = {
+        "active_mode",
+        "sequence_input",
+        "ingress_stamp_advancing",
+        "each_conflict_span_below_configured_delay",
+        "module_bit32",
+        "module_bit33",
+        "input_mode",
+        "video_input_mode",
+        "preflight_invocations",
+        "latest_preflight_ok",
+        "grant_age_sec",
+        "grant_expires_in_sec",
+        "input_mode_conflict_warning_delay_sec",
+    }
+    for source in sources[:1000] if isinstance(sources, (list, tuple)) else []:
+        excerpt = source.get("excerpt", "") if isinstance(source, dict) else ""
+        if not isinstance(excerpt, str):
+            continue
+        for line in excerpt[:FILE_BYTES].replace("\\n", "\n").splitlines()[:1000]:
+            if scan_content(line):
+                continue
+            status_tokens.extend(re.findall(r"\[([A-Z][A-Z0-9]{1,30}(?:_[A-Z0-9]{1,30})+)\]", line))
+            status_tokens.extend(key for key in re.findall(r"\b([a-z][a-z0-9_]{2,80})\s*=", line) if key in fields)
+    if status_tokens:
+        return " ".join(dict.fromkeys(status_tokens))[:2000]
     # Non-error material retains the prior natural-language retrieval behavior, with sensitive lines removed.
     safe = redact(text.split("\n[FILE-", 1)[0]) if isinstance(text, str) else ""
     return summarize(safe, 2000) if safe else ""

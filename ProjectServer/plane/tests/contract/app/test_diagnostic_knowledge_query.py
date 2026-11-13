@@ -149,3 +149,66 @@ def test_plain_error_line_keeps_producer_signature_for_knowledge_retrieval():
         "通用模拟回放描述", [{"excerpt": "ERROR synthetic=true timestamp count mismatch: sidecar=29, encoded=30"}]
     )
     assert "timestamp count mismatch" in query
+
+
+def test_non_error_status_observations_retrieve_mechanism_instead_of_generic_report_text():
+    from plane.quality.diagnostic_materials import diagnostic_search_query
+
+    source = {
+        "excerpt": json.dumps(
+            {
+                "observations": [
+                    "INFO [VR_INPUT_MODE] active_mode=hand",
+                    "INFO each_conflict_span_below_configured_delay=true module_bit32=false module_bit33=false",
+                ]
+            }
+        )
+    }
+    query = diagnostic_search_query("通用反馈验收说明", [source])
+    assert "VR_INPUT_MODE" in query and "active_mode" in query
+    assert "module_bit32" in query and "module_bit33" in query
+    assert "通用反馈" not in query
+
+
+def test_status_query_does_not_use_sensitive_lines_or_arbitrary_json_fields():
+    from plane.quality.diagnostic_materials import diagnostic_search_query
+
+    query = diagnostic_search_query(
+        "普通描述",
+        [
+            {
+                "excerpt": (
+                    'INFO [VR_INPUT_MODE] password=synthetic-secret\n'
+                    '{"business_title":"PRIVATE_MARKER", "actor_id":"private-actor"}'
+                )
+            }
+        ],
+    )
+    assert "VR_INPUT_MODE" not in query and "PRIVATE" not in query
+
+
+def test_error_query_stays_ahead_of_status_mechanisms():
+    from plane.quality.diagnostic_materials import diagnostic_search_query
+
+    q = diagnostic_search_query(
+        "generic", [{"excerpt": "INFO [VR_INPUT_MODE] active_mode=hand\nERROR ConnectionRefusedError errno111"}]
+    )
+    assert "ConnectionRefusedError" in q and "active_mode" not in q
+
+
+def test_status_query_contains_mechanism_keys_without_raw_values_or_generic_tags():
+    from plane.quality.diagnostic_materials import diagnostic_search_query
+
+    q = diagnostic_search_query(
+        "generic",
+        [
+            {
+                "excerpt": (
+                    "INFO [INFO] [SYNTHETIC] [2026-11-14] [VR_INPUT_MODE] active_mode=hand "
+                    "sequence_input=hand,controller module_bit32=false actor_id=private-id request_sha=abc123"
+                )
+            }
+        ],
+    )
+    assert q == "VR_INPUT_MODE active_mode sequence_input module_bit32"
+    assert all(value not in q for value in ["hand", "controller", "private", "abc123", "INFO", "SYNTHETIC"])
