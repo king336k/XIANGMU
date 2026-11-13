@@ -166,7 +166,10 @@ export function DefectDetail({
             <div className="flex flex-wrap items-center justify-between gap-2 text-12 text-secondary">
               <span>
                 {value.source_kind === "daq" ? "DAQ 上报" : value.source_kind === "test" ? "测试提报" : "平台新建"} ·{" "}
-                {value.created_by_name || "未记录"}
+                {value.source_kind === "daq" ? "采集员" : "创建人"}：
+                {(value.source_kind === "daq" ? value.reporter?.username : undefined) ||
+                  value.created_by_name ||
+                  "未记录"}
                 {value.created_at ? ` · ${renderNumericDateTime(value.created_at)}` : ""}
               </span>
               <RecordProgress base={base} kind="defect" id={value.id} projectUrl={projectUrl} />

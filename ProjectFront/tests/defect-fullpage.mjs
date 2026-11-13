@@ -25,18 +25,28 @@ function load(name, mocks) {
   );
   return exports;
 }
-function detail(tab, writable = false) {
+function detail(tab, writable = false, extra = {}) {
   let index = 0;
   const closed = [];
   const api = load("defect-detail", {
     react: { ...React, useState: (value) => [index++ === 2 ? tab : value, () => {}] },
     "./shared": { Modal: "Modal", Badge: "Badge" },
+    "@plane/utils": { renderNumericDateTime: () => "2026/11/12 23:35" },
     "./types": { can: () => writable, severityNames: { major: "严重" } },
     "./defect-disposition": { resolutionNames: {} },
   });
   const tree = api.DefectDetail({
     base: "/q/",
-    value: { id: "d", code: "Q-D-1", title: "数据异常", status: "resolved", severity: "major", collaborators: [] },
+    value: {
+      id: "d",
+      code: "Q-D-1",
+      title: "数据异常",
+      status: "resolved",
+      severity: "major",
+      collaborators: [],
+      created_at: "2026-11-12T15:35:00Z",
+      ...extra,
+    },
     context: { members: [], is_manager: writable, project_name: "平台基础知识" },
     projectUrl: "/p",
     onClose: () => closed.push(true),
@@ -131,4 +141,53 @@ test("缺陷整页顶部仅返回列表，宽度随窗口展开", () => {
   assert.ok(walk(tree).some((n) => n.type === "button" && n.props.children?.includes?.("返回缺陷列表")));
   const css = readFileSync(new URL("../styles/globals.css", import.meta.url), "utf8");
   assert.doesNotMatch(css, /\.defect-page-card\s*\{[^}]*max-width:\s*1152px/);
+});
+
+const text = (node) =>
+  node == null || typeof node === "boolean"
+    ? ""
+    : typeof node === "string" || typeof node === "number"
+      ? String(node)
+      : Array.isArray(node)
+        ? node.map(text).join("")
+        : text(node.props?.children);
+
+test("缺陷标题下方明确区分DAQ采集员、平台创建人与测试提报", () => {
+  const daq = text(
+    detail("overview", false, { source_kind: "daq", created_by_name: "反馈服务", reporter: { username: "caiji1" } })
+      .tree
+  );
+  assert.match(daq, /DAQ 上报 · 采集员：caiji1 · 2026\/11\/12 23:35/);
+  const manual = text(detail("overview", false, { source_kind: "manual", created_by_name: "张工" }).tree);
+  assert.match(manual, /平台新建 · 创建人：张工 · 2026\/11\/12 23:35/);
+  const fromTest = text(detail("overview", false, { source_kind: "test", created_by_name: "测试员" }).tree);
+  assert.match(fromTest, /测试提报 · 创建人：测试员/);
+});
+
+test("缺陷表格与窄屏列表都保留采集员和时间", () => {
+  const { DefectList } = load("record-lists", {
+    "./shared": { Badge: "Badge" },
+    "./types": { defectDisplayTitle: (value) => value, severityNames: {}, statusNames: {} },
+    "@plane/utils": { renderNumericDateTime: () => "2026/11/12 23:35" },
+  });
+  const tree = DefectList({
+    rows: [
+      {
+        id: "d",
+        code: "D-1",
+        title: "测试展示",
+        source_kind: "daq",
+        reporter: { username: "caiji1" },
+        created_by_name: "服务账号",
+        created_at: "2026-11-12T15:35:00Z",
+        severity: "major",
+        status: "open",
+      },
+    ],
+    onEdit() {},
+  });
+  const labels = walk(tree).filter(
+    (n) => n.type === "p" && text(n).includes("DAQ 上报 · 采集员：caiji1 · 2026/11/12 23:35")
+  );
+  assert.equal(labels.length, 2);
 });

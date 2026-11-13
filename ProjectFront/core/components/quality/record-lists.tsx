@@ -256,6 +256,12 @@ export function DefectList({ rows, onEdit }: { rows: Defect[]; onEdit: (value: D
               {row.code && <span className="mr-2 text-11 text-secondary">{row.code}</span>}
               {defectDisplayTitle(row.title)}
             </button>
+            <p className="text-11 text-secondary">
+              {row.source_kind === "daq" ? "DAQ 上报" : row.source_kind === "test" ? "测试提报" : "平台新建"} ·{" "}
+              {row.source_kind === "daq" ? "采集员" : "创建人"}：
+              {(row.source_kind === "daq" ? row.reporter?.username : undefined) || row.created_by_name || "未记录"}
+              {row.created_at ? ` · ${renderNumericDateTime(row.created_at)}` : ""}
+            </p>
             <div className="flex flex-wrap items-center gap-3 text-12">
               <Badge value={row.status} />
               <Badge value={row.severity} />
@@ -311,6 +317,14 @@ export function DefectList({ rows, onEdit }: { rows: Defect[]; onEdit: (value: D
                     {row.code && <span className="mr-2 text-11 text-secondary">{row.code}</span>}
                     {defectDisplayTitle(row.title)}
                   </button>
+                  <p className="mt-1 text-11 text-secondary">
+                    {row.source_kind === "daq" ? "DAQ 上报" : row.source_kind === "test" ? "测试提报" : "平台新建"} ·{" "}
+                    {row.source_kind === "daq" ? "采集员" : "创建人"}：
+                    {(row.source_kind === "daq" ? row.reporter?.username : undefined) ||
+                      row.created_by_name ||
+                      "未记录"}
+                    {row.created_at ? ` · ${renderNumericDateTime(row.created_at)}` : ""}
+                  </p>
                   {row.repair_issue_name && (
                     <p className="mt-1 text-11 text-secondary">修复任务：{row.repair_issue_name}</p>
                   )}
