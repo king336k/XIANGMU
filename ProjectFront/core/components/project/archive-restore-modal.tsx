@@ -93,7 +93,7 @@ export function ArchiveRestoreProjectModal(props: Props) {
         </h3>
         <p className="mt-3 text-13 text-secondary">
           {archive
-            ? "此项目及其工作项、周期、模块和文档将被归档。归档的工作项不会出现在搜索结果中，仅管理员可以恢复项目。"
+            ? "归档后，项目将从“我的项目”和常用项目列表移除，项目资料继续保留。需要时可在“项目归档”中恢复。"
             : "恢复后，项目将重新启用并对所有项目成员可见。确定继续吗？"}
         </p>
         <div className="mt-3 flex justify-end gap-2">
@@ -103,7 +103,6 @@ export function ArchiveRestoreProjectModal(props: Props) {
           <Button
             variant="primary"
             size="lg"
-            tabIndex={1}
             onClick={archive ? handleArchiveProject : handleRestoreProject}
             loading={isLoading}
           >

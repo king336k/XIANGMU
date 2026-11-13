@@ -33,6 +33,7 @@ import { DEFAULT_TAB_KEY, getTabUrl } from "@/components/navigation/tab-navigati
 import { useTabPreferences } from "@/components/navigation/use-tab-preferences";
 import { RenameDialog } from "@/components/common/rename-dialog";
 import { ProjectMenuSettings } from "@/components/project/project-menu-settings";
+import { ArchiveRestoreProjectModal } from "@/components/project/archive-restore-modal";
 import { LeaveProjectModal } from "@/components/project/leave-project-modal";
 import { PublishProjectModal } from "@/components/project/publish-project/modal";
 // hooks
@@ -87,6 +88,7 @@ export const SidebarProjectsListItem = observer(function SidebarProjectsListItem
   const [publishModalOpen, setPublishModal] = useState(false);
   const [menuSettingsOpen, setMenuSettingsOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [archiveProjectModalOpen, setArchiveProjectModal] = useState(false);
   const [isMenuActive, setIsMenuActive] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const isProjectListOpen = getIsProjectListOpen(projectId);
@@ -288,6 +290,13 @@ export const SidebarProjectsListItem = observer(function SidebarProjectsListItem
 
   return (
     <>
+      <ArchiveRestoreProjectModal
+        workspaceSlug={String(workspaceSlug)}
+        projectId={projectId}
+        isOpen={archiveProjectModalOpen}
+        onClose={() => setArchiveProjectModal(false)}
+        archive
+      />
       {renameOpen && project && (
         <RenameDialog
           title="重命名项目"
@@ -453,8 +462,17 @@ export const SidebarProjectsListItem = observer(function SidebarProjectsListItem
                     >
                       <div className="flex cursor-pointer items-center justify-start gap-2">
                         <ArchiveIcon className="h-3.5 w-3.5 stroke-[1.5]" />
-                        <span>{t("archives")}</span>
+                        <span>已归档任务</span>
                       </div>
+                    </CustomMenu.MenuItem>
+                  )}
+
+                  {isAuthorized && (
+                    <CustomMenu.MenuItem onClick={() => setArchiveProjectModal(true)}>
+                      <span className="flex items-center gap-2">
+                        <ArchiveIcon className="h-3.5 w-3.5 stroke-[1.5]" />
+                        <span>归档项目</span>
+                      </span>
                     </CustomMenu.MenuItem>
                   )}
 

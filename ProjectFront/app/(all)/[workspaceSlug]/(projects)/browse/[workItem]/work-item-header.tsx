@@ -47,7 +47,7 @@ export const WorkItemDetailsHeader = observer(function WorkItemDetailsHeader() {
           <Breadcrumbs.Item
             component={
               <BreadcrumbLink
-                label="工作项"
+                label={kinds?.requirement_sequences.includes(Number(issueDetails?.sequence_id)) ? "需求" : "任务"}
                 href={`/${workspaceSlug}/projects/${projectId}/issues/`}
                 icon={<WorkItemsIcon className="h-4 w-4 text-tertiary" />}
               />

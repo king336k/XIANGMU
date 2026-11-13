@@ -70,7 +70,7 @@ function ArchivedIssueDetailsPage({ params }: Route.ComponentProps) {
         <>
           <Banner
             variant="warning"
-            title="此工作项已归档，可在归档记录中恢复。"
+            title="此任务已归档，可在归档记录中恢复。"
             icon={<ArchiveIcon className="size-4" />}
             action={
               <Button

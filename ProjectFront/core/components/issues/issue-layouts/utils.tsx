@@ -128,7 +128,7 @@ export const getGroupByColumns = ({
     return [
       {
         id: "All Issues",
-        name: isEpic ? "全部史诗" : "全部工作项",
+        name: isEpic ? "全部史诗" : "全部",
         payload: {},
         icon: undefined,
       },
