@@ -254,6 +254,15 @@ def diagnostic_search_query(text, sources):
                 continue
             tokens.extend(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]{0,80}(?:Error|Exception))\b", line))
             tokens.extend(re.findall(r"\bE-[A-Z][A-Z0-9]*(?:-[A-Z0-9]+){0,4}\b", line))
+            tokens.extend(
+                re.findall(
+                    r"(?i)\b(?:code|failure_class|failure_reason|exception_type)[\"']?\s*[:=]\s*[\"']?([a-z][a-z0-9_]{2,119})",
+                    line,
+                )
+            )
+            tokens.extend(
+                re.findall(r"\b[a-z][a-z0-9_]{2,100}_(?:quota_exceeded|integrity_failed|timestamp_invalid)\b", line)
+            )
             tokens.extend(re.findall(r"\b[A-Z][A-Z0-9_]{2,60}_(?:MISSING|REQUIRED|INVALID|FAILED|UNAVAILABLE)\b", line))
             tokens.extend("errno" + code for code in re.findall(r"\b(?:Errno|errno)[ =:]*([0-9]{1,4})\b", line))
             tokens.extend(

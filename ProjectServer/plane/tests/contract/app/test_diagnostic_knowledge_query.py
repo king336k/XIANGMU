@@ -121,3 +121,22 @@ def test_latest_structured_preflight_retrieves_its_knowledge_despite_old_gpu_err
     query = diagnostic_search_query("相机Topic未发布", [{"excerpt": excerpt}])
     assert "topic_missing" in query and "FileNotFoundError" not in query
     assert revision.id in search(project, query).values_list("id", flat=True)
+
+
+def test_verified_lowercase_failure_codes_are_retrieval_terms_without_generic_description_noise():
+    from plane.quality.diagnostic_materials import diagnostic_search_query
+
+    query = diagnostic_search_query(
+        "通用模拟回放描述 机器人 采集",
+        [{"excerpt": "ERROR synthetic=true code=topic_rate_too_low actual_hz=12"}],
+    )
+    assert "topic_rate_too_low" in query
+    assert "通用模拟" not in query
+
+
+def test_json_error_code_and_failure_reason_are_literal_retrieval_terms():
+    from plane.quality.diagnostic_materials import diagnostic_search_query
+
+    for field, value in [("code", "topic_rate_too_low"), ("failure_reason", "packet_timeline_failed")]:
+        query = diagnostic_search_query("通用描述", [{"excerpt": json.dumps({field: value})}])
+        assert value in query

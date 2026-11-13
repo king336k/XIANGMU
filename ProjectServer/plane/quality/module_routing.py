@@ -27,6 +27,15 @@ def identified(text, options):
             names.setdefault(value.casefold(), set()).add(row["key"])
     values = [match.strip().casefold() for match in FIELD.findall(text)]
     result = set()
+    # A canonical unquoted scalar may be followed by an English diagnostic message.
+    # Do not apply this to human scope labels, quoted multi-value fields or conjunctions.
+    for scalar, remainder in re.findall(
+        r"\b(?:module|module_key|component)\s*=\s*([a-z][a-z0-9_-]*)([^\n\r,;]*)", text, re.I
+    ):
+        tail = remainder.strip().casefold()
+        if scalar.casefold() in names and not re.match(r"(?:and|or|和|与|及|、)\b", tail):
+            if not any(re.search(r"(?<![\w])" + re.escape(name) + r"(?![\w])", tail) for name in names):
+                result.update(names[scalar.casefold()])
     for value in values:
         # In log lines the scalar label may be followed by the failure itself.
         if value in names:
@@ -49,9 +58,16 @@ def failing_components(value, options):
         if state in {"failed", "error", "crashed", "unhealthy"}:
             for field in ("module", "module_key", "scope", "component"):
                 if isinstance(value.get(field), str):
-                    found.update(identified(f"module={value[field]}", options))
-        for child in value.values():
-            found.update(failing_components(child, options))
+                    aliases = {
+                        "DAQ 采集": {"daq"},
+                        "DAQ采集": {"daq"},
+                        "遥操与 DAQ": {"daq", "teleop"},
+                        "遥操与DAQ": {"daq", "teleop"},
+                    }
+                    found.update(aliases.get(value[field], identified(f"module={value[field]}", options)))
+        for key, child in value.items():
+            if key not in {"history", "logs", "startupLog", "preceding_lines"}:
+                found.update(failing_components(child, options))
     elif isinstance(value, list):
         for child in value:
             found.update(failing_components(child, options))
@@ -114,6 +130,147 @@ LOG_COMPONENTS = {
 }
 
 
+SOURCE_DAQ_CODES = frozenset(
+    {
+        "topic_not_discovered",
+        "topic_not_matched",
+        "topic_first_message_timeout",
+        "topic_discovery_unavailable",
+        "topic_missing",
+        "topic_type_mismatch",
+        "topic_header_timestamp_invalid",
+        "topic_sample_insufficient",
+        "topic_rate_unstable",
+        "topic_no_messages",
+        "topic_length_unavailable",
+        "topic_length_mismatch",
+        "topic_rate_too_low",
+        "record_topic_health_failed",
+        "record_topic_preflight_failed",
+        "record_topics_empty",
+        "record_network_link_unhealthy",
+        "raw_failed",
+        "derived_failed",
+        "metadata_storage_quota_exceeded",
+        "RECORDING_DURABILITY_FAILED",
+    }
+)
+SOURCE_DAQ_PHRASES = (
+    "MCAP queue full",
+    "MCAP write failed",
+    "C++ CaptureService raw MCAP integrity check failed",
+    "Invalid camera stream geometry or frame rate",
+    "Camera configuration must be an array",
+    "Camera name is not a safe artifact name",
+    "Camera provider returned no source",
+    "SDK camera readiness failed",
+    "Mixed encoder admission failed",
+    "recording primary routes exceed encoder capacity",
+    "CaptureService raw accounting missing/invalid counter",
+    "MCAP metadata message count conflicts with CaptureService write accounting",
+    "DAQ_MCAP_STORAGE_PRESET must be",
+    "DAQ_MCAP_MAX_MESSAGES_PER_FILE must be",
+    "MCAP message limit requires",
+    "Session has no frozen recording topic rules",
+    "Stopped recording has no conversion source",
+    "Recording interrupted by unexpected service shutdown",
+    "Raw MCAP changed during timestamp inspection",
+    "候选 MCAP 的逐 Topic 消息数量校验失败",
+    "realtime master changed after CaptureService hand-off",
+    "timestamp count mismatch: sidecar=",
+    "depth source mapping digest or record count mismatch",
+    "上传会话分片参数不完整",
+)
+SOURCE_TELEOP_PHRASES = (
+    "Retarget error (left)",
+    "Retarget error (right)",
+    "Error in dual hand retargeting loop",
+    "invalid video_input_mode",
+    "unsupported robot",
+    "stereo video input requires distinct, non-empty left and right topics",
+    "relay_source_topics and relay_local_topics must have the same length",
+    "relay local topic is also configured as a source",
+    "invalid requested SBS output size",
+    "Pico signaling failed to start",
+    "ENGRAM_TELEOP_INSTALL_PREFIX is required",
+    "[PICO_RECENTER] failed",
+    "[RESET_ERROR] type=feedback_unavailable",
+    "[pico_video] video session open failed",
+)
+SOURCE_TELEOP_WARN_TAGS = ("[VR_INPUT_MODE_CONFLICT]", "[VR_RAW_HAND_INVALID]", "[VR_RAW_HAND_INVALID_BEGIN]")
+
+
+def source_fault_modules(line, structured=None):
+    """Finite producer signatures identify responsibility, never an unobserved root cause."""
+    if isinstance(structured, dict):
+        state = str(structured.get("status", structured.get("state", ""))).casefold()
+        if state in {"ok", "success", "completed", "healthy", "idle", "pending", "not_started", "not_running"}:
+            return set()
+        level = str(structured.get("level", structured.get("levelname", ""))).casefold()
+        active = state in {"failed", "error", "blocked", "crashed", "unhealthy"} or level in {
+            "error",
+            "fatal",
+            "warning",
+            "warn",
+        }
+        active = active or bool(isinstance(structured.get("error"), str) and structured["error"].strip())
+        result = set()
+        if active:
+            values = [
+                str(structured[key])
+                for key in [
+                    "code",
+                    "error_code",
+                    "failure_class",
+                    "failure_reason",
+                    "exception_type",
+                    "error",
+                    "message",
+                    "msg",
+                    "detail",
+                ]
+                if isinstance(structured.get(key), (str, int))
+            ]
+            result.update(
+                source_fault_modules(("WARN " if level in {"warning", "warn"} else "ERROR ") + " ".join(values))
+            )
+        return result
+    if re.search(
+        r"\bno errors?\b|\bactive=false\b|\bcleared=true\b|documentation example|示例[：:]|\bexample:", line, re.I
+    ):
+        return set()
+    failed = log_failure(line)
+    tokens = set(re.findall(r"(?<![A-Za-z0-9_])([A-Za-z][A-Za-z0-9_]{2,119})(?![A-Za-z0-9_])", line))
+    result = set()
+    if failed and (
+        tokens & SOURCE_DAQ_CODES or any(value.casefold() in line.casefold() for value in SOURCE_DAQ_PHRASES)
+    ):
+        result.add("daq")
+    if failed and any(value.casefold() in line.casefold() for value in SOURCE_TELEOP_PHRASES):
+        result.add("teleop")
+    if re.search(r"\bWARN(?:ING)?\b", line, re.I):
+        if "MCAP queue full" in line and re.search(r"\bqueue_drops=[1-9][0-9]*\b", line):
+            result.add("daq")
+        if any(tag in line for tag in SOURCE_TELEOP_WARN_TAGS):
+            result.add("teleop")
+        if any(
+            phrase in line
+            for phrase in (
+                "[pico_video] media failure stage=",
+                "Discarded invalid retargeting sample",
+                "[TopicMonitor] Unknown msg_type",
+                "[JointStateProvider] rejected msg.robot_name=",
+                "Dropping source image with invalid or non-increasing timestamp",
+            )
+        ):
+            result.add("teleop")
+        if "IMAGE_TIMESTAMP_FILTER_DROP" in line and "reason=backwards_header_timestamp" in line:
+            result.add("daq")
+        if "[PICO_HEARTBEAT]" in line and "diagnosis=heartbeat_timeout_while_tracking_active" in line:
+            result.add("teleop")
+    return result
+
+
 def evidence_modules(job, defect, materials=None):
     result = job.result or {}
     sources = result.get("sources", [])
@@ -143,7 +300,9 @@ def evidence_modules(job, defect, materials=None):
             document = json.loads(text)
         except (ValueError, TypeError, RecursionError):
             document = None
-        structured = failing_components(document, options) | producer_modules(document)
+        structured = (
+            failing_components(document, options) | producer_modules(document) | source_fault_modules("", document)
+        )
         if structured:
             has_failure = True
             candidates.update(structured)
@@ -154,18 +313,23 @@ def evidence_modules(job, defect, materials=None):
             except (ValueError, TypeError, RecursionError):
                 value = None
             if isinstance(value, dict):
-                structured = failing_components(value, options) | producer_modules(value)
+                structured = (
+                    failing_components(value, options) | producer_modules(value) | source_fault_modules(line, value)
+                )
                 observation = value.get("observation")
                 if observation in {"daq", "teleop"}:
                     structured |= producer_modules({"evidence": {"observations": {observation: value}}})
                 if structured:
                     has_failure = True
                     candidates.update(structured)
-            elif document is None and not line.lstrip().startswith(("{", '"')) and log_failure(line):
-                has_failure = True
-                candidates.update(identified(line, options))
-                candidates.update(key for key, pattern in LOG_COMPONENTS.items() if pattern.search(line))
-    if has_failure:
+            elif document is None and not line.lstrip().startswith(("{", '"')):
+                specific = source_fault_modules(line)
+                if log_failure(line) or specific:
+                    has_failure = True
+                    candidates.update(specific)
+                    candidates.update(identified(line, options))
+                    candidates.update(key for key, pattern in LOG_COMPONENTS.items() if pattern.search(line))
+    if has_failure and not candidates:
         # Structured DAQ descriptions can narrow an otherwise generic verified failure.
         # Ordinary titles, keywords and model answers never establish a module.
         candidates.update(identified(defect.description, options))
