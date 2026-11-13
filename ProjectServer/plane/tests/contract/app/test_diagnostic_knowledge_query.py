@@ -140,3 +140,12 @@ def test_json_error_code_and_failure_reason_are_literal_retrieval_terms():
     for field, value in [("code", "topic_rate_too_low"), ("failure_reason", "packet_timeline_failed")]:
         query = diagnostic_search_query("通用描述", [{"excerpt": json.dumps({field: value})}])
         assert value in query
+
+
+def test_plain_error_line_keeps_producer_signature_for_knowledge_retrieval():
+    from plane.quality.diagnostic_materials import diagnostic_search_query
+
+    query = diagnostic_search_query(
+        "通用模拟回放描述", [{"excerpt": "ERROR synthetic=true timestamp count mismatch: sidecar=29, encoded=30"}]
+    )
+    assert "timestamp count mismatch" in query

@@ -153,6 +153,8 @@ SOURCE_DAQ_CODES = frozenset(
         "derived_failed",
         "metadata_storage_quota_exceeded",
         "RECORDING_DURABILITY_FAILED",
+        "packet_timeline_failed",
+        "no_video_frames",
     }
 )
 SOURCE_DAQ_PHRASES = (
@@ -246,6 +248,8 @@ def source_fault_modules(line, structured=None):
     if failed and (
         tokens & SOURCE_DAQ_CODES or any(value.casefold() in line.casefold() for value in SOURCE_DAQ_PHRASES)
     ):
+        result.add("daq")
+    if failed and re.search(r"\bvalidation_error=相机 [^\n]{1,100} 的 (?:color|depth) 重复", line):
         result.add("daq")
     if failed and any(value.casefold() in line.casefold() for value in SOURCE_TELEOP_PHRASES):
         result.add("teleop")

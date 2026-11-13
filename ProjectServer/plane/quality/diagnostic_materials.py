@@ -277,6 +277,21 @@ def diagnostic_search_query(text, sources):
             )
     if tokens:
         return " ".join(dict.fromkeys(tokens))[:2000]
+    signatures = []
+    for source in sources[:1000] if isinstance(sources, (list, tuple)) else []:
+        excerpt = source.get("excerpt", "") if isinstance(source, dict) else ""
+        if not isinstance(excerpt, str):
+            continue
+        for line in excerpt[:FILE_BYTES].replace("\\n", "\n").splitlines():
+            if scan_content(line):
+                continue
+            match = re.search(r"(?<![A-Za-z0-9_=])(?:ERROR|FATAL)(?:\s|:)([^\r\n]{1,300})", line)
+            if match:
+                signature = re.sub(r"\b(?:synthetic|simulated)=true\s*", "", match[1]).strip()
+                if signature:
+                    signatures.append(signature)
+    if signatures:
+        return " ".join(dict.fromkeys(signatures))[:2000]
     # Non-error material retains the prior natural-language retrieval behavior, with sensitive lines removed.
     safe = redact(text.split("\n[FILE-", 1)[0]) if isinstance(text, str) else ""
     return summarize(safe, 2000) if safe else ""

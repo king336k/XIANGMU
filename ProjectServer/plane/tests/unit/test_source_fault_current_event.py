@@ -31,3 +31,14 @@ def test_pico_video_media_failure_has_same_owner_at_error_severity():
     from plane.quality.module_routing import source_fault_modules
 
     assert source_fault_modules("ERROR [pico_video] media failure stage=encode_submit") == {"teleop"}
+
+
+def test_media_finalization_codes_and_camera_slot_validation_identify_daq():
+    from plane.quality.module_routing import source_fault_modules
+
+    for line in [
+        "ERROR failure_reason=packet_timeline_failed:integrity_rejected",
+        "ERROR failure_reason=no_video_frames",
+        "ERROR validation_error=相机 synthetic_camera 的 color 重复（第 1 行 与 第 2 行）",
+    ]:
+        assert source_fault_modules(line) == {"daq"}
