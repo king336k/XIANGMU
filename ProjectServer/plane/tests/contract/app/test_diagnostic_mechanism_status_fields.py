@@ -161,3 +161,16 @@ def test_upload_fixed_enums_reject_status_prefixes_and_keep_json_delimiters():
         assert not {"上传", "续传", "分片"} & set(later.split()), ("later", changed)
     valid = '{"persisted_status":"UPLOADING","restored_status":"INTERRUPTED","final_complete_response":"not_observed"}'
     assert {"上传", "续传", "分片"} <= set(diagnostic_search_query("neutral", [{"excerpt": valid}]).split())
+
+
+def test_mode_switch_current_action_and_requested_mode_retrieve_only_contract_context():
+    excerpt = "INFO current_action=hand requested_input_mode=controller\nWARN switch_response HTTP=409"
+    query = diagnostic_search_query("neutral", [{"excerpt": excerpt}])
+    assert {"current_action", "requested_input_mode", "模式切换", "接口", "状态"} <= set(query.split())
+    assert "hand" not in query and "controller" not in query and "409" not in query
+    assert "模式切换" not in diagnostic_search_query("neutral", [{"excerpt": "INFO current_action=hand"}])
+    assert "模式切换" not in diagnostic_search_query(
+        "neutral", [{"excerpt": "INFO current_action=hand"}, {"excerpt": "INFO requested_input_mode=controller"}]
+    )
+    sensitive = "INFO current_action=hand requested_input_mode=controller password=private"
+    assert diagnostic_search_query("neutral", [{"excerpt": sensitive}]) == "neutral"

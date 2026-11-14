@@ -415,6 +415,7 @@ def diagnostic_search_query(text, sources):
     status_tokens = []
     message_type_observed = False
     upload_resume_observed = False
+    mode_switch_observed = False
     fields = {
         "active_mode",
         "sequence_input",
@@ -444,6 +445,8 @@ def diagnostic_search_query(text, sources):
         "queue_drops",
         "write_errors",
         "image_timestamp_drops",
+        "current_action",
+        "requested_input_mode",
         # Fixed monitor/continuation observations; preserve field names, never values.
         "publisher_type",
         "monitor_config_type",
@@ -489,6 +492,8 @@ def diagnostic_search_query(text, sources):
                 )
         if {"publisher_type", "monitor_config_type", "callback_received"} <= excerpt_fields:
             message_type_observed = True
+        if {"current_action", "requested_input_mode"} <= excerpt_fields:
+            mode_switch_observed = True
         if (
             excerpt_statuses.get("persisted_status") == "uploading"
             and excerpt_statuses.get("restored_status") == "interrupted"
@@ -500,6 +505,8 @@ def diagnostic_search_query(text, sources):
             status_tokens.extend(["监控", "订阅", "消息类型", "QoS"])
         if upload_resume_observed:
             status_tokens.extend(["上传", "续传", "分片"])
+        if mode_switch_observed:
+            status_tokens.extend(["模式切换", "接口", "状态"])
         return " ".join(dict.fromkeys(status_tokens))[:2000]
     # Non-error material retains the prior natural-language retrieval behavior, with sensitive lines removed.
     safe = redact(text.split("\n[FILE-", 1)[0]) if isinstance(text, str) else ""
