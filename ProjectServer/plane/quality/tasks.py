@@ -2,24 +2,27 @@
 """Bounded diagnostics with evidence-gated, single-owner assignment after completion."""
 
 import time
+
 from celery import shared_task
-from openai import APITimeoutError
 from django.db import transaction
 from django.utils import timezone
-from .models import DiagnosticJob, Defect
-from .diagnostic_materials import inspect, redact, diagnostic_search_query
-from .diagnostic_model import analyze_diagnostic
-from .diagnostic_rules import evaluate
-from .log_evidence import summarize
-from plane.knowledge.retrieval import search
+from openai import APITimeoutError
+
 from plane.knowledge import assistant
-from .diagnostic_limits import timeout_seconds, task_limits
+from plane.knowledge.retrieval import search
+
 from .diagnostic_failures import (
     append_attempt_failure,
     failure_from_exception,
     safe_attempt_failures,
     safe_model_failure,
 )
+from .diagnostic_limits import task_limits, timeout_seconds
+from .diagnostic_materials import diagnostic_search_query, inspect, redact
+from .diagnostic_model import analyze_diagnostic
+from .diagnostic_rules import evaluate
+from .log_evidence import summarize
+from .models import Defect, DiagnosticJob
 
 DIAGNOSTIC_SOFT_LIMIT, DIAGNOSTIC_HARD_LIMIT = task_limits()
 
@@ -32,10 +35,9 @@ def run_diagnostic(job_id):
         job = DiagnosticJob.objects.select_for_update().select_related("defect", "project").filter(pk=job_id).first()
         if not job or job.status != "queued":
             return
-        from .permissions import writable_member, capable, is_administrator
-        from .data_regression import manager
-
         from .daq_reporting import report_only_diagnostic_access
+        from .data_regression import manager
+        from .permissions import capable, is_administrator, writable_member
 
         report_only = report_only_diagnostic_access(job)
         automatic = job.mode == "auto" and job.result.get("trigger") in {"daq_report", "materials_verified"}
@@ -163,7 +165,9 @@ def run_diagnostic(job_id):
                     # prioritize the observed mechanism rather than database row order.
                     candidates = search(job.project, query)
                     fallback = list(candidates[:5])
-                    iterator = candidates.iterator(chunk_size=100) if hasattr(candidates, "iterator") else iter(candidates)
+                    iterator = (
+                        candidates.iterator(chunk_size=100) if hasattr(candidates, "iterator") else iter(candidates)
+                    )
                     revisions = rank_diagnostic_rows(iterator, query)
                     selected = {row.id for row in revisions}
                     revisions.extend(row for row in fallback if row.id not in selected)
@@ -176,7 +180,11 @@ def run_diagnostic(job_id):
 
                     context_references = diagnostic_context(job, report_only=report_only, sources=sources)
                     answer = analyze_diagnostic(
-                        config, model_text, sources, [*references, *context_references], materials
+                        {**config, "require_actionable_report": True},
+                        model_text,
+                        sources,
+                        [*references, *context_references],
+                        materials,
                     )
                     result["context_references"] = context_references
                     result.update(answer, method="hybrid", notice="规则与模型分析", model_status="completed")
@@ -281,9 +289,10 @@ def run_diagnostic(job_id):
             }
             current.save(update_fields=["result"])
             if current.result.get("fallback") == "rules_after_retries":
-                from .notifications import defect_notice, managers
                 from plane.license.models import InstanceAdmin
+
                 from .models import DefectEvent
+                from .notifications import defect_notice, managers
 
                 receivers = [
                     *managers(assigned.project),

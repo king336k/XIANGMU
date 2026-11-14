@@ -413,6 +413,8 @@ def diagnostic_search_query(text, sources):
         return " ".join(dict.fromkeys(signatures))[:2000]
     # Normal/status observations also carry mechanism identity; generic report templates do not.
     status_tokens = []
+    message_type_observed = False
+    upload_resume_observed = False
     fields = {
         "active_mode",
         "sequence_input",
@@ -442,11 +444,22 @@ def diagnostic_search_query(text, sources):
         "queue_drops",
         "write_errors",
         "image_timestamp_drops",
+        # Fixed monitor/continuation observations; preserve field names, never values.
+        "publisher_type",
+        "monitor_config_type",
+        "callback_received",
+        "persisted_status",
+        "restored_status",
+        "manualPaused",
+        "pauseReason",
+        "final_complete_response",
     }
     for source in sources[:1000] if isinstance(sources, (list, tuple)) else []:
         excerpt = source.get("excerpt", "") if isinstance(source, dict) else ""
         if not isinstance(excerpt, str):
             continue
+        excerpt_fields = set()
+        excerpt_statuses = {}
         for line in excerpt[:FILE_BYTES].replace("\\n", "\n").splitlines()[:1000]:
             if scan_content(line):
                 continue
@@ -459,10 +472,34 @@ def diagnostic_search_query(text, sources):
                 )
             )
             # Match logger assignments and JSON keys without decoding/traversing arbitrary payloads.
-            status_tokens.extend(
-                key for key in re.findall(r"\b([a-z][a-z0-9_]{2,80})[\"']?\s*[:=]", line) if key in fields
-            )
+            for key in re.findall(r"\b([A-Za-z][A-Za-z0-9_]{2,80})[\"']?\s*[:=]", line):
+                if key in fields:
+                    status_tokens.append(key)
+                    excerpt_fields.add(key)
+            for key, value in re.findall(
+                r"\b(persisted_status|restored_status|final_complete_response)"
+                r"[\"']?\s*[:=]\s*[\"']?([^\s\"',;}\]]{1,120})[^\s\"',;}\]]*(?=$|[\s\"',;}\]]|\\n)",
+                line,
+            ):
+                normalized = value.casefold()
+                excerpt_statuses[key] = (
+                    normalized
+                    if normalized in {"uploading", "interrupted", "not_observed", "false", "missing"}
+                    else None
+                )
+        if {"publisher_type", "monitor_config_type", "callback_received"} <= excerpt_fields:
+            message_type_observed = True
+        if (
+            excerpt_statuses.get("persisted_status") == "uploading"
+            and excerpt_statuses.get("restored_status") == "interrupted"
+            and excerpt_statuses.get("final_complete_response") in {"not_observed", "false", "missing"}
+        ):
+            upload_resume_observed = True
     if status_tokens:
+        if message_type_observed:
+            status_tokens.extend(["监控", "订阅", "消息类型", "QoS"])
+        if upload_resume_observed:
+            status_tokens.extend(["上传", "续传", "分片"])
         return " ".join(dict.fromkeys(status_tokens))[:2000]
     # Non-error material retains the prior natural-language retrieval behavior, with sensitive lines removed.
     safe = redact(text.split("\n[FILE-", 1)[0]) if isinstance(text, str) else ""

@@ -1,19 +1,22 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Diagnostic-specific model boundary; only approved text and validated references."""
 
+import hashlib
 import json
 import math
-import hashlib
-import re
 import os
+import re
 import subprocess
 from pathlib import Path
+
 from openai import OpenAI
 from rest_framework import serializers
+
 from plane.knowledge.retrieval import scan_content
-from .log_evidence import summarize
-from .diagnostic_limits import timeout_seconds
+
 from .diagnostic_failures import DiagnosticProviderFailure, DiagnosticTimeoutFailure, agent_failure_metadata
+from .diagnostic_limits import timeout_seconds
+from .log_evidence import summarize
 
 
 class DiagnosticOutputFailure(ValueError):
@@ -136,6 +139,7 @@ class DiagnosticAnswer(serializers.Serializer):
 
 def analyze_diagnostic(config, text, sources, references, materials=None):
     budget = timeout_seconds()
+    require_actionable_report = config.get("require_actionable_report") is True
     model_usage = None
     actual_model = config.get("model", "")
     model_source = "configured"
@@ -195,6 +199,7 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
                         "evidence": evidence,
                         "references": references,
                         "materials": approved_materials,
+                        "require_actionable_report": require_actionable_report,
                     }
                 ),
                 capture_output=True,
@@ -324,6 +329,8 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
     parsed = DiagnosticAnswer(data=payload)
     parsed.is_valid(raise_exception=True)
     result = parsed.validated_data
+    if require_actionable_report and (not result["suggested_actions"] or not result["verification_steps"]):
+        raise ValueError("INVALID_DIAGNOSTIC_OUTPUT")
     if not result["citations"] or any(pk not in allowed for pk in result["citations"]):
         raise ValueError("INVALID_DIAGNOSTIC_CITATION")
     if any(ref not in result["citations"] for ref in result["confidence_references"]):
@@ -342,7 +349,9 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
         "model": model_name,
         "model_source": model_source,
         "engine": result["engine"],
-        "instruction_version": "diagnostic-evidence-impact-v4",
+        "instruction_version": "diagnostic-evidence-impact-v5"
+        if require_actionable_report
+        else "diagnostic-evidence-impact-v4",
         "boundary_code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "agent_code_sha256": agent_sha256,
     }
