@@ -3,7 +3,6 @@ import useSWR, { useSWRConfig } from "swr";
 import { v4 as uuidv4 } from "uuid";
 import { qualityApi } from "./api";
 import { Field, fieldClass, Modal } from "./shared";
-import { can } from "./types";
 import type { Context } from "./types";
 import type { VerificationData } from "./verification-types";
 
@@ -38,7 +37,7 @@ export function VerificationAssignee({
             修改指派
           </button>
         )}
-        {data && !current && ["manage_test_plan", "manage_defect", "solution"].some((cap) => can(context, cap)) && (
+        {data && !current && canSchedule(context) && (
           <button type="button" className="text-12 text-accent-primary hover:underline" onClick={onArrange}>
             安排测试
           </button>
@@ -49,7 +48,7 @@ export function VerificationAssignee({
           读取失败，重试
         </button>
       ) : (
-        <p className="text-13">{!data ? "加载中…" : current ? current.assignee_name || "待认领" : "未安排"}</p>
+        <p className="text-13">{!data ? "加载中…" : current ? current.assignee_name || "待安排测试员" : "未安排"}</p>
       )}
       {editing && (
         <Modal
@@ -72,15 +71,24 @@ export function VerificationAssignee({
           }}
         >
           <Field label="测试员">
-            <select name="assignee_id" aria-label="指派测试员" defaultValue={editing.assignee} className={fieldClass}>
-              <option value="">待测试员认领</option>
+            <select
+              required
+              name="assignee_id"
+              aria-label="指派测试员"
+              defaultValue={editing.assignee}
+              className={fieldClass}
+            >
+              <option value="" disabled>
+                选择测试员
+              </option>
               {context.members
-                .filter(
-                  (member) =>
-                    !context.business_roles_enabled ||
-                    member.is_administrator ||
-                    [member.business_role, ...(member.business_roles || [])].includes("REGRESSION_TESTER")
-                )
+                .filter((member) => {
+                  if (member.is_administrator) return false;
+                  const roles = [member.business_role, ...(member.business_roles || [])].filter(Boolean);
+                  return roles.length
+                    ? roles.includes("REGRESSION_TESTER")
+                    : !context.business_roles_enabled && member.role === 15;
+                })
                 .map((member) => (
                   <option key={member.id} value={member.id}>
                     {member.name}
@@ -91,5 +99,14 @@ export function VerificationAssignee({
         </Modal>
       )}
     </div>
+  );
+}
+
+function canSchedule(context: Context) {
+  return (
+    context.is_administrator ||
+    context.is_manager ||
+    context.business_role === "TECHNICIAN" ||
+    (context.business_roles || []).includes("TECHNICIAN")
   );
 }

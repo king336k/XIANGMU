@@ -224,6 +224,67 @@ class DefectVerification(QualityRecord):
         ]
 
 
+class DefectVerificationCase(QualityRecord):
+    """A frozen public-case revision or a private case scoped to one defect round."""
+
+    verification = models.ForeignKey(DefectVerification, on_delete=models.PROTECT, related_name="case_items")
+    source_case = models.ForeignKey(TestCase, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    source_revision = models.ForeignKey(CaseRevision, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    source_plan_item = models.ForeignKey(PlanItem, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    source = models.CharField(max_length=16, choices=(("library", "library"), ("round", "round")))
+    title = models.CharField(max_length=255)
+    snapshot = models.JSONField(default=dict)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta(QualityRecord.Meta):
+        ordering = ["position", "created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(source="library", source_case__isnull=False, source_revision__isnull=False)
+                    | models.Q(source="round", source_case__isnull=True, source_revision__isnull=True)
+                ),
+                name="quality_verification_case_source_consistent",
+            ),
+            models.UniqueConstraint(
+                fields=["verification", "source_case"],
+                condition=models.Q(source_case__isnull=False),
+                name="quality_verification_library_case_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["source_plan_item"],
+                condition=models.Q(source_plan_item__isnull=False),
+                name="quality_verification_legacy_plan_item_unique",
+            ),
+        ]
+
+
+class DefectVerificationCaseExecution(QualityRecord):
+    """Append-only per-item results; created_by is the actual operator (including admin proxy)."""
+
+    item = models.ForeignKey(DefectVerificationCase, on_delete=models.PROTECT, related_name="executions")
+    source_execution = models.ForeignKey(TestExecution, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    request_id = models.UUIDField()
+    request_hash = models.CharField(max_length=64)
+    result = models.CharField(max_length=16)
+    actual_result = models.TextField(blank=True)
+    evidence = models.TextField(blank=True)
+    step_results = models.JSONField(default=list)
+    reason_category = models.CharField(max_length=24, blank=True)
+    next_action = models.TextField(blank=True)
+
+    class Meta(QualityRecord.Meta):
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["item", "request_id"], name="quality_verification_case_execution_request_unique"),
+            models.UniqueConstraint(
+                fields=["source_execution"],
+                condition=models.Q(source_execution__isnull=False),
+                name="quality_verification_legacy_execution_unique",
+            ),
+        ]
+
+
 class DefectVerificationResult(QualityRecord):
     verification = models.ForeignKey(DefectVerification, on_delete=models.PROTECT, related_name="manual_results")
     request_id = models.UUIDField()

@@ -12,11 +12,13 @@ export const qualityOwnerMetrics = [
   { key: "plan_count", label: "有效测试计划" },
   { key: "historical_plan_count", label: "历史测试计划" },
   { key: "execution_count", label: "执行记录" },
+  { key: "case_execution_count", label: "缺陷用例执行记录" },
   { key: "manual_execution_count", label: "人工验证记录" },
   { key: "open_defects", label: "未关闭缺陷" },
   { key: "closed_defects", label: "已关闭缺陷" },
   ...[
     ["summary", "当前测试"],
+    ["verification_case", "当前缺陷用例"],
     ["manual", "当前人工验证"],
   ].flatMap(([prefix, label]) =>
     [
@@ -36,6 +38,7 @@ export const analyticsOwnerMetrics = [
   { key: "total_defects", label: "缺陷" },
   { key: "total_test_plans", label: "未归档计划（含历史）" },
   { key: "total_test_executions", label: "测试执行记录" },
+  { key: "total_case_round_executions", label: "缺陷用例执行记录" },
   { key: "total_manual_executions", label: "人工验证记录" },
   { key: "total_work_items", label: "全部任务与需求" },
   { key: "total_projects", label: "项目" },
@@ -58,6 +61,7 @@ export const periodOwnerMetrics = [
   { key: "work_created", label: "新增任务与需求" },
   { key: "work_completed", label: "完成任务与需求" },
   { key: "test_executions", label: "测试执行" },
+  { key: "verification_case_executions", label: "缺陷用例验证" },
   { key: "manual_executions", label: "人工验证" },
   { key: "plans_confirmed", label: "确认测试计划" },
   { key: "defects_created", label: "新增缺陷" },

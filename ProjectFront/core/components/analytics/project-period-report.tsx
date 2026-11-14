@@ -111,7 +111,9 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
   const projectUrl = `/${workspaceSlug}/projects/${projectId}`;
   const members = data
     ? [...data.workload, data.unassigned].filter(
-        (row) => total(row.work) + total(row.plans) + total(row.defects) + row.period_executions > 0
+        (row) =>
+          total(row.work) + total(row.plans) + total(row.defects) + row.period_executions + row.case_round_executions >
+          0
       )
     : [];
   const workloadCell = (row: Workload, resource: "work" | "plans" | "defects") => (
@@ -239,6 +241,7 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
             series={[
               { key: "work_created", label: "新增工作项", color: "#4b86c6" },
               { key: "test_executions", label: "测试执行", color: "#8d78b6" },
+              { key: "case_round_executions", label: "缺陷用例验证", color: "#6584b5" },
               { key: "manual_executions", label: "人工验证", color: "#4b9b96" },
               { key: "defects_created", label: "新增缺陷", color: "#db8650" },
               { key: "defects_closed", label: "关闭缺陷", color: "#379b76" },
@@ -270,6 +273,22 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
                   }))}
                 onSelect={(result) =>
                   show(`人工验证 · ${resultNames[result]}`, { detail: "manual_executions", result })
+                }
+              />
+            )}
+            {data.case_round_results && (
+              <Distribution
+                title="缺陷用例验证结果"
+                rows={Object.keys(resultNames)
+                  .filter((key) => key !== "pending")
+                  .map((key, i) => ({
+                    key,
+                    name: resultNames[key],
+                    count: data.case_round_results?.[key] || 0,
+                    color: ["#379b76", "#c94c5c", "#db8650", "#b6a05c", "#8b9ba8"][i],
+                  }))}
+                onSelect={(result) =>
+                  show(`缺陷用例验证 · ${resultNames[result]}`, { detail: "verification_case_executions", result })
                 }
               />
             )}
@@ -347,7 +366,7 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
                             setParams(next, { replace: true, preventScrollReset: true });
                           }}
                         >
-                          {row.period_executions}
+                          {row.period_executions + row.case_round_executions}
                         </button>
                       </td>
                     </tr>

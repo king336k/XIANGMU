@@ -166,13 +166,16 @@ test("测试员能新建编辑复制归档发布测试套件，不能创建或�
 });
 test("用例和计划顶部创建导入入口按独立能力开放，不改变其他岗位", () => {
   for (const tab of ["cases", "plans"]) {
-    const tree = load("workbench", tester, tab).QualityWorkbench({});
-    for (const text of tab === "cases" ? ["新建用例", "导入用例"] : ["新建计划", "导入任务包"])
+    const context =
+      tab === "cases" ? { ...tester, capabilities: { ...tester.capabilities, manage_case: false } } : tester;
+    const tree = load("workbench", context, tab).QualityWorkbench({});
+    for (const text of tab === "cases" ? ["新建用例"] : ["新建计划", "导入任务包"])
       assert.ok(labels(tree).includes(text), text);
+    if (tab === "cases") assert.ok(!labels(tree).includes("导入用例"), "测试员可建公共用例，批量导入仍需管理权限");
     const reporter = { ...tester, business_role: "REPORTER", capabilities: { report: true } };
-    assert.ok(
-      !labels(load("workbench", reporter, tab).QualityWorkbench({})).includes(tab === "cases" ? "新建用例" : "新建计划")
-    );
+    const reporterLabels = labels(load("workbench", reporter, tab).QualityWorkbench({}));
+    if (tab === "cases") assert.ok(reporterLabels.includes("新建用例"), "项目成员可以新增公共用例");
+    else assert.ok(!reporterLabels.includes("新建计划"));
   }
 });
 test("测试员可登记测试执行资源与选择计划资源，能力缺失不能借经理标记绕过", () => {

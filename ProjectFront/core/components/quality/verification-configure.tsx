@@ -5,8 +5,8 @@ import { CasePicker } from "./case-picker";
 import type { CaseOption } from "./case-selection";
 import { qualityApi, errorMessage } from "./api";
 import { Field, fieldClass } from "./shared";
-import type { Context, Step } from "./types";
-import type { VerificationData, VerificationRound } from "./verification-types";
+import type { Context } from "./types";
+import type { VerificationData, VerificationItem, VerificationRound } from "./verification-types";
 
 export function VerificationConfigure({
   base,
@@ -30,21 +30,20 @@ export function VerificationConfigure({
   context?: Context;
 }) {
   const [mode, setMode] = useState(initialMode || initial?.mode || "manual");
-  const [steps, setSteps] = useState<(Step & { id: string })[]>(
-    (initial?.steps.length ? initial.steps : [{ action: "", expected: "" }]).map((step) => ({
-      action: step.action,
-      expected: step.expected,
-      id: uuidv4(),
-    }))
-  );
+  const [howToTest, setHowToTest] = useState(initial?.steps.map((step) => step.action).join("\n") || "");
   const [selected, setSelected] = useState<CaseOption[]>(
-    (initial?.items || []).map((item) => ({
-      id: item.case_id,
-      title: item.title,
-      version: item.case_version,
-      module: item.snapshot.module || "",
-      priority: item.snapshot.priority || "medium",
-    }))
+    (initial?.items || [])
+      .filter((item): item is VerificationItem & { case_id: string } => !!item.case_id)
+      .map((item) => ({
+        id: item.case_id,
+        title: item.title,
+        version: item.case_version ?? 1,
+        module: item.snapshot.module || "",
+        priority: item.snapshot.priority || "medium",
+      }))
+  );
+  const [testRequirements, setTestRequirements] = useState(
+    mode === "cases" ? initial?.steps.map((step) => step.action).join("\n") || "" : ""
   );
   const [build, setBuild] = useState(initial?.fixed_build || fixedBuild);
   const [environment, setEnvironment] = useState(initial?.environment || "");
@@ -67,8 +66,9 @@ export function VerificationConfigure({
         fixed_build: build,
         environment,
         assignee_id: assignee || null,
+        test_requirements: mode === "cases" ? testRequirements : "",
         ...(mode === "manual"
-          ? { steps: steps.map(({ action, expected }) => ({ action, expected })) }
+          ? { steps: [{ action: howToTest, expected: "" }] }
           : { case_ids: selected.map((row) => row.id) }),
       });
       await onSaved(result);
@@ -80,6 +80,12 @@ export function VerificationConfigure({
   };
   return (
     <fieldset disabled={busy} className="min-w-0 space-y-4">
+      <div className="rounded-md border border-subtle bg-layer-1 p-3">
+        <h3 className="text-13 font-medium">安排验证</h3>
+        <p className="mt-1 text-12 text-secondary">
+          写清测试要求并指派测试员。测试员会在缺陷页、测试任务和我的工作中看到同一项任务。
+        </p>
+      </div>
       <div role="group" aria-label="验证方式" className="flex flex-wrap gap-2">
         {(
           [
@@ -129,6 +135,7 @@ export function VerificationConfigure({
       <Field label="指派测试员">
         <select
           aria-label="指派测试员"
+          required
           value={assignee}
           className={fieldClass}
           onChange={(event) => {
@@ -136,14 +143,17 @@ export function VerificationConfigure({
             change();
           }}
         >
-          <option value="">待测试员认领</option>
+          <option value="" disabled>
+            选择测试员
+          </option>
           {context?.members
-            .filter(
-              (member) =>
-                !context.business_roles_enabled ||
-                member.is_administrator ||
-                [member.business_role, ...(member.business_roles || [])].includes("REGRESSION_TESTER")
-            )
+            .filter((member) => {
+              if (member.is_administrator) return false;
+              const roles = [member.business_role, ...(member.business_roles || [])].filter(Boolean);
+              return roles.length
+                ? roles.includes("REGRESSION_TESTER")
+                : !context.business_roles_enabled && member.role === 15;
+            })
             .map((member) => (
               <option key={member.id} value={member.id}>
                 {member.name}
@@ -152,67 +162,44 @@ export function VerificationConfigure({
         </select>
       </Field>
       {mode === "manual" ? (
-        <div className="space-y-3">
-          {steps.map((step, index) => (
-            <div key={step.id} className="grid items-start gap-2 sm:grid-cols-[1fr_1fr_auto]">
-              <Field label={`步骤 ${index + 1}`}>
-                <textarea
-                  className={fieldClass}
-                  rows={2}
-                  maxLength={4000}
-                  value={step.action}
-                  onChange={(event) => {
-                    setSteps(steps.map((row) => (row.id === step.id ? { ...row, action: event.target.value } : row)));
-                    change();
-                  }}
-                />
-              </Field>
-              <Field label="预期结果">
-                <textarea
-                  className={fieldClass}
-                  rows={2}
-                  maxLength={4000}
-                  value={step.expected}
-                  onChange={(event) => {
-                    setSteps(steps.map((row) => (row.id === step.id ? { ...row, expected: event.target.value } : row)));
-                    change();
-                  }}
-                />
-              </Field>
-              <Button
-                type="button"
-                variant="neutral-primary"
-                disabled={steps.length === 1}
-                onClick={() => {
-                  setSteps(steps.filter((row) => row.id !== step.id));
-                  change();
-                }}
-              >
-                移除
-              </Button>
-            </div>
-          ))}
-          <Button
-            type="button"
-            variant="neutral-primary"
-            disabled={steps.length >= 100}
-            onClick={() => {
-              setSteps([...steps, { id: uuidv4(), action: "", expected: "" }]);
+        <Field label="如何测试">
+          <textarea
+            required
+            className={fieldClass}
+            rows={4}
+            maxLength={4000}
+            value={howToTest}
+            onChange={(event) => {
+              setHowToTest(event.target.value);
               change();
             }}
-          >
-            添加步骤
-          </Button>
-        </div>
+            placeholder="写清测试操作，可按 1、2、3 分行填写。"
+          />
+        </Field>
       ) : (
-        <CasePicker
-          base={base}
-          selected={selected}
-          onChange={(rows) => {
-            setSelected(rows);
-            change();
-          }}
-        />
+        <div className="space-y-3">
+          <CasePicker
+            base={base}
+            selected={selected}
+            onChange={(rows) => {
+              setSelected(rows);
+              change();
+            }}
+          />
+          <Field label="测试要求（选填）">
+            <textarea
+              className={fieldClass}
+              rows={3}
+              maxLength={4000}
+              value={testRequirements}
+              onChange={(event) => {
+                setTestRequirements(event.target.value);
+                change();
+              }}
+              placeholder="未关联用例时，请写清测试目标；测试员可据此补充本轮用例。"
+            />
+          </Field>
+        </div>
       )}
       {error && (
         <p role="alert" className="text-13 text-danger-primary">
@@ -226,7 +213,7 @@ export function VerificationConfigure({
             busy ||
             !build.trim() ||
             !environment.trim() ||
-            (mode === "manual" ? steps.some((step) => !step.action.trim() || !step.expected.trim()) : !selected.length)
+            (mode === "manual" ? !howToTest.trim() : !selected.length && !testRequirements.trim())
           }
           onClick={() => void save()}
         >

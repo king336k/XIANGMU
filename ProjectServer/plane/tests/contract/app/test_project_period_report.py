@@ -1,9 +1,22 @@
 """Project period activity and current workload have distinct clocks and permission boundaries."""
 
 from datetime import datetime, timezone as dt_timezone
+from uuid import uuid4
 import pytest
+from django.utils import timezone
 from plane.db.models import Project, ProjectMember, Issue, State, IssueAssignee
-from plane.quality.models import Defect, DefectEvent, TestPlan, TestCase, CaseRevision, PlanItem, TestExecution
+from plane.quality.models import (
+    Defect,
+    DefectEvent,
+    DefectVerification,
+    DefectVerificationCase,
+    DefectVerificationCaseExecution,
+    TestPlan,
+    TestCase,
+    CaseRevision,
+    PlanItem,
+    TestExecution,
+)
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 
@@ -86,6 +99,163 @@ def test_period_native_work_and_multiple_execution_results_count_as_recorded(
     assert response.data["test_results"] == {"passed": 1, "failed": 1, "blocked": 0, "inconclusive": 0, "skipped": 0}
     row = response.data["workload"][0]
     assert row["work"]["started"] == 1 and row["plans"]["running"] == 1
+
+
+def test_period_defect_case_results_are_counted_and_drill_down_by_executor(session_client, report_project, create_user):
+    project, url = report_project
+    today = timezone.localdate().isoformat()
+    defect = Defect.objects.create(
+        project=project,
+        created_by=create_user,
+        title="缺陷回归用例",
+        status="resolved",
+        fixed_build="v2",
+        resolved_at=timezone.now(),
+        assignee=create_user,
+    )
+    plan = TestPlan.objects.create(
+        project=project,
+        created_by=create_user,
+        name="缺陷回归",
+        build="v2",
+        environment="测试",
+        assignee=create_user,
+        status="running",
+        managed=True,
+    )
+    round_ = DefectVerification.objects.create(
+        project=project,
+        created_by=create_user,
+        defect=defect,
+        plan=plan,
+        round_no=1,
+        mode="cases",
+        status="testing",
+        fixed_build="v2",
+        environment="测试",
+        resolved_at=defect.resolved_at,
+        request_id=uuid4(),
+        request_hash="round",
+    )
+    item = DefectVerificationCase.objects.create(
+        project=project,
+        created_by=create_user,
+        verification=round_,
+        source="round",
+        title="临时场景",
+        snapshot={"title": "临时场景", "steps": []},
+    )
+    DefectVerificationCaseExecution.objects.create(
+        project=project,
+        created_by=create_user,
+        item=item,
+        request_id=uuid4(),
+        request_hash="execution",
+        result="passed",
+        actual_result="通过",
+    )
+
+    response = session_client.get(url + f"?start={today}&end={today}")
+    assert response.status_code == 200, response.content
+    assert response.data["activity"]["verification_case_executions"] == 1
+    assert response.data["test_results"]["passed"] == 1
+    assert response.data["case_round_results"]["passed"] == 1
+    detail = session_client.get(
+        url
+        + f"?start={today}&end={today}&detail=verification_case_executions&result=passed"
+    )
+    assert detail.status_code == 200, detail.content
+    assert detail.data["count"] == 1
+    assert detail.data["results"][0]["kind"] == "缺陷用例执行"
+
+
+def test_legacy_snapshot_copy_does_not_double_count_period_results(session_client, report_project, create_user):
+    project, url = report_project
+    today = timezone.localdate().isoformat()
+    defect = Defect.objects.create(
+        project=project,
+        created_by=create_user,
+        title="旧轮次快照",
+        status="resolved",
+        fixed_build="v2",
+        resolved_at=timezone.now(),
+    )
+    case = TestCase.objects.create(project=project, created_by=create_user, title="旧用例", steps=[])
+    revision = CaseRevision.objects.create(
+        project=project,
+        created_by=create_user,
+        case=case,
+        version=1,
+        title=case.title,
+        snapshot={"title": case.title, "steps": []},
+    )
+    plan = TestPlan.objects.create(
+        project=project,
+        created_by=create_user,
+        name="旧缺陷回归",
+        build="v2",
+        environment="测试",
+        status="running",
+        managed=True,
+    )
+    old_item = PlanItem.objects.create(
+        project=project,
+        created_by=create_user,
+        plan=plan,
+        case=case,
+        revision=revision,
+    )
+    round_ = DefectVerification.objects.create(
+        project=project,
+        created_by=create_user,
+        defect=defect,
+        plan=plan,
+        round_no=1,
+        mode="cases",
+        status="testing",
+        fixed_build="v2",
+        environment="测试",
+        resolved_at=defect.resolved_at,
+        request_id=uuid4(),
+        request_hash="legacy-round",
+    )
+    old_execution = TestExecution.objects.create(
+        project=project,
+        created_by=create_user,
+        item=old_item,
+        request_id=uuid4(),
+        result="passed",
+        actual_result="通过",
+        round_no=1,
+    )
+    snapshot = DefectVerificationCase.objects.create(
+        project=project,
+        created_by=create_user,
+        verification=round_,
+        source_case=case,
+        source_revision=revision,
+        source_plan_item=old_item,
+        source="library",
+        title=revision.title,
+        snapshot=revision.snapshot,
+    )
+    DefectVerificationCaseExecution.objects.create(
+        project=project,
+        created_by=create_user,
+        item=snapshot,
+        source_execution=old_execution,
+        request_id=old_execution.request_id,
+        request_hash="legacy-execution-copy",
+        result="passed",
+        actual_result="通过",
+    )
+
+    response = session_client.get(url + f"?start={today}&end={today}")
+    assert response.status_code == 200, response.content
+    assert response.data["activity"]["test_executions"] == 1
+    assert response.data["activity"]["verification_case_executions"] == 0
+    assert response.data["activity"]["test_cases_executed"] == 1
+    assert response.data["test_results"]["passed"] == 1
 
 
 @pytest.mark.parametrize(

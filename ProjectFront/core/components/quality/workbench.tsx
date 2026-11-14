@@ -377,7 +377,11 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
             <RefreshCw className="size-4" />
           </Button>
           {context &&
-            can(context, defectsOnly ? "report" : tab === "cases" ? "manage_case" : "manage_test_plan") &&
+            (defectsOnly
+              ? can(context, "report")
+              : tab === "cases"
+                ? context.can_write
+                : can(context, "manage_test_plan")) &&
             (tab === "cases" || tab === "plans" || defectsOnly) && (
               <Button
                 onClick={() => {

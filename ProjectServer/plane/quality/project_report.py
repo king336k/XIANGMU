@@ -19,6 +19,7 @@ from .models import (
     PlanItem,
     Requirement,
     DefectVerificationResult,
+    DefectVerificationCaseExecution,
 )
 from .views import QualityView, current_plans
 from .permissions import ROLE_NAMES
@@ -40,6 +41,7 @@ class PeriodInput(serializers.Serializer):
             "defects_closed",
             "defects_reopened",
             "test_executions",
+            "verification_case_executions",
             "manual_executions",
             "plans_confirmed",
             "workload",
@@ -148,6 +150,11 @@ def period_querysets(project, data):
         project=project, plan_id__in=plans.values("id"), action="approve", status="completed", **window
     )
     period_executions = executions.filter(**window)
+    # Legacy plan executions remain in TestExecution; their frozen round copies are
+    # only for display and must not count twice in period statistics.
+    case_verification_executions = DefectVerificationCaseExecution.objects.filter(
+        project=project, source_execution__isnull=True, **window
+    )
     manual_executions = DefectVerificationResult.objects.filter(project=project, **window)
     confirmed_plans = plans.filter(
         Q(pk__in=confirmed.values("plan_id"))
@@ -164,6 +171,7 @@ def period_querysets(project, data):
         "defects_closed": all_defects.filter(pk__in=closure.values("defect_id")),
         "defects_reopened": all_defects.filter(pk__in=reopened.values("defect_id")),
         "test_executions": period_executions,
+        "verification_case_executions": case_verification_executions,
         "manual_executions": manual_executions,
         "plans_confirmed": confirmed_plans,
     }
@@ -179,6 +187,7 @@ def period_querysets(project, data):
         "unfinished_plans": unfinished_plans,
         "defects": defects,
         "period_executions": period_executions,
+        "case_verification_executions": case_verification_executions,
         "manual_executions": manual_executions,
         "closure": closure,
         "detail_queries": detail_queries,
@@ -200,6 +209,7 @@ class ProjectPeriodReport(QualityView):
         unfinished_plans = scope["unfinished_plans"]
         defects = scope["defects"]
         period_executions = scope["period_executions"]
+        case_verification_executions = scope["case_verification_executions"]
         manual_executions = scope["manual_executions"]
         closure = scope["closure"]
         detail_queries = scope["detail_queries"]
@@ -251,7 +261,7 @@ class ProjectPeriodReport(QualityView):
                 qs = qs.distinct()
             else:
                 qs = {**detail_queries, **current_queries}[kind]
-                if kind in {"test_executions", "manual_executions"} and data.get("result"):
+                if kind in {"test_executions", "manual_executions", "verification_case_executions"} and data.get("result"):
                     qs = qs.filter(result=data["result"])
                 kind = {
                     "current_work": "work_current",
@@ -275,6 +285,17 @@ class ProjectPeriodReport(QualityView):
                         "kind": "测试执行",
                     }
                     for row in qs.select_related("item__revision")[offset : offset + data["per_page"]]
+                ]
+            elif kind == "verification_case_executions":
+                records = [
+                    {
+                        "id": str(row.id),
+                        "title": row.item.title,
+                        "result": row.result,
+                        "path": f"defects?defect={row.item.verification.defect_id}",
+                        "kind": "缺陷用例执行",
+                    }
+                    for row in qs.select_related("item__verification")[offset : offset + data["per_page"]]
                 ]
             elif kind == "manual_executions":
                 records = [
@@ -311,7 +332,10 @@ class ProjectPeriodReport(QualityView):
                 {"count": qs.count(), "results": records, "page": data["page"], "per_page": data["per_page"]}
             )
         activity = {key: query.count() for key, query in detail_queries.items()}
-        activity["test_cases_executed"] = period_executions.values("item__case_id").distinct().count()
+        activity["test_cases_executed"] = (
+            period_executions.values("item__case_id").distinct().count()
+            + case_verification_executions.values("item_id").distinct().count()
+        )
         members = active_members.select_related("member")
         roles = dict(BusinessRole.objects.filter(project=project).values_list("user_id", "role"))
         by_user = {
@@ -323,6 +347,7 @@ class ProjectPeriodReport(QualityView):
                 "plans": {},
                 "defects": {},
                 "period_executions": 0,
+                "case_round_executions": 0,
             }
             for member in members
         }
@@ -334,6 +359,7 @@ class ProjectPeriodReport(QualityView):
             "plans": {},
             "defects": {},
             "period_executions": 0,
+            "case_round_executions": 0,
         }
         previous = {
             "user_id": "outside",
@@ -343,6 +369,7 @@ class ProjectPeriodReport(QualityView):
             "plans": {},
             "defects": {},
             "period_executions": 0,
+            "case_round_executions": 0,
         }
 
         def add(user_id, kind, status, count=1):
@@ -378,11 +405,14 @@ class ProjectPeriodReport(QualityView):
                 add(row["assignee_id"], key, status, row["count"])
         for user, count in grouped(period_executions, "created_by_id").items():
             (by_user.get(user, unassigned if user == "unassigned" else previous))["period_executions"] += count
+        for user, count in grouped(case_verification_executions, "created_by_id").items():
+            (by_user.get(user, unassigned if user == "unassigned" else previous))["case_round_executions"] += count
         daily = {}
         for kind, qs, field in [
             ("work_created", detail_queries["work_created"], "created_at"),
             ("defects_created", detail_queries["defects_created"], "created_at"),
             ("test_executions", period_executions, "created_at"),
+            ("case_round_executions", case_verification_executions, "created_at"),
             ("manual_executions", manual_executions, "created_at"),
         ]:
             for value in qs.values_list(field, flat=True):
@@ -405,6 +435,7 @@ class ProjectPeriodReport(QualityView):
                         "defects_created",
                         "defects_closed",
                         "test_executions",
+                        "case_round_executions",
                         "manual_executions",
                     ]
                 },
@@ -412,6 +443,7 @@ class ProjectPeriodReport(QualityView):
             for offset in range((data["end"] - data["start"]).days + 1)
         ]
         results = grouped(period_executions, "result")
+        case_round_results = grouped(case_verification_executions, "result")
         manual_results = grouped(manual_executions, "result")
         return Response(
             {
@@ -426,7 +458,12 @@ class ProjectPeriodReport(QualityView):
                     "defects_unclosed": defects.exclude(status="closed").count(),
                 },
                 "test_results": {
-                    key: results.get(key, 0) for key in ["passed", "failed", "blocked", "inconclusive", "skipped"]
+                    key: results.get(key, 0) + case_round_results.get(key, 0)
+                    for key in ["passed", "failed", "blocked", "inconclusive", "skipped"]
+                },
+                "case_round_results": {
+                    key: grouped(case_verification_executions, "result").get(key, 0)
+                    for key in ["passed", "failed", "blocked", "inconclusive", "skipped"]
                 },
                 "manual_results": {
                     key: manual_results.get(key, 0)
@@ -435,7 +472,7 @@ class ProjectPeriodReport(QualityView):
                 "workload": list(by_user.values())
                 + (
                     [previous]
-                    if any(previous[key] for key in ["work", "plans", "defects", "period_executions"])
+                    if any(previous[key] for key in ["work", "plans", "defects", "period_executions", "case_round_executions"])
                     else []
                 ),
                 "unassigned": unassigned,

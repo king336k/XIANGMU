@@ -65,6 +65,7 @@ function renderRound(value = round) {
   return renderToStaticMarkup(React.createElement(VerificationRoundView, { round: value }));
 }
 test("验证状态使用语义颜色，退回修复红色且待验收与已验收可区分", () => {
+  assert.equal(types.verificationStatus.waiting_repair, "等待修复");
   assert.equal(types.verificationStatusTone.returned_repair, "failed");
   assert.equal(types.verificationStatusTone.review, "review");
   assert.equal(types.verificationStatusTone.accepted, "passed");
@@ -198,15 +199,16 @@ test("结果列选择绑定当前步骤并打开原轮次实测表单，历史�
     });
   };
   const views = descendants(render()).filter((node) => node.type === View);
-  assert.equal(typeof views[0].props.onManualResultChange, "function");
+  assert.equal(views[0].props.onManualResultChange, undefined);
   assert.equal(views[1].props.onManualResultChange, undefined);
-  views[0].props.onManualResultChange(...changes[0]);
+  descendants(render())
+    .find((node) => node.props?.children === "填写测试结果")
+    .props.onClick();
   data.current = { ...current, id: "next", version: 4, round_no: 2 };
   const form = descendants(render()).find((node) => node.type === Form);
   assert.equal(form.props.round.id, "current");
   assert.equal(form.props.round.version, 2);
-  assert.equal(form.props.initialStepIndex, 1);
-  assert.equal(form.props.initialResult, "failed");
+  assert.equal(form.props.initialStepIndex, undefined);
 
   const { VerificationRoundView } = load("verification-round-view.tsx", {
     "./verification-types": types,
@@ -242,4 +244,167 @@ test("验证结果详情不显示环境等重复信息", () => {
   const html = renderRound();
   assert.doesNotMatch(html, />环境/);
   assert.doesNotMatch(html, />本地</);
+});
+
+test("缺陷验证进度显示当前阶段，并用颜色区分退回与完成", () => {
+  const { VerificationProgress } = load("verification-progress.tsx");
+  const value = {
+    ...round,
+    status: "returned_repair",
+  };
+  const html = renderToStaticMarkup(React.createElement(VerificationProgress, { round: value, defectStatus: "open" }));
+  assert.match(html, /aria-label="缺陷验证进度"/);
+  assert.match(html, /aria-current="step"[^>]*>.*退回修复/s);
+  assert.match(html, /border-danger-subtle bg-danger-subtle text-danger-primary/);
+  assert.match(html, /安排测试/);
+  assert.match(html, /关闭缺陷/);
+});
+
+test("十条用例集中在同一轮列表，管理员代测后显示实际执行人及剩余项", () => {
+  const items = Array.from({ length: 10 }, (_, index) => ({
+    item_id: `item-${index}`,
+    case_id: `case-${index}`,
+    case_version: 1,
+    revision_id: `revision-${index}`,
+    source: "library",
+    title: `检查 ${index + 1}`,
+    snapshot: { steps: [{ action: "执行", expected: "通过" }] },
+    stale: false,
+    latest_execution:
+      index === 0
+        ? {
+            id: "exec-admin",
+            result: "passed",
+            actual_result: "管理员代测通过",
+            evidence: "",
+            executor: "管理员",
+            created_at: "2026-11-15T00:00:00Z",
+            step_results: [],
+          }
+        : null,
+    result: index === 0 ? "passed" : "pending",
+  }));
+  const html = renderRound({
+    ...round,
+    mode: "cases",
+    items,
+    summary: { total: 10, passed: 1, failed: 0, pending: 9, blocked: 0, inconclusive: 0, skipped: 0 },
+  });
+  assert.match(html, /共 10 条/);
+  assert.match(html, /通过 1/);
+  assert.match(html, /未执行 9/);
+  assert.match(html, /管理员 ·/);
+  assert.match(html, /管理员代测通过/);
+  assert.equal((html.match(/检查 \d+/g) || []).length, 10);
+});
+
+test("用例执行表显示逐条测试备注并保留管理员实际执行人", () => {
+  const { VerificationRoundView } = load("verification-round-view.tsx", {
+    "./verification-types": types,
+    "./shared": { Badge },
+    "./verification-steps-table": { VerificationStepsTable: () => null },
+  });
+  const item = {
+    item_id: "i1",
+    title: "相机连接",
+    case_version: 2,
+    source: "library",
+    snapshot: { steps: [] },
+    result: "passed",
+    stale: false,
+    latest_execution: {
+      id: "e1",
+      result: "passed",
+      actual_result: "相机连接正常",
+      evidence: "管理员代执行，序列号已核对",
+      executor: "管理员",
+      created_at: "2026-11-15T01:00:00Z",
+      step_results: [],
+    },
+    execution_history: [],
+  };
+  const value = {
+    ...round,
+    mode: "cases",
+    status: "testing",
+    execution_state: "running",
+    items: [item],
+    test_requirements: "检查相机连接",
+    summary: { total: 1, passed: 1, failed: 0, pending: 0 },
+    events: [],
+  };
+  const tree = VerificationRoundView({ round: value });
+  const html = renderToStaticMarkup(React.createElement(() => tree));
+  for (const text of [
+    "执行验证",
+    "用例执行列表",
+    "测试要求",
+    "通过 1",
+    "测试结果：",
+    "相机连接正常",
+    "测试备注：管理员代执行，序列号已核对",
+    "管理员",
+  ]) {
+    assert.ok(html.includes(text), text);
+  }
+});
+
+test("提交单条用例结果时保留可选测试备注", async () => {
+  const states = [];
+  let cursor = 0;
+  const writes = [];
+  let requestSequence = 0;
+  const Field = ({ label, children }) => React.createElement("label", null, label, children);
+  const Modal = ({ children, ...props }) => React.createElement("div", { ...props, "data-modal": true }, children);
+  const api = load("verification-case-execution.tsx", {
+    react: {
+      ...React,
+      useState(initial) {
+        const index = cursor++;
+        if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial;
+        return [states[index], (value) => (states[index] = value)];
+      },
+    },
+    uuid: { v4: () => `execution-request-${++requestSequence}` },
+    "./api": {
+      qualityApi: {
+        write: async (...args) => {
+          writes.push(args);
+          return { current: {} };
+        },
+      },
+    },
+    "./shared": { Field, Modal, fieldClass: "field" },
+    "./types": {
+      resultNames: { passed: "通过", failed: "失败", blocked: "阻塞", inconclusive: "无法判定", skipped: "跳过" },
+      reasonNames: {},
+    },
+  });
+  const item = {
+    item_id: "item-1",
+    title: "相机连接",
+    snapshot: { steps: [{ action: "连接相机", expected: "连接成功" }] },
+    latest_execution: { result: "passed", actual_result: "已连接", evidence: "旧备注" },
+  };
+  const render = () => {
+    cursor = 0;
+    return api.VerificationCaseExecution({
+      base: "/quality/",
+      item,
+      round: { version: 3 },
+      onSaved: async () => {},
+      onClose: () => {},
+    });
+  };
+  const first = descendants(render());
+  const noteField = first.find((node) => node.type === "textarea" && node.props.value === "旧备注");
+  assert.ok(noteField, "现有备注会回填到本条用例");
+  noteField.props.onChange({ target: { value: "管理员代测：已核对设备状态" } });
+  const modal = descendants(render()).find((node) => node.type === Modal);
+  await modal.props.onSubmit({ get: () => "" });
+  await modal.props.onSubmit({ get: () => "" });
+  assert.equal(writes[0][0], "/quality/verification/cases/item-1/executions/");
+  assert.equal(writes[0][1].evidence, "管理员代测：已核对设备状态");
+  assert.equal(writes[0][1].actual_result, "已连接");
+  assert.equal(writes[1][1].request_id, writes[0][1].request_id, "uncertain retries reuse one idempotency key");
 });

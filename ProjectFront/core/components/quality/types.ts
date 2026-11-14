@@ -170,6 +170,7 @@ export type Context = {
   members: {
     id: string;
     name: string;
+    role?: number;
     business_role?: string | null;
     business_roles?: string[];
     is_administrator?: boolean;

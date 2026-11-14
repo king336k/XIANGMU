@@ -70,6 +70,8 @@ function harness(current) {
             { id: "tech", name: "模块技术负责人", business_role: "TECHNICIAN" },
           ],
           business_roles_enabled: true,
+          business_role: "PROJECT_MANAGER",
+          is_manager: true,
         },
         onArrange() {},
       });
@@ -89,7 +91,9 @@ test("缺陷属性测试指派独立于模块责任，只选择本项目测试�
   all.find((n) => n.props?.children === "修改指派").props.onClick();
   const next = nodes(h.render()),
     options = next.filter((n) => n.type === "option");
+  assert.equal(next.find((n) => n.type === "select" && n.props.name === "assignee_id")?.props.required, true);
   assert.ok(options.some((n) => n.props.value === "tester"));
+  assert.ok(options.some((n) => n.props.value === "" && n.props.disabled));
   assert.ok(!options.some((n) => n.props.value === "tech"));
   await next.find((n) => n.type === h.component("Modal")).props.onSubmit(new Map([["assignee_id", "tester2"]]));
   assert.equal(h.writes[0][0], "/q/defects/d/verification/workflow/");

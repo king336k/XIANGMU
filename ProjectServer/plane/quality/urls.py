@@ -47,6 +47,8 @@ from . import assets
 from . import sources, reports, imports
 from .defect_verification import (
     DefectVerification,
+    DefectVerificationCases,
+    DefectVerificationCaseExecution,
     DefectVerificationResult,
     DefectVerificationWorkflow,
     DefectVerificationResults,
@@ -57,6 +59,8 @@ urlpatterns = [
     path("defects/<uuid:pk>/reassign/", views.DefectReassign.as_view()),
     path("verification-results/", DefectVerificationResults.as_view()),
     path("defects/<uuid:pk>/verification/", DefectVerification.as_view()),
+    path("defects/<uuid:pk>/verification/cases/", DefectVerificationCases.as_view()),
+    path("verification/cases/<uuid:item_id>/executions/", DefectVerificationCaseExecution.as_view()),
     path("defects/<uuid:pk>/verification/result/", DefectVerificationResult.as_view()),
     path("defects/<uuid:pk>/verification/workflow/", DefectVerificationWorkflow.as_view()),
     path("collaboration-settings/", ProjectCollaborationSettings.as_view()),

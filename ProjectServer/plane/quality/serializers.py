@@ -9,7 +9,7 @@ RESULTS = ("passed", "failed", "blocked", "inconclusive", "skipped")
 
 class StepInput(serializers.Serializer):
     action = serializers.CharField(max_length=4000)
-    expected = serializers.CharField(max_length=4000)
+    expected = serializers.CharField(max_length=4000, allow_blank=True, default="")
 
 
 class CaseInput(serializers.Serializer):
@@ -173,7 +173,7 @@ class ItemSerializer(serializers.ModelSerializer):
 
 def plan_summary(plan):
     verification = getattr(plan, "defect_verification", None)
-    if verification and verification.mode == "manual":
+    if verification:
         from .defect_verification import results
         _, counts = results(verification)
         total = counts["total"]
@@ -239,13 +239,39 @@ class PlanSerializer(AuthoredRecordSerializer):
             else None
         )
 
-    items = ItemSerializer(many=True, read_only=True)
+    items = serializers.SerializerMethodField()
     summary = serializers.SerializerMethodField()
     assignee_name = serializers.CharField(source="assignee.display_name", default="")
     workflow_events = PlanEventSerializer(many=True, read_only=True)
 
     def get_summary(self, obj):
         return plan_summary(obj)
+
+    def get_items(self, obj):
+        verification = getattr(obj, "defect_verification", None)
+        if verification and verification.mode == "cases":
+            from .defect_verification import results
+
+            rows, _ = results(verification)
+            if rows:
+                return [
+                    {
+                        "id": row["item_id"],
+                        "case_id": row.get("case_id"),
+                        "revision": {
+                            "id": row.get("revision_id"),
+                            "version": row.get("case_version"),
+                            "title": row["title"],
+                            "snapshot": row["snapshot"],
+                            "created_at": None,
+                        },
+                        "latest_execution": row.get("latest_execution"),
+                        "current_case_version": row.get("case_version"),
+                        "case_archived": False,
+                    }
+                    for row in rows
+                ]
+        return ItemSerializer(obj.items.all(), many=True).data
 
     class Meta:
         model = TestPlan

@@ -1,13 +1,15 @@
 import type { Execution, Step } from "./types";
 export type VerificationItem = {
   item_id: string;
-  case_id: string;
-  case_version: number;
-  revision_id: string;
+  case_id?: string | null;
+  case_version?: number | null;
+  revision_id?: string | null;
+  source?: "library" | "round" | "legacy";
   title: string;
   snapshot: { title: string; steps: Step[]; preconditions?: string; module?: string; priority?: string };
   stale: boolean;
   latest_execution: Execution | null;
+  execution_history?: Execution[];
   result: string;
 };
 export type VerificationRound = {
@@ -21,10 +23,10 @@ export type VerificationRound = {
   blocked_reason?: string;
   assignee_id?: string | null;
   assignee_name?: string;
-  can_claim?: boolean;
   fixed_build: string;
   environment: string;
   steps: Step[];
+  test_requirements?: string;
   plan_id: string | null;
   created_at: string;
   items: VerificationItem[];
@@ -58,8 +60,10 @@ export type VerificationData = {
   history: VerificationRound[];
 };
 export const verificationStatus: Record<string, string> = {
-  waiting_repair: "待修复",
+  waiting_repair: "等待修复",
   needs_arrangement: "待重新安排",
+  needs_assignment: "待安排测试员",
+  needs_cases: "待补充用例",
   pending: "待测试",
   running: "测试中",
   tested: "已测试，待提交",
@@ -75,6 +79,8 @@ export const verificationStatus: Record<string, string> = {
 export const verificationStatusTone: Record<string, string> = {
   waiting_repair: "pending",
   needs_arrangement: "blocked",
+  needs_assignment: "pending",
+  needs_cases: "pending",
   pending: "pending",
   running: "running",
   tested: "passed",

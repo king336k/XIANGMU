@@ -19,6 +19,8 @@ from .models import (
     TestExecution,
     DefectVerification,
     DefectVerificationResult,
+    DefectVerificationCase,
+    DefectVerificationCaseExecution as VerificationCaseExecutionRecord,
 )
 from .permissions import ROLE_CAPABILITIES, roles_for, is_administrator
 from .views import QualityPagination
@@ -47,12 +49,12 @@ def permitted_projects(user, workspace):
         projects = list(
             Project.objects.filter(workspace__slug=workspace, archived_at__isnull=True).values_list("id", flat=True)
         )
-        return (projects,) * 5
+        return (projects,) * 6
     membership = WorkspaceMember.objects.filter(workspace__slug=workspace, member=user, is_active=True).first()
     if not user.is_active or membership is None:
         raise PermissionDenied("当前账号没有此工作空间的工作权限。")
     if membership.role < 15:
-        return [], [], [], [], []
+        return [], [], [], [], [], []
     memberships = dict(
         ProjectMember.objects.filter(
             project__workspace__slug=workspace,
@@ -88,7 +90,13 @@ def permitted_projects(user, workspace):
         or pk in strict
         and any("manage_test" in ROLE_CAPABILITIES.get(d, set()) for d in duties.get(pk, set()))
     ]
-    return native, allowed("manage_defect"), allowed("execute"), allowed("review"), managers
+    arrangers = [
+        pk
+        for pk, role in memberships.items()
+        if (pk not in strict and role == 20)
+        or (pk in strict and bool(duties.get(pk, set()) & {"PLATFORM_ADMIN", "PROJECT_MANAGER", "TECHNICIAN"}))
+    ]
+    return native, allowed("manage_defect"), allowed("execute"), allowed("review"), managers, arrangers
 
 
 FIELDS = [
@@ -151,11 +159,12 @@ def projection(
 
 
 def todo_query(user, options):
-    native, defects, execute, reviews, managers = permitted_projects(user, options["workspace"])
+    native, defects, execute, reviews, managers, arrangers = permitted_projects(user, options["workspace"])
     project = options.get("project_id")
     if project:
-        native, defects, execute, reviews, managers = [
-            [pk for pk in group if pk == project] for group in [native, defects, execute, reviews, managers]
+        native, defects, execute, reviews, managers, arrangers = [
+            [pk for pk in group if pk == project]
+            for group in [native, defects, execute, reviews, managers, arrangers]
         ]
     assigned = IssueAssignee.objects.filter(issue_id=OuterRef("pk"), assignee=user, deleted_at__isnull=True)
     req = Requirement.objects.filter(issue_id=OuterRef("pk"))
@@ -241,6 +250,11 @@ def todo_query(user, options):
     pending_items = (
         PlanItem.objects.filter(plan_id=OuterRef("pk")).annotate(has_result=Exists(recorded)).filter(has_result=False)
     )
+    verification_cases = DefectVerificationCase.objects.filter(verification__plan_id=OuterRef("pk"))
+    verification_case_execution = VerificationCaseExecutionRecord.objects.filter(item_id=OuterRef("pk"))
+    pending_verification_cases = (
+        verification_cases.annotate(has_result=Exists(verification_case_execution)).filter(has_result=False)
+    )
     plan_query = (
         TestPlan.objects.filter(archived_at__isnull=True)
         .annotate(has_pending_items=Exists(pending_items))
@@ -263,7 +277,16 @@ def todo_query(user, options):
         defect_verification__status="testing",
         defect_verification__defect__archived_at__isnull=True,
         defect_verification__defect__status__in=["open", "in_progress", "resolved"],
-    ).filter(Q(assignee=user) | Q(assignee__isnull=True))
+        assignee=user,
+    )
+    arrangement_plans = TestPlan.objects.filter(
+        project_id__in=arrangers,
+        archived_at__isnull=True,
+        assignee__isnull=True,
+        defect_verification__status="testing",
+        defect_verification__defect__archived_at__isnull=True,
+        defect_verification__defect__status="resolved",
+    )
     if is_administrator(user):
         verification_plans = TestPlan.objects.filter(
             project_id__in=execute,
@@ -271,6 +294,14 @@ def todo_query(user, options):
             defect_verification__status__in=["testing", "review"],
             defect_verification__defect__archived_at__isnull=True,
             defect_verification__defect__status__in=["open", "in_progress", "resolved"],
+        )
+        arrangement_plans = TestPlan.objects.filter(
+            project_id__in=execute,
+            archived_at__isnull=True,
+            assignee__isnull=True,
+            defect_verification__status="testing",
+            defect_verification__defect__archived_at__isnull=True,
+            defect_verification__defect__status="resolved",
         )
     review_plans = TestPlan.objects.filter(
         project_id__in=managers,
@@ -283,6 +314,7 @@ def todo_query(user, options):
         Q(pk__in=plan_query.filter(defect_verification__isnull=True).values("pk"))
         | Q(pk__in=verification_plans.values("pk"))
         | Q(pk__in=review_plans.values("pk"))
+        | Q(pk__in=arrangement_plans.values("pk"))
     )
     plan_query = plan_query.annotate(
         is_regression=Exists(DataRegression.objects.filter(plan_id=OuterRef("pk"))),
@@ -294,6 +326,8 @@ def todo_query(user, options):
         has_case_execution=Exists(
             TestExecution.objects.filter(item__plan_id=OuterRef("pk"), round_no=OuterRef("round_no"))
         ),
+        has_verification_cases=Exists(verification_cases),
+        has_pending_verification_cases=Exists(pending_verification_cases),
         has_pending_items=Exists(pending_items),
     )
     plan_rows = projection(
@@ -308,17 +342,26 @@ def todo_query(user, options):
                 then=Value("waiting_repair"),
             ),
             When(verification_mode="manual", has_manual_execution=False, then=Value("waiting_test")),
+            When(verification_mode="cases", has_verification_cases=False, then=Value("waiting_test")),
+            When(verification_mode="cases", has_verification_cases=True, has_pending_verification_cases=True, then=Value("waiting_test")),
+            When(verification_mode="cases", has_verification_cases=True, has_pending_verification_cases=False, then=Value("tested")),
             When(verification_mode="cases", has_case_execution=False, then=Value("waiting_test")),
             When(verification_mode="manual", has_manual_execution=True, then=Value("tested")),
             When(verification_mode="cases", has_pending_items=False, then=Value("tested")),
             default=F("status"),
         ),
         "quality.testplan",
-        responsibility=Case(When(status="review", then=Value("验收")), default=Value("执行")),
+        responsibility=Case(
+            When(verification_status="review", then=Value("验收")),
+            When(is_verification=True, assignee__isnull=True, then=Value("安排")),
+            default=Value("执行"),
+        ),
         action=Case(
             When(verification_status="review", then=Value("验收结果")),
             When(is_verification=True, verification_defect_status__in=["open", "in_progress"], then=Value("等待修复")),
-            When(is_verification=True, assignee__isnull=True, then=Value("认领测试")),
+            When(is_verification=True, assignee__isnull=True, then=Value("安排测试")),
+            When(verification_mode="cases", has_verification_cases=False, then=Value("补充用例")),
+            When(verification_mode="cases", has_verification_cases=True, has_pending_verification_cases=True, then=Value("执行用例")),
             When(verification_mode="manual", has_manual_execution=True, then=Value("提交验收")),
             When(verification_mode="cases", has_pending_items=False, then=Value("提交验收")),
             When(is_verification=True, then=Value("执行验证")),

@@ -58,12 +58,19 @@ function harness(current = null, canConfigure = true) {
       data.current = next;
       data.defect_version += 1;
     },
+    setDefectStatus(status) {
+      data.defect_status = status;
+    },
     render() {
       index = 0;
       return exp.DefectVerificationScope({
         base: "/q/",
-        value: { id: "d", status: "resolved", edit_version: 7, fixed_build: "v2" },
-        context: { can_write: true },
+        value: { id: "d", status: data.defect_status, edit_version: 7, fixed_build: "v2" },
+        context: {
+          can_write: true,
+          is_manager: canConfigure,
+          business_role: canConfigure ? "PROJECT_MANAGER" : null,
+        },
         onChanged: async () => {},
         projectUrl: "/p/",
       });
@@ -85,7 +92,14 @@ test("新缺陷未安排，直接选择两种方式，不默认选人工", () =>
   assert.equal(editor.props.initialMode, "cases");
 });
 test("已安排可修改，传递当前轮和最新缺陷版本", () => {
-  const round = { id: "r", mode: "cases", version: 4, round_no: 2, can_configure: true };
+  const round = {
+    id: "r",
+    mode: "cases",
+    version: 4,
+    round_no: 2,
+    can_configure: true,
+    summary: { total: 1, pending: 1, passed: 0, failed: 0 },
+  };
   const h = harness(round);
   nodes(h.render())
     .find((n) => n.props?.children === "修改安排")
@@ -121,6 +135,26 @@ test("退回修复后重新修复明确提示旧结果，重新安排沿用当�
   const editor = nodes(h.render()).find((n) => n.type === h.sym("VerificationConfigure"));
   assert.equal(editor.props.initial.fixed_build, "v2");
 });
+
+test("当前修复版本改变时入口明确为重新安排", () => {
+  const round = {
+    id: "r",
+    mode: "manual",
+    status: "testing",
+    execution_state: "needs_arrangement",
+    version: 2,
+    round_no: 1,
+    fixed_build: "old",
+    can_configure: true,
+    summary: { total: 1, passed: 0, pending: 1 },
+  };
+  const all = nodes(harness(round).render());
+  assert.ok(all.some((node) => node.props?.children === "重新安排"));
+  assert.equal(
+    all.some((node) => node.props?.children === "修改安排"),
+    false
+  );
+});
 test("经理可查看失败结果并退回，失败轮次的验收关闭按钮禁用", () => {
   const round = {
     id: "r",
@@ -155,7 +189,7 @@ test("打开人工记录后刷新到新轮次，表单仍指向原轮次快照",
   };
   const h = harness(old);
   nodes(h.render())
-    .find((n) => n.props?.children === "记录结果")
+    .find((n) => n.props?.children === "填写测试结果")
     .props.onClick();
   const first = nodes(h.render()).find((n) => n.type === h.sym("VerificationManualResult"));
   assert.equal(first.props.round.id, "old");
@@ -229,4 +263,65 @@ test("打开关联用例执行后新轮次替换，执行上下文仍绑定原�
   assert.equal(execution.props.plan.build, "v2");
   assert.equal(execution.props.plan.environment, "环境A");
   assert.match(execution.props.plan.name, /1/);
+});
+
+const textContent = (tree) =>
+  !tree || typeof tree !== "object"
+    ? typeof tree === "string"
+      ? [tree]
+      : []
+    : Array.isArray(tree)
+      ? tree.flatMap(textContent)
+      : textContent(tree.props?.children);
+
+test("测试员能看懂待修复时为何未执行，以及结果要在哪里提交", () => {
+  const round = {
+    id: "r",
+    mode: "manual",
+    status: "testing",
+    execution_state: "waiting_repair",
+    blocked_reason: "待修复后测试",
+    version: 2,
+    round_no: 1,
+    fixed_build: "",
+    can_record: false,
+    can_configure: false,
+    summary: { total: 1, passed: 0, pending: 1 },
+    steps: [{ action: "复现步骤", expected: "预期表现" }],
+    manual_results: [],
+    events: [],
+    items: [],
+  };
+  const h = harness(round);
+  h.setDefectStatus("open");
+  const tree = h.render();
+  const all = nodes(tree);
+  assert.ok(textContent(tree).includes("技术员更新修复版本后，测试员即可在此填写结果。当前无需提交测试结果。"));
+  assert.equal(
+    all.some((node) => node.props?.children === "填写测试结果"),
+    false
+  );
+});
+
+test("修复后人工验证明确显示提交测试结果入口和步骤", () => {
+  const round = {
+    id: "r",
+    mode: "manual",
+    status: "testing",
+    execution_state: "pending",
+    version: 2,
+    round_no: 1,
+    fixed_build: "v2",
+    can_record: true,
+    can_configure: false,
+    summary: { total: 1, passed: 0, pending: 1 },
+    steps: [{ action: "复现步骤", expected: "预期表现" }],
+    manual_results: [],
+    events: [],
+    items: [],
+  };
+  const tree = harness(round).render();
+  const all = nodes(tree);
+  assert.ok(all.some((node) => node.props?.children === "填写测试结果"));
+  assert.ok(textContent(tree).includes("现在可以测试。按步骤填写实际结果，提交测试结果后等待项目经理或管理员验收。"));
 });

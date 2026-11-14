@@ -5,7 +5,14 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 from plane.db.models import User, Project, ProjectMember, WorkspaceMember, Issue, IssueAssignee, State
-from plane.quality.models import Defect, DefectVerificationResult
+from plane.quality.models import (
+    Defect,
+    DefectVerification,
+    DefectVerificationCase,
+    DefectVerificationCaseExecution,
+    DefectVerificationResult,
+    TestPlan,
+)
 from plane.tests.contract.app.test_statistics_scopes import case_plan, execute, verification
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
@@ -120,6 +127,232 @@ def test_manual_latest_round_and_all_execution_history_are_separate(owners):
     data = query(owners, "quality", "manual_total").data
     assert data["total"] == 1 and data["results"][0]["owner_id"] == str(users[2].id)
     assert query(owners, "quality", "manual_execution_count").data["total"] == 3
+
+
+def test_period_case_round_execution_is_attributed_to_actual_executor(owners):
+    _, _, project, _, actor, users, _ = owners
+    defect = Defect.objects.create(
+        project=project,
+        created_by=actor,
+        title="用例回归统计",
+        status="resolved",
+        fixed_build="v2",
+        resolved_at=timezone.now(),
+        assignee=users[0],
+    )
+    plan = TestPlan.objects.create(
+        project=project,
+        created_by=actor,
+        name="用例回归",
+        build="v2",
+        environment="测试",
+        assignee=users[0],
+        status="running",
+        managed=True,
+    )
+    round_ = DefectVerification.objects.create(
+        project=project,
+        created_by=actor,
+        defect=defect,
+        plan=plan,
+        round_no=1,
+        mode="cases",
+        status="testing",
+        fixed_build="v2",
+        environment="测试",
+        resolved_at=defect.resolved_at,
+        request_id=uuid4(),
+        request_hash="round",
+    )
+    item = DefectVerificationCase.objects.create(
+        project=project,
+        created_by=actor,
+        verification=round_,
+        source="round",
+        title="临时用例",
+        snapshot={"title": "临时用例", "steps": []},
+    )
+    DefectVerificationCaseExecution.objects.create(
+        project=project,
+        created_by=users[1],
+        item=item,
+        request_id=uuid4(),
+        request_hash="execution",
+        result="passed",
+        actual_result="通过",
+    )
+
+    today = timezone.localdate().isoformat()
+    response = query(
+        owners,
+        "period",
+        "verification_case_executions",
+        start=today,
+        end=today,
+    )
+
+    assert response.status_code == 200, response.content
+    assert response.data["total"] == 1
+    assert response.data["results"][0]["owner_id"] == str(users[1].id)
+
+
+def test_quality_owner_stats_include_current_round_cases_and_exclude_legacy_snapshot_copies(owners):
+    from plane.quality.models import PlanItem, TestCase, CaseRevision, TestExecution
+
+    _, _, project, _, actor, users, _ = owners
+    defect = Defect.objects.create(
+        project=project,
+        created_by=actor,
+        title="新缺陷用例统计",
+        status="resolved",
+        fixed_build="v2",
+        resolved_at=timezone.now(),
+    )
+    plan = TestPlan.objects.create(
+        project=project,
+        created_by=actor,
+        name="新回归轮次",
+        build="v2",
+        environment="测试",
+        assignee=users[0],
+        status="running",
+        managed=True,
+    )
+    round_ = DefectVerification.objects.create(
+        project=project,
+        created_by=actor,
+        defect=defect,
+        plan=plan,
+        round_no=1,
+        mode="cases",
+        status="testing",
+        fixed_build="v2",
+        environment="测试",
+        resolved_at=defect.resolved_at,
+        request_id=uuid4(),
+        request_hash="new-round",
+    )
+    pending = DefectVerificationCase.objects.create(
+        project=project,
+        created_by=actor,
+        verification=round_,
+        source="round",
+        title="待测条目",
+        snapshot={"title": "待测条目", "steps": []},
+        position=0,
+    )
+    executed = DefectVerificationCase.objects.create(
+        project=project,
+        created_by=actor,
+        verification=round_,
+        source="round",
+        title="已测条目",
+        snapshot={"title": "已测条目", "steps": []},
+        position=1,
+    )
+    DefectVerificationCaseExecution.objects.create(
+        project=project,
+        created_by=users[1],
+        item=executed,
+        request_id=uuid4(),
+        request_hash="new-execution",
+        result="passed",
+        actual_result="通过",
+    )
+
+    legacy_defect = Defect.objects.create(
+        project=project,
+        created_by=actor,
+        title="旧计划快照统计",
+        status="resolved",
+        fixed_build="v2",
+        resolved_at=timezone.now(),
+    )
+    case = TestCase.objects.create(project=project, created_by=actor, title="旧公开用例", steps=[])
+    revision = CaseRevision.objects.create(
+        project=project,
+        created_by=actor,
+        case=case,
+        version=1,
+        title=case.title,
+        snapshot={"title": case.title, "steps": []},
+    )
+    legacy_plan = TestPlan.objects.create(
+        project=project,
+        created_by=actor,
+        name="旧计划",
+        build="v2",
+        environment="测试",
+        assignee=users[0],
+        status="running",
+        managed=True,
+    )
+    legacy_round = DefectVerification.objects.create(
+        project=project,
+        created_by=actor,
+        defect=legacy_defect,
+        plan=legacy_plan,
+        round_no=1,
+        mode="cases",
+        status="testing",
+        fixed_build="v2",
+        environment="测试",
+        resolved_at=legacy_defect.resolved_at,
+        request_id=uuid4(),
+        request_hash="legacy-round",
+    )
+    plan_item = PlanItem.objects.create(
+        project=project,
+        created_by=actor,
+        plan=legacy_plan,
+        case=case,
+        revision=revision,
+    )
+    source_execution = TestExecution.objects.create(
+        project=project,
+        created_by=users[2],
+        item=plan_item,
+        request_id=uuid4(),
+        result="passed",
+        actual_result="旧实测通过",
+        round_no=legacy_round.round_no,
+    )
+    legacy_snapshot = DefectVerificationCase.objects.create(
+        project=project,
+        created_by=actor,
+        verification=legacy_round,
+        source_case=case,
+        source_revision=revision,
+        source_plan_item=plan_item,
+        source="library",
+        title=revision.title,
+        snapshot=revision.snapshot,
+    )
+    DefectVerificationCaseExecution.objects.create(
+        project=project,
+        created_by=users[2],
+        item=legacy_snapshot,
+        source_execution=source_execution,
+        request_id=uuid4(),
+        request_hash="legacy-copy",
+        result="passed",
+        actual_result="旧实测通过",
+    )
+
+    total = query(owners, "quality", "verification_case_total")
+    assert total.status_code == 200, total.content
+    assert total.data["total"] == 2
+    assert {row["owner_id"]: row["count"] for row in total.data["results"]} == {
+        str(users[0].id): 1,
+        str(users[1].id): 1,
+    }
+    assert query(owners, "quality", "verification_case_passed").data["total"] == 1
+    pending_owner = query(owners, "quality", "verification_case_pending").data["results"]
+    assert pending_owner[0]["owner_id"] == str(users[0].id)
+    # The copied record is not counted again as a new defect-round execution.
+    case_executions = query(owners, "quality", "case_execution_count")
+    assert case_executions.data["total"] == 1
+    assert case_executions.data["results"][0]["owner_id"] == str(users[1].id)
 
 
 def test_analytics_multi_owner_totals_are_distinct_and_each_collaborator_drills_all(owners):

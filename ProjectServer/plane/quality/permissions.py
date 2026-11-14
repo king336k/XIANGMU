@@ -243,17 +243,32 @@ def require_assignee(view, user_id, role):
 def permission_for(view, request):
     name = type(view).__name__
     action = request.data.get("action") if hasattr(request.data, "get") else None
+    if name == "CaseList" and request.method == "POST":
+        return "report"
+    if name == "DefectVerificationCases":
+        if capable(view.project_id, request.user.id, "manage_test"):
+            return "manage_test"
+        if capable(view.project_id, request.user.id, "solution"):
+            return "solution"
+        return "execute"
     if name == "DefectVerification":
-        return "manage_test_plan" if capable(view.project_id, request.user.id, "manage_test_plan") else "manage_defect"
-    if name == "DefectVerificationResult":
+        return (
+            "manage_test"
+            if capable(view.project_id, request.user.id, "manage_test")
+            else "solution"
+            if capable(view.project_id, request.user.id, "solution")
+            else "manage_defect"
+        )
+    if name in {"DefectVerificationResult", "DefectVerificationCaseExecution"}:
         return "execute"
     if name == "DefectVerificationWorkflow":
         if action == "assign":
             return (
-                "manage_test_plan" if capable(view.project_id, request.user.id, "manage_test_plan")
+                "manage_test" if capable(view.project_id, request.user.id, "manage_test")
+                else "solution" if capable(view.project_id, request.user.id, "solution")
                 else "manage_defect"
             )
-        return "execute" if action in {"claim", "submit"} else "manage_test"
+        return "execute" if action == "submit" else "manage_test"
     if name in {"RoleList", "RolePolicy"}:
         return "manage_roles"
     if name == "PlanWorkflow":

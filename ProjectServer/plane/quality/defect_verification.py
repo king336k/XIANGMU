@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from uuid import uuid4
 
 from django.db import transaction
 from django.db.models import F, Q, OuterRef, Subquery
@@ -15,6 +16,8 @@ from .models import (
     Defect,
     DefectEvent,
     DefectVerification as Verification,
+    DefectVerificationCase,
+    DefectVerificationCaseExecution as VerificationCaseExecutionRecord,
     DefectVerificationEvent as Event,
     DefectVerificationResult as ManualResult,
     PlanItem,
@@ -22,7 +25,7 @@ from .models import (
     TestPlan,
     BusinessNumber,
 )
-from .permissions import capable, strict, writable_member, is_administrator
+from .permissions import capable, strict, writable_member, is_administrator, has_role, roles_for
 from .serializers import ExecutionInput, ExecutionSerializer, StepInput, RESULTS
 from .views import Conflict, QualityView
 
@@ -34,13 +37,16 @@ class ConfigureInput(serializers.Serializer):
     fixed_build = serializers.CharField(max_length=120)
     environment = serializers.CharField(max_length=255)
     steps = StepInput(many=True, max_length=100, required=False)
-    case_ids = serializers.ListField(child=serializers.UUIDField(), max_length=500, required=False)
+    case_ids = serializers.ListField(child=serializers.UUIDField(), max_length=500, required=False, default=list)
+    test_requirements = serializers.CharField(max_length=4000, allow_blank=True, required=False, default="")
     assignee_id = serializers.UUIDField(required=False, allow_null=True)
 
     def validate(self, data):
         field = "steps" if data["mode"] == "manual" else "case_ids"
-        if not data.get(field):
-            raise ValidationError({field: "请填写验证步骤或选择验证用例。"})
+        if data["mode"] == "manual" and not data.get("steps"):
+            raise ValidationError({field: "请填写如何测试。"})
+        if data["mode"] == "cases" and not data.get("case_ids") and not data["test_requirements"].strip():
+            raise ValidationError({field: "请关联用例，或填写测试要求后由测试员补充本轮用例。"})
         if data["mode"] == "cases" and len(data[field]) != len(set(data[field])):
             raise ValidationError({field: "不能重复选择同一用例。"})
         return data
@@ -50,12 +56,40 @@ class ResultInput(ExecutionInput):
     expected_version = serializers.IntegerField(min_value=1)
 
 
+class RoundCaseInput(serializers.Serializer):
+    expected_version = serializers.IntegerField(min_value=1)
+    request_id = serializers.UUIDField()
+    case_ids = serializers.ListField(child=serializers.UUIDField(), max_length=500, required=False, default=list)
+    temporary_cases = serializers.ListField(child=serializers.DictField(), max_length=100, required=False, default=list)
+
+    def validate_temporary_cases(self, rows):
+        parsed = []
+        for index, row in enumerate(rows):
+            serializer = TemporaryCaseInput(data=row)
+            serializer.is_valid(raise_exception=True)
+            parsed.append(serializer.validated_data)
+        return parsed
+
+    def validate(self, attrs):
+        if not attrs.get("case_ids") and not attrs.get("temporary_cases"):
+            raise ValidationError("请选择用例或补充本轮临时用例。")
+        return attrs
+
+
+class TemporaryCaseInput(serializers.Serializer):
+    title = serializers.CharField(max_length=255)
+    preconditions = serializers.CharField(max_length=20000, allow_blank=True, default="")
+    steps = StepInput(many=True, allow_empty=False, max_length=100)
+
+
+class RoundCaseExecutionInput(ExecutionInput):
+    expected_version = serializers.IntegerField(min_value=1)
+
+
 class WorkflowInput(serializers.Serializer):
     expected_version = serializers.IntegerField(min_value=1)
     request_id = serializers.UUIDField()
-    action = serializers.ChoiceField(
-        choices=["assign", "claim", "submit", "accept", "return_test", "return_repair", "reopen"]
-    )
+    action = serializers.ChoiceField(choices=["assign", "submit", "accept", "return_test", "return_repair", "reopen"])
     assignee_id = serializers.UUIDField(required=False, allow_null=True)
     comment = serializers.CharField(max_length=4000, allow_blank=True, default="")
 
@@ -78,6 +112,10 @@ def manager(view):
     )
 
 
+def scheduler(view):
+    return manager(view) or has_role(view.project_id, view.request.user.id, "TECHNICIAN")
+
+
 def execution_state(row):
     if row.status != "testing":
         return row.status
@@ -87,8 +125,15 @@ def execution_state(row):
         return "needs_arrangement"
     if row.plan_id and (row.plan.archived_at or row.plan.build != row.fixed_build or row.plan.round_no != row.round_no):
         return "needs_arrangement"
-    if row.mode == "cases" and row.plan.items.exclude(revision__version=F("case__version")).exists():
+    if row.mode == "cases" and (
+        row.plan.items.exclude(revision__version=F("case__version")).exists()
+        or row.case_items.filter(source="library").exclude(source_case__version=F("source_revision__version")).exists()
+    ):
         return "needs_arrangement"
+    if row.plan_id and not row.plan.assignee_id:
+        return "needs_assignment"
+    if row.mode == "cases" and not row.case_items.exists() and not (row.plan_id and row.plan.items.exists()):
+        return "needs_cases"
     _, summary = results(row)
     if summary["pending"] == summary["total"]:
         return "pending"
@@ -104,6 +149,7 @@ def sync_plan(row):
         "accepted": "completed",
         "waiting_repair": "pending",
         "needs_arrangement": "pending",
+        "needs_assignment": "pending",
         "returned_repair": "cancelled",
         "reopened": "cancelled",
         "superseded": "cancelled",
@@ -115,7 +161,11 @@ def sync_plan(row):
 
 
 def require_executor(row, user):
-    if not is_administrator(user) and row.plan_id and row.plan.assignee_id and row.plan.assignee_id != user.id:
+    if is_administrator(user):
+        return
+    if not row.plan_id or not row.plan.assignee_id:
+        raise PermissionDenied("请联系技术负责人或项目经理安排测试员。")
+    if row.plan.assignee_id != user.id:
         raise PermissionDenied("此验证已指派给其他测试员。")
 
 
@@ -132,8 +182,24 @@ def validate_tester(view, assignee):
         member__member_workspace__is_active=True,
         member__member_workspace__role__gte=15,
     ).exists()
-    if not is_administrator(assignee) and (not member or not capable(view.project_id, assignee, "execute")):
+    if is_administrator(assignee):
+        raise ValidationError({"assignee_id": "管理员可代执行，无需作为测试员指派。"})
+    if not member or not capable(view.project_id, assignee, "execute"):
         raise ValidationError({"assignee_id": "请选择当前项目的测试员。"})
+    roles = roles_for(view.project_id, assignee)
+    if roles:
+        if "REGRESSION_TESTER" not in roles:
+            raise ValidationError({"assignee_id": "请选择测试员角色账号。"})
+    else:
+        legacy_tester = ProjectMember.objects.filter(
+            project_id=view.project_id,
+            member_id=assignee,
+            is_active=True,
+            role=15,
+            member__is_active=True,
+        ).exists()
+        if not legacy_tester:
+            raise ValidationError({"assignee_id": "请选择测试员账号。"})
 
 
 def current_check(row, defect):
@@ -161,11 +227,44 @@ def current_check(row, defect):
             raise Conflict("验证计划已变更，请重新安排验证。")
         if row.plan.items.exclude(revision__version=F("case__version")).exists():
             raise Conflict("用例库已产生新版本，请新建验证轮次后重新执行。")
+    if row.case_items.filter(source="library").exists():
+        list(
+            TestCase.objects.select_for_update()
+            .filter(pk__in=row.case_items.filter(source="library").values("source_case_id"))
+            .order_by("id")
+        )
+        if row.case_items.filter(source="library").exclude(source_case__version=F("source_revision__version")).exists():
+            raise Conflict("用例库已产生新版本，请新建验证轮次后重新执行。")
 
 
 def results(row):
     items = []
     if row.mode == "cases":
+        round_items = row.case_items.all()
+        if round_items.exists():
+            for item in round_items.select_related("source_case", "source_revision").prefetch_related("executions__created_by"):
+                execution_history = list(item.executions.select_related("created_by").order_by("-created_at", "-id"))
+                execution = execution_history[0] if execution_history else None
+                items.append(
+                    {
+                        "item_id": str(item.id),
+                        "case_id": str(item.source_case_id) if item.source_case_id else "",
+                        "case_version": item.source_revision.version if item.source_revision_id else 0,
+                        "revision_id": str(item.source_revision_id) if item.source_revision_id else None,
+                        "source": item.source,
+                        "title": item.title,
+                        "snapshot": item.snapshot,
+                        "stale": bool(item.source_case_id and item.source_case.version != item.source_revision.version),
+                        "latest_execution": case_execution_data(execution) if execution else None,
+                        "execution_history": [case_execution_data(row) for row in execution_history],
+                        "result": execution.result if execution else "pending",
+                    }
+                )
+            summary = {key: 0 for key in ["total", "pending", *RESULTS]}
+            summary["total"] = len(items)
+            for item in items:
+                summary[item["result"]] += 1
+            return items, summary
         for item in row.plan.items.select_related("revision", "case").order_by("created_at", "id"):
             execution = item.executions.filter(round_no=row.round_no).order_by("-created_at", "-id").first()
             items.append(
@@ -174,6 +273,7 @@ def results(row):
                     "case_id": str(item.case_id),
                     "case_version": item.revision.version,
                     "revision_id": str(item.revision_id),
+                    "source": "legacy",
                     "title": item.revision.title,
                     "snapshot": item.revision.snapshot,
                     "stale": item.case.version != item.revision.version,
@@ -189,6 +289,72 @@ def results(row):
     for item in items:
         summary[item["result"]] += 1
     return items, summary
+
+
+def case_execution_data(execution):
+    return {
+        "id": str(execution.id),
+        "result": execution.result,
+        "actual_result": execution.actual_result,
+        "evidence": execution.evidence,
+        "step_results": execution.step_results,
+        "reason_category": execution.reason_category,
+        "next_action": execution.next_action,
+        "created_at": execution.created_at,
+        "plan_id": str(execution.item.verification.plan_id),
+        "plan_name": execution.item.verification.plan.name,
+        "build": execution.item.verification.fixed_build,
+        "environment": execution.item.verification.environment,
+        "case_id": str(execution.item.source_case_id) if execution.item.source_case_id else "",
+        "case_title": execution.item.title,
+        "case_version": execution.item.source_revision.version if execution.item.source_revision_id else 0,
+        "executor": (execution.created_by.display_name or execution.created_by.username)
+        if execution.created_by_id else "",
+    }
+
+
+def snapshot_legacy_plan_items(row, actor):
+    """Freeze legacy public items into round scope before appending new round cases."""
+    if row.case_items.exists() or not row.plan_id:
+        return
+    position = 0
+    for plan_item in row.plan.items.select_related("case", "revision").order_by("created_at", "id"):
+        item = DefectVerificationCase.objects.create(
+            project=row.project,
+            created_by=actor,
+            verification=row,
+            source_case=plan_item.case,
+            source_revision=plan_item.revision,
+            source_plan_item=plan_item,
+            source="library",
+            title=plan_item.revision.title,
+            snapshot=plan_item.revision.snapshot,
+            position=position,
+        )
+        position += 1
+        for old in plan_item.executions.filter(round_no=row.round_no).order_by("created_at", "id"):
+            execution = VerificationCaseExecutionRecord.objects.create(
+                project=row.project,
+                created_by=old.created_by,
+                item=item,
+                request_id=old.request_id,
+                request_hash=fingerprint({
+                    "result": old.result,
+                    "actual_result": old.actual_result,
+                    "evidence": old.evidence,
+                    "step_results": old.step_results,
+                    "reason_category": old.reason_category,
+                    "next_action": old.next_action,
+                }),
+                source_execution=old,
+                result=old.result,
+                actual_result=old.actual_result,
+                evidence=old.evidence,
+                step_results=old.step_results,
+                reason_category=old.reason_category,
+                next_action=old.next_action,
+            )
+            VerificationCaseExecutionRecord.objects.filter(pk=execution.pk).update(created_at=old.created_at)
 
 
 def serialize(row, view):
@@ -207,12 +373,17 @@ def serialize(row, view):
     writable = administrator or writable_member(view.project_id, view.request.user.id, view.workspace_slug)
     mutable = writable and row.status == "testing" and fresh
     is_manager = writable and manager(view)
-    can_execute = writable and (administrator or capable(view.project_id, view.request.user.id, "execute"))
-    can_execute = can_execute and (
-        administrator or not row.plan_id or not row.plan.assignee_id or row.plan.assignee_id == view.request.user.id
+    can_execute = writable and (
+        administrator
+        or (capable(view.project_id, view.request.user.id, "execute") and row.plan_id and row.plan.assignee_id == view.request.user.id)
     )
     state = execution_state(row)
-    blocked = {"waiting_repair": "待修复后测试", "needs_arrangement": "修复版本已更新，请重新安排"}.get(state, "")
+    blocked = {
+        "waiting_repair": "等待技术员修复",
+        "needs_arrangement": "修复版本已更新，请重新安排验证",
+        "needs_assignment": "请技术负责人、项目经理或管理员安排测试员",
+        "needs_cases": "请补充本轮用例",
+    }.get(state, "")
     return {
         "id": str(row.id),
         "defect_id": str(row.defect_id),
@@ -226,10 +397,10 @@ def serialize(row, view):
         "assignee_name": (row.plan.assignee.display_name or row.plan.assignee.username)
         if row.plan_id and row.plan.assignee_id
         else "",
-        "can_claim": mutable and can_execute and bool(row.plan_id) and not row.plan.assignee_id,
         "fixed_build": row.fixed_build,
         "environment": row.environment,
         "steps": row.steps,
+        "test_requirements": row.steps[0]["action"] if row.mode == "cases" and row.steps else "",
         "plan_id": str(row.plan_id) if row.plan_id else None,
         "created_at": row.created_at,
         "created_by_id": str(row.created_by_id) if row.created_by_id else None,
@@ -266,10 +437,7 @@ def serialize(row, view):
         "can_configure": writable
         and row.defect.status in {"open", "in_progress", "resolved"}
         and row.status not in {"review", "accepted"}
-        and any(
-            administrator or capable(view.project_id, view.request.user.id, cap)
-            for cap in ["manage_test_plan", "manage_defect", "solution"]
-        ),
+        and scheduler(view),
         "can_accept": row.status == "review" and is_manager and fresh,
         "can_return_test": row.status == "review" and is_manager,
         "can_return_repair": row.status in {"testing", "review"} and row.defect.status == "resolved" and is_manager,
@@ -309,7 +477,9 @@ def create_round(defect, actor, data, previous=None):
         mode=data["mode"],
         fixed_build=data["fixed_build"],
         environment=data["environment"],
-        steps=data.get("steps", []),
+        steps=data.get("steps", []) if data["mode"] == "manual" else (
+            [{"action": data["test_requirements"], "expected": ""}] if data.get("test_requirements") else []
+        ),
         resolved_at=defect.resolved_at,
     )
     plan = TestPlan.objects.create(
@@ -318,6 +488,7 @@ def create_round(defect, actor, data, previous=None):
         name=f"{defect.title} · {'人工验证' if row.mode == 'manual' else '用例回归'} · 第{number}轮"[:255],
         build=row.fixed_build,
         environment=row.environment,
+        description=(row.steps[0]["action"] if row.steps else ""),
         round_no=number,
         assignee_id=data.get("assignee_id", previous.plan.assignee_id if previous and previous.plan_id else None),
         status="running" if defect.status == "resolved" else "pending",
@@ -337,13 +508,18 @@ def create_round(defect, actor, data, previous=None):
         )
         if len(cases) != len(data["case_ids"]):
             raise ValidationError({"case_ids": "请选择当前项目未归档的有效用例。"})
-        for case in cases:
-            PlanItem.objects.create(
+        for index, case in enumerate(cases):
+            revision = case.revisions.get(version=case.version)
+            DefectVerificationCase.objects.create(
                 project=defect.project,
                 created_by=actor,
-                plan=plan,
-                case=case,
-                revision=case.revisions.get(version=case.version),
+                verification=row,
+                source_case=case,
+                source_revision=revision,
+                source="library",
+                title=revision.title,
+                snapshot=revision.snapshot,
+                position=index,
             )
         row.plan = plan
         row.save(update_fields=["plan"])
@@ -376,14 +552,9 @@ class DefectVerification(QualityView):
 
     @transaction.atomic
     def post(self, request, pk, **kwargs):
-        if not any(
-            is_administrator(request.user) or capable(self.project_id, request.user.id, c)
-            for c in ["manage_test_plan", "manage_defect", "solution"]
-        ):
+        if not scheduler(self):
             raise PermissionDenied("当前角色不能配置验证。")
         data = self.input(ConfigureInput)
-        if "assignee_id" in data:
-            validate_tester(self, data["assignee_id"])
         defect, old = lock(self, pk)
         existing = Verification.objects.filter(defect=defect, request_id=data["request_id"]).first()
         if existing:
@@ -396,6 +567,9 @@ class DefectVerification(QualityView):
             return Response(payload(defect, self))
         if defect.edit_version != data["expected_version"]:
             raise Conflict()
+        if not data.get("assignee_id"):
+            raise ValidationError({"assignee_id": "安排验证时必须指定测试员。"})
+        validate_tester(self, data["assignee_id"])
         if defect.archived_at or defect.status == "closed":
             raise Conflict("请先恢复或重开缺陷，再安排验证。")
         if defect.status == "resolved" and data["fixed_build"] != defect.fixed_build:
@@ -411,13 +585,63 @@ class DefectVerification(QualityView):
             and old.environment == data["environment"]
         )
         if unchanged and old.mode == "manual":
-            unchanged = old.steps == data["steps"]
+            unchanged = True
         elif unchanged:
+            current_case_ids = set(
+                old.case_items.filter(source_case__isnull=False).values_list("source_case_id", flat=True)
+            )
+            if not old.case_items.exists() and old.plan_id:
+                current_case_ids = set(old.plan.items.values_list("case_id", flat=True))
             unchanged = (
-                set(old.plan.items.values_list("case_id", flat=True)) == set(data["case_ids"])
-                and not old.plan.items.exclude(revision__version=F("case__version")).exists()
+                current_case_ids == set(data["case_ids"])
+                and not old.case_items.filter(source="library")
+                .exclude(source_case__version=F("source_revision__version"))
+                .exists()
             )
         if unchanged:
+            if old.mode == "manual" and old.steps != data["steps"]:
+                if old.manual_results.exists():
+                    raise Conflict("本轮已有测试结果，修改测试要求请重新安排以保留历史。")
+                old.steps = data["steps"]
+                old.version += 1
+                old.save(update_fields=["steps", "version"])
+                Event.objects.create(
+                    project=defect.project,
+                    created_by=request.user,
+                    verification=old,
+                    request_id=uuid4(),
+                    request_hash=hashlib.sha256(json.dumps(data["steps"], sort_keys=True).encode()).hexdigest(),
+                    action="requirements_updated",
+                    note="更新人工验证要求",
+                    snapshot={"steps": data["steps"]},
+                )
+                audit(defect, request.user, "更新人工验证要求")
+            if old.mode == "cases":
+                previous_requirements = old.steps[0]["action"] if old.steps else ""
+                next_requirements = data["test_requirements"].strip()
+                if previous_requirements != next_requirements:
+                    if old.case_items.filter(executions__isnull=False).exists() or (
+                        old.plan_id and TestExecution.objects.filter(item__plan=old.plan).exists()
+                    ):
+                        raise Conflict("本轮已有执行结果，修改测试要求请重新安排验证以保留历史。")
+                    old.steps = [{"action": next_requirements, "expected": ""}] if next_requirements else []
+                    old.version += 1
+                    old.save(update_fields=["steps", "version"])
+                    if old.plan_id:
+                        old.plan.description = next_requirements
+                        old.plan.workflow_version += 1
+                        old.plan.save(update_fields=["description", "workflow_version"])
+                    Event.objects.create(
+                        project=defect.project,
+                        created_by=request.user,
+                        verification=old,
+                        request_id=uuid4(),
+                        request_hash=hashlib.sha256(next_requirements.encode()).hexdigest(),
+                        action="requirements_updated",
+                        note="更新本轮测试要求",
+                        snapshot={"test_requirements": next_requirements},
+                    )
+                    audit(defect, request.user, "更新本轮测试要求")
             if "assignee_id" in data and old.plan_id and old.plan.assignee_id != data["assignee_id"]:
                 previous_assignee_id = old.plan.assignee_id
                 old.plan.assignee_id = data["assignee_id"]
@@ -449,9 +673,168 @@ class DefectVerification(QualityView):
         audit(
             defect,
             request.user,
-            f"{'人工验证安排' if row.mode == 'manual' else '关联' + str(len(data['case_ids'])) + '条用例'}，"
+            f"{'人工验证安排' if row.mode == 'manual' else '用例回归安排：关联' + str(len(data['case_ids'])) + '条公共用例' + ('，填写测试要求' if data['test_requirements'].strip() else '，待补充本轮用例')}，"
             f"第{row.round_no}轮，修复版本{row.fixed_build}，环境{row.environment}",
         )
+        return Response(payload(defect, self), status=201)
+
+
+class DefectVerificationCases(QualityView):
+    @transaction.atomic
+    def post(self, request, pk, **kwargs):
+        data = self.input(RoundCaseInput)
+        defect, row = lock(self, pk)
+        if not row or row.mode != "cases" or row.status != "testing":
+            raise Conflict("当前没有可补充用例的回归轮次。")
+        current_check(row, defect)
+        administrator = is_administrator(request.user)
+        assigned_tester = (
+            row.plan_id
+            and row.plan.assignee_id == request.user.id
+            and capable(self.project_id, request.user.id, "execute")
+        )
+        if not (administrator or scheduler(self) or assigned_tester):
+            raise PermissionDenied("仅安排人、被指派测试员或管理员可以补充本轮用例。")
+        existing = Event.objects.filter(verification=row, request_id=data["request_id"]).first()
+        if existing:
+            if existing.request_hash != fingerprint(data) or existing.created_by_id != request.user.id:
+                raise Conflict("提交编号已用于其他操作。")
+            return Response(payload(defect, self))
+        if row.version != data["expected_version"]:
+            raise Conflict()
+        snapshot_legacy_plan_items(row, request.user)
+        selected = list(
+            TestCase.objects.select_for_update()
+            .filter(project=defect.project, pk__in=data["case_ids"], archived_at__isnull=True, trashed_at__isnull=True)
+            .order_by("id")
+        )
+        if len(selected) != len(set(data["case_ids"])):
+            raise ValidationError({"case_ids": "请选择当前项目中未归档的用例。"})
+        duplicate = set(
+            row.case_items.filter(source_case_id__in=data["case_ids"]).values_list("source_case_id", flat=True)
+        )
+        if duplicate:
+            raise ValidationError({"case_ids": "所选用例已在本轮中，请移除重复项。"})
+        position = row.case_items.count()
+        created = []
+        for case in selected:
+            revision = case.revisions.get(version=case.version)
+            created.append(
+                DefectVerificationCase.objects.create(
+                    project=defect.project,
+                    created_by=request.user,
+                    verification=row,
+                    source_case=case,
+                    source_revision=revision,
+                    source="library",
+                    title=revision.title,
+                    snapshot=revision.snapshot,
+                    position=position,
+                )
+            )
+            position += 1
+        for temporary in data["temporary_cases"]:
+            parsed = TemporaryCaseInput(data=temporary)
+            parsed.is_valid(raise_exception=True)
+            value = parsed.validated_data
+            created.append(
+                DefectVerificationCase.objects.create(
+                    project=defect.project,
+                    created_by=request.user,
+                    verification=row,
+                    source="round",
+                    title=value["title"],
+                    snapshot={"title": value["title"], "preconditions": value["preconditions"], "steps": value["steps"]},
+                    position=position,
+                )
+            )
+            position += 1
+        if not created:
+            raise ValidationError("请添加公共用例或本轮临时用例。")
+        row.version += 1
+        row.save(update_fields=["version"])
+        sync_plan(row)
+        Event.objects.create(
+            project=defect.project,
+            created_by=request.user,
+            verification=row,
+            request_id=data["request_id"],
+            request_hash=fingerprint(data),
+            action="cases_added",
+            note=f"补充本轮用例 {len(created)} 条",
+            snapshot={"items": [{"id": str(item.id), "title": item.title, "source": item.source} for item in created]},
+        )
+        audit(defect, request.user, f"补充回归用例第{row.round_no}轮：{len(created)}条")
+        from .notifications import plan_notice
+
+        if row.plan_id:
+            plan_notice(row.plan, "update", request.user)
+        return Response(payload(defect, self), status=201)
+
+
+class DefectVerificationCaseExecution(QualityView):
+    @transaction.atomic
+    def post(self, request, item_id, **kwargs):
+        if not is_administrator(request.user) and not capable(self.project_id, request.user.id, "execute"):
+            raise PermissionDenied("当前角色不能提交用例结果。")
+        data = self.input(RoundCaseExecutionInput)
+        item = get_object_or_404(
+            DefectVerificationCase.objects.select_for_update().select_related("verification__defect"),
+            pk=item_id,
+            project_id=self.project_id,
+        )
+        defect, row = lock(self, item.verification.defect_id)
+        if item.verification_id != row.id or row.mode != "cases" or row.status != "testing":
+            raise Conflict("当前用例不属于可执行的验证轮次。")
+        require_executor(row, request.user)
+        existing = item.executions.filter(request_id=data["request_id"]).first()
+        if existing:
+            if existing.request_hash != fingerprint(data) or existing.created_by_id != request.user.id:
+                raise Conflict("同一提交编号不能改写结果。")
+            return Response(payload(defect, self))
+        current_check(row, defect)
+        if data["expected_version"] != row.version:
+            raise Conflict()
+        if not data["actual_result"].strip():
+            raise ValidationError({"actual_result": "请填写本条用例的测试结果说明。"})
+        execution = VerificationCaseExecutionRecord.objects.create(
+            project=defect.project,
+            created_by=request.user,
+            item=item,
+            request_id=data["request_id"],
+            request_hash=fingerprint(data),
+            result=data["result"],
+            actual_result=data["actual_result"],
+            evidence=data["evidence"],
+            step_results=[],
+            reason_category=data["reason_category"],
+            next_action=data["next_action"],
+        )
+        row.version += 1
+        row.save(update_fields=["version"])
+        sync_plan(row)
+        Event.objects.create(
+            project=defect.project,
+            created_by=request.user,
+            verification=row,
+            request_id=data["request_id"],
+            request_hash=fingerprint(data),
+            action="case_executed",
+            note=f"执行用例 {item.title}：{execution.result}",
+            snapshot={"item_id": str(item.id), "execution_id": str(execution.id), "result": execution.result},
+        )
+        audit(defect, request.user, f"执行用例第{row.round_no}轮「{item.title}」：{execution.result}")
+        if is_administrator(request.user) and row.plan_id and row.plan.assignee_id:
+            from .notifications import notify
+
+            notify(
+                defect.project,
+                request.user,
+                [row.plan.assignee_id],
+                row.plan_id,
+                f"管理员已代执行一条用例：{item.title}",
+                f"quality?tab=plans&plan={row.plan_id}",
+            )
         return Response(payload(defect, self), status=201)
 
 
@@ -500,6 +883,17 @@ class DefectVerificationResult(QualityView):
         row.save(update_fields=["version"])
         sync_plan(row)
         audit(defect, request.user, f"记录人工实测第{row.round_no}轮：{data['result']}")
+        if is_administrator(request.user) and row.plan_id and row.plan.assignee_id:
+            from .notifications import notify
+
+            notify(
+                defect.project,
+                request.user,
+                [row.plan.assignee_id],
+                row.plan_id,
+                f"管理员已代提交人工测试结果：{defect.title}",
+                f"quality?tab=plans&plan={row.plan_id}",
+            )
         return Response(payload(defect, self), status=201)
 
 
@@ -516,21 +910,15 @@ class DefectVerificationWorkflow(QualityView):
         data = self.input(WorkflowInput)
         action = data["action"]
         if action == "assign":
-            if not (
-                is_administrator(request.user)
-                or any(
-                    capable(self.project_id, request.user.id, cap)
-                    for cap in ["manage_test_plan", "manage_defect", "solution"]
-                )
-            ):
+            if not scheduler(self):
                 raise PermissionDenied("当前账号不能指派测试员。")
-            if "assignee_id" not in data:
+            if not data.get("assignee_id"):
                 raise ValidationError({"assignee_id": "请选择测试员。"})
             validate_tester(self, data["assignee_id"])
         if (
-            action in {"claim", "submit"}
+            action == "submit"
             and not (is_administrator(request.user) or capable(self.project_id, request.user.id, "execute"))
-        ) or (action not in {"assign", "claim", "submit"} and not manager(self)):
+        ) or (action not in {"assign", "submit"} and not manager(self)):
             raise PermissionDenied("仅项目经理或管理员可以最终验收、退回或重开。")
         defect, row = lock(self, pk)
         if not row or defect.archived_at:
@@ -544,7 +932,6 @@ class DefectVerificationWorkflow(QualityView):
             raise Conflict()
         allowed = {
             "assign": {"testing"},
-            "claim": {"testing"},
             "submit": {"testing"},
             "accept": {"review"},
             "return_test": {"review"},
@@ -555,12 +942,12 @@ class DefectVerificationWorkflow(QualityView):
             raise Conflict("当前验证状态不允许此操作。")
         if action in {"return_test", "return_repair", "reopen"} and not data["comment"].strip():
             raise ValidationError({"comment": "请说明退回或重开原因。"})
-        if action in {"claim", "submit", "accept"}:
+        if action in {"submit", "accept"}:
             current_check(row, defect)
-            if action in {"claim", "submit"}:
+            if action == "submit":
                 require_executor(row, request.user)
             items, summary = results(row)
-            if action != "claim" and (summary["pending"] or not summary["total"]):
+            if summary["pending"] or not summary["total"]:
                 raise ValidationError({"result": "请先记录本轮全部验证的实际结果。"})
             if action == "accept" and summary["passed"] != summary["total"]:
                 raise ValidationError({"result": "本轮全部验证通过后才可关闭缺陷。"})
@@ -573,11 +960,6 @@ class DefectVerificationWorkflow(QualityView):
             row.plan.save(update_fields=["assignee"])
             defect.edit_version += 1
             defect.save(update_fields=["edit_version", "updated_at"])
-        elif action == "claim":
-            if not row.plan_id or row.plan.assignee_id:
-                raise Conflict("测试已由其他人认领，请刷新。")
-            row.plan.assignee = request.user
-            row.plan.save(update_fields=["assignee"])
         elif action == "submit":
             row.status = "review"
         elif action == "accept":
@@ -588,9 +970,10 @@ class DefectVerificationWorkflow(QualityView):
         elif action == "return_test":
             if defect.status != "resolved":
                 raise Conflict("请先重新修复缺陷。")
+            snapshot_legacy_plan_items(row, request.user)
             row.status = "returned_test"
             row.save(update_fields=["status"])
-            create_round(
+            next_round = create_round(
                 defect,
                 request.user,
                 {
@@ -599,10 +982,22 @@ class DefectVerificationWorkflow(QualityView):
                     "fixed_build": defect.fixed_build,
                     "environment": row.environment,
                     "steps": row.steps,
-                    "case_ids": list(row.plan.items.values_list("case_id", flat=True)) if row.plan_id else [],
+                    "test_requirements": row.steps[0]["action"] if row.mode == "cases" and row.steps else "",
+                    "case_ids": list(row.case_items.filter(source_case__isnull=False).values_list("source_case_id", flat=True)),
                 },
                 row,
             )
+            if row.mode == "cases":
+                for index, old_item in enumerate(row.case_items.filter(source="round").order_by("position", "created_at")):
+                    DefectVerificationCase.objects.create(
+                        project=defect.project,
+                        created_by=request.user,
+                        verification=next_round,
+                        source="round",
+                        title=old_item.title,
+                        snapshot=old_item.snapshot,
+                        position=next_round.case_items.count() + index,
+                    )
         else:
             if action == "reopen" and defect.status != "closed":
                 raise Conflict("当前缺陷尚未关闭。")
@@ -619,7 +1014,6 @@ class DefectVerificationWorkflow(QualityView):
 
         notice_action = {
             "assign": "assign",
-            "claim": "claim",
             "submit": "submit",
             "accept": "approve",
             "return_test": "return",
@@ -658,7 +1052,6 @@ class DefectVerificationWorkflow(QualityView):
         )
         label = {
             "assign": "指派测试员",
-            "claim": "认领测试",
             "submit": "提交验证结果",
             "accept": "验收关闭",
             "return_test": "退回补测",
@@ -667,9 +1060,9 @@ class DefectVerificationWorkflow(QualityView):
         }[action]
         detail = data["comment"]
         if action == "assign":
-            old_name = (previous_assignee.display_name or previous_assignee.username) if previous_assignee else "待认领"
+            old_name = (previous_assignee.display_name or previous_assignee.username) if previous_assignee else "未安排"
             new_assignee = row.plan.assignee
-            new_name = (new_assignee.display_name or new_assignee.username) if new_assignee else "待认领"
+            new_name = (new_assignee.display_name or new_assignee.username) if new_assignee else "未安排"
             detail = f"{old_name} → {new_name}"
         audit(defect, request.user, f"{label}，验证第{row.round_no}轮：{detail}", before)
         return Response(payload(defect, self))

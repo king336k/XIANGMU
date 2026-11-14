@@ -10,7 +10,10 @@ from rest_framework.response import Response
 from plane.app.views.base import BaseAPIView
 from plane.db.models import Project, ProjectMember, WorkspaceMember, User, Issue
 from plane.utils.date_utils import get_analytics_filters
-from .models import Defect, TestCase, TestPlan, PlanItem, TestExecution, DefectVerificationResult
+from .models import (
+    Defect, TestCase, TestPlan, PlanItem, TestExecution, DefectVerificationResult,
+    DefectVerification, DefectVerificationCase, DefectVerificationCaseExecution,
+)
 from .permissions import is_administrator
 
 
@@ -48,20 +51,21 @@ def quality_queries(project, params=None):
         plan = get_object_or_404(TestPlan, pk=serializers.UUIDField().run_validation(plan_id), project=project)
         plans = TestPlan.objects.filter(pk=plan.pk)
     if verification_id:
-        from .models import DefectVerification
-
         verification = get_object_or_404(
             DefectVerification, pk=serializers.UUIDField().run_validation(verification_id), project=project
         )
         plans = TestPlan.objects.filter(project=project, pk=verification.plan_id)
     executions = TestExecution.objects.filter(project=project)
+    case_executions = DefectVerificationCaseExecution.objects.filter(project=project, source_execution__isnull=True)
     manuals = DefectVerificationResult.objects.filter(project=project)
     if plan_id:
         executions = executions.filter(item__plan_id=plan_id)
+        case_executions = case_executions.filter(item__verification__plan_id=plan_id)
         manuals = manuals.none()
     if verification_id:
         manuals = manuals.filter(verification_id=verification_id)
         executions = executions.filter(item__plan_id=verification.plan_id)
+        case_executions = case_executions.filter(item__verification_id=verification_id)
     defects = Defect.objects.filter(project=project, archived_at__isnull=True)
     plan_basis = "按计划当前负责人归属；历史计划包含已归档计划。"
     result = {
@@ -82,6 +86,13 @@ def quality_queries(project, params=None):
             "result",
             "execution",
             "全部历史用例执行，按每次真实执行人归属，不按计划创建人或当前负责人重算。",
+        ),
+        "case_execution_count": specification(
+            case_executions,
+            "created_by_id",
+            "result",
+            "case_execution",
+            "缺陷回归用例执行按实际操作人归属；管理员代执行保留管理员为实际操作人。",
         ),
         "manual_execution_count": specification(
             manuals, "created_by_id", "result", "manual_execution", "全部历史人工实测，按每次真实提交人归属。"
@@ -106,12 +117,51 @@ def quality_queries(project, params=None):
         latest = TestExecution.objects.filter(item_id=OuterRef("pk"), round_no=verification.round_no).order_by(
             "-created_at", "-id"
         )
-    items = PlanItem.objects.filter(plan__in=plans).annotate(
-        latest_execution=Subquery(latest.values("pk")[:1]),
-        owner_result=Coalesce(Subquery(latest.values("result")[:1]), Value("pending")),
+    case_verification = (
+        verification if verification_id else
+        getattr(plan, "defect_verification", None) if plan_id else None
+    )
+    if case_verification and case_verification.mode == "cases" and case_verification.case_items.exists():
+        latest_round_execution = DefectVerificationCaseExecution.objects.filter(item_id=OuterRef("pk")).order_by(
+            "-created_at", "-id"
+        )
+        items = DefectVerificationCase.objects.filter(verification=case_verification).annotate(
+            latest_execution=Subquery(latest_round_execution.values("pk")[:1]),
+            owner_result=Coalesce(Subquery(latest_round_execution.values("result")[:1]), Value("pending")),
+            owner_executor=Case(
+                When(latest_execution__isnull=True, then=F("verification__plan__assignee_id")),
+                default=Subquery(latest_round_execution.values("created_by_id")[:1]),
+                output_field=UUIDField(),
+            ),
+        )
+        item_kind = "verification_case"
+    else:
+        items = PlanItem.objects.filter(plan__in=plans).annotate(
+            latest_execution=Subquery(latest.values("pk")[:1]),
+            owner_result=Coalesce(Subquery(latest.values("result")[:1]), Value("pending")),
+            owner_executor=Case(
+                When(latest_execution__isnull=True, then=F("plan__assignee_id")),
+                default=Subquery(latest.values("created_by_id")[:1]),
+                output_field=UUIDField(),
+            ),
+        )
+        item_kind = "item"
+    case_rounds = current_verifications(project).filter(mode="cases")
+    if verification_id:
+        case_rounds = DefectVerification.objects.filter(project=project, pk=verification_id, mode="cases")
+    if plan_id:
+        case_rounds = DefectVerification.objects.filter(project=project, plan_id=plan_id, mode="cases")
+    latest_case_execution = DefectVerificationCaseExecution.objects.filter(
+        item_id=OuterRef("pk"), source_execution__isnull=True
+    ).order_by("-created_at", "-id")
+    case_round_items = DefectVerificationCase.objects.filter(
+        verification__in=case_rounds, source_plan_item__isnull=True
+    ).annotate(
+        latest_execution=Subquery(latest_case_execution.values("pk")[:1]),
+        owner_result=Coalesce(Subquery(latest_case_execution.values("result")[:1]), Value("pending")),
         owner_executor=Case(
-            When(latest_execution__isnull=True, then=F("plan__assignee_id")),
-            default=Subquery(latest.values("created_by_id")[:1]),
+            When(latest_execution__isnull=True, then=F("verification__plan__assignee_id")),
+            default=Subquery(latest_case_execution.values("created_by_id")[:1]),
             output_field=UUIDField(),
         ),
     )
@@ -120,8 +170,6 @@ def quality_queries(project, params=None):
     )
     manual_scope = current_verifications(project)
     if verification_id:
-        from .models import DefectVerification
-
         manual_scope = DefectVerification.objects.filter(project=project, pk=verification.pk)
     manual_rounds = manual_scope.filter(mode="manual").annotate(
         owner_result=Coalesce(Subquery(latest_manual.values("result")[:1]), Value("pending")),
@@ -138,12 +186,18 @@ def quality_queries(project, params=None):
         (
             "summary",
             items,
-            "item",
+            item_kind,
             (
                 "指定计划/验证轮次的每条最新结果按真实执行人归属；未执行归计划负责人。"
                 if plan_id or verification_id
                 else "当前有效计划本轮每条最新结果按真实执行人归属；未执行条目归当前计划负责人。"
             ),
+        ),
+        (
+            "verification_case",
+            case_round_items,
+            "verification_case",
+            "缺陷回归本轮快照用例按最新实测结果归属实际执行人；未执行条目归指派测试员。",
         ),
         (
             "manual",
@@ -231,14 +285,19 @@ def source_spec(view, data, project):
         if metric not in queries:
             raise serializers.ValidationError({"metric": "请选择有效工作报表指标。"})
         query = queries[metric]
-        if metric in {"test_executions", "manual_executions"}:
+        if metric in {"test_executions", "verification_case_executions", "manual_executions"}:
             if options.validated_data.get("result"):
                 query = query.filter(result=options.validated_data["result"])
+            execution_kind = {
+                "test_executions": "execution",
+                "verification_case_executions": "case_execution",
+                "manual_executions": "manual_execution",
+            }[metric]
             return specification(
                 query,
                 "created_by_id",
                 "result",
-                "execution" if metric == "test_executions" else "manual_execution",
+                execution_kind,
                 "区间真实执行记录按实际执行人归属，保留每次历史结果。",
             )
         if metric.startswith("work") or metric == "current_work":
@@ -302,6 +361,13 @@ def source_spec(view, data, project):
             "result",
             "execution",
             "历史用例执行按每次实际执行人归属。",
+        ),
+        "total_case_round_executions": (
+            DefectVerificationCaseExecution.objects.all(),
+            "created_by_id",
+            "result",
+            "case_execution",
+            "缺陷回归用例执行按实际操作人归属；管理员代执行保留管理员为实际操作人。",
         ),
         "total_manual_executions": (
             DefectVerificationResult.objects.all(),
@@ -439,6 +505,12 @@ def detail_row(row, kind, slug):
         item = row if kind == "item" else row.item
         title = item.revision.title
         path = f"quality?tab=plans&plan={item.plan_id}"
+    elif kind == "verification_case":
+        title = row.title
+        path = f"defects?defect={row.verification.defect_id}"
+    elif kind == "case_execution":
+        title = row.item.title
+        path = f"defects?defect={row.item.verification.defect_id}"
     elif kind in {"verification", "manual_execution"}:
         verification = row if kind == "verification" else row.verification
         title = verification.defect.title
@@ -523,6 +595,10 @@ class OwnerStatistics(BaseAPIView):
                 rows = rows.select_related("member" if spec["kind"] == "member" else "page")
             if spec["kind"] in {"item", "execution"}:
                 rows = rows.select_related("revision" if spec["kind"] == "item" else "item__revision")
+            if spec["kind"] == "verification_case":
+                rows = rows.select_related("verification__defect")
+            if spec["kind"] == "case_execution":
+                rows = rows.select_related("item__verification__defect")
             if spec["kind"] in {"verification", "manual_execution"}:
                 rows = rows.select_related("defect" if spec["kind"] == "verification" else "verification__defect")
             return Response(

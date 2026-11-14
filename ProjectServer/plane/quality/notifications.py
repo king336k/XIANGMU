@@ -67,6 +67,7 @@ def plan_notice(plan, action, actor):
         "return": "测试结果被退回，请补充复测",
         "approve": "测试结果已由经理确认",
         "cancel": "测试计划已取消",
+        "update": "本轮测试内容已更新",
     }
     if action not in names:
         return

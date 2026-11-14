@@ -76,6 +76,8 @@ class QualityPermission(BasePermission):
             is_active=True,
         ).exists()
         if allowed and request.method not in SAFE_METHODS:
+            if type(view).__name__ == "CaseList" and request.method == "POST":
+                return True
             return capable(view.project_id, request.user.id, permission_for(view, request))
         return allowed
 
@@ -773,6 +775,7 @@ class QualityContext(QualityView):
                 {
                     "id": member.member_id,
                     "name": member.member.display_name or member.member.first_name or "成员",
+                    "role": member.role,
                     "business_role": "PLATFORM_ADMIN"
                     if "PLATFORM_ADMIN" in member_duties
                     else next(iter(sorted(member_duties)), None),

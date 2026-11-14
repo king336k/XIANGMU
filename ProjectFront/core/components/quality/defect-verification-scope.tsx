@@ -5,23 +5,32 @@ import { v4 as uuidv4 } from "uuid";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
 import { Badge, Field, fieldClass, Modal } from "./shared";
-import { can } from "./types";
 import type { Context, Defect } from "./types";
 import { ExecutionForm } from "./execution-form";
 import { VerificationConfigure } from "./verification-configure";
 import { VerificationManualResult } from "./verification-manual-result";
+import { VerificationCaseExecution } from "./verification-case-execution";
+import { VerificationCaseSupplement } from "./verification-case-supplement";
 import { VerificationRoundView } from "./verification-round-view";
+import { VerificationProgress } from "./verification-progress";
 import type { VerificationData, VerificationItem, VerificationRound } from "./verification-types";
 import { verificationStatus, verificationStatusTone } from "./verification-types";
 import { ProjectRouteLink } from "@/components/common/project-route-link";
 const actionLabels: Record<string, string> = {
-  claim: "认领测试",
   submit: "提交验收",
   accept: "验收关闭",
   return_test: "退回补测",
   return_repair: "退回修复",
   reopen: "重新打开",
 };
+function canSchedule(context: Context) {
+  return (
+    context.is_administrator ||
+    context.is_manager ||
+    context.business_role === "TECHNICIAN" ||
+    (context.business_roles || []).includes("TECHNICIAN")
+  );
+}
 export function DefectVerificationScope({
   base,
   value,
@@ -57,14 +66,16 @@ export function DefectVerificationScope({
   const [action, setAction] = useState<{ key: string; requestId: string; round: VerificationRound }>();
   const round = data?.current;
   const displayState = round?.execution_state || round?.status || "";
+  const waitingForRepair = round?.execution_state === "waiting_repair";
+  const waitingForArrangement = round?.execution_state === "needs_arrangement";
+  const waitingForAssignment = round?.execution_state === "needs_assignment";
+  const waitingForCases = round?.execution_state === "needs_cases";
   const retiredRound = !!round && ["returned_repair", "reopened", "superseded"].includes(round.status);
   const readyForNewRound =
     !!round &&
     (retiredRound || (!!round.fixed_build && round.fixed_build !== value.fixed_build)) &&
     data?.defect_status === "resolved";
-  const canConfigure = round
-    ? round.can_configure
-    : value.status !== "closed" && ["manage_test_plan", "manage_defect", "solution"].some((cap) => can(context, cap));
+  const canConfigure = round ? round.can_configure : value.status !== "closed" && canSchedule(context);
   const update = async (result: VerificationData) => {
     await mutate(result, false);
     setEditing(false);
@@ -123,18 +134,17 @@ export function DefectVerificationScope({
                 />
               )}
             </div>
-            {round &&
-              (canConfigure || ["manage_test_plan", "manage_defect", "solution"].some((cap) => can(context, cap))) && (
-                <Button
-                  type="button"
-                  variant="neutral-primary"
-                  size="sm"
-                  disabled={!canConfigure}
-                  onClick={() => start(round.mode)}
-                >
-                  {retiredRound ? "重新安排" : "修改安排"}
-                </Button>
-              )}
+            {round && canConfigure && (
+              <Button
+                type="button"
+                variant="neutral-primary"
+                size="sm"
+                disabled={!canConfigure}
+                onClick={() => start(round.mode)}
+              >
+                {retiredRound || readyForNewRound ? "重新安排" : "修改安排"}
+              </Button>
+            )}
           </div>
           {!round && canConfigure && (
             <div role="group" aria-label="选择验证方式" className="flex flex-wrap gap-2">
@@ -148,21 +158,64 @@ export function DefectVerificationScope({
           )}
           {round && (
             <>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-subtle bg-layer-1 px-3 py-2 text-12">
-                <span>指派测试员：{round.assignee_name || "待认领"}</span>
+              <VerificationProgress round={round} defectStatus={data.defect_status} />
+              <div
+                role="status"
+                className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border px-3 py-3 text-12 ${
+                  waitingForRepair || waitingForArrangement || waitingForAssignment || waitingForCases
+                    ? "border-warning-subtle bg-warning-subtle"
+                    : "border-subtle bg-layer-1"
+                }`}
+              >
+                <span>指派测试员：{round.assignee_name || "未安排"}</span>
                 <span className="text-secondary">
                   下一步：
-                  {round.blocked_reason ||
-                    (round.status === "review"
-                      ? "经理或管理员验收"
-                      : round.status === "accepted"
-                        ? "验收完成"
-                        : round.can_record
-                          ? round.summary.pending
-                            ? "执行验证，填写实测结果"
-                            : "提交验收"
-                          : "由指派测试员继续处理")}
+                  {waitingForRepair
+                    ? "等待技术员修复"
+                    : waitingForArrangement
+                      ? "等待重新安排"
+                      : waitingForAssignment
+                        ? "等待负责人安排测试员"
+                        : waitingForCases
+                          ? "等待补充本轮用例"
+                          : round.blocked_reason ||
+                            (round.status === "review"
+                              ? "经理或管理员验收"
+                              : round.status === "accepted"
+                                ? "验收完成"
+                                : round.can_record
+                                  ? round.summary.pending
+                                    ? "执行验证，填写实测结果"
+                                    : "提交验收"
+                                  : "由指派测试员继续处理")}
                 </span>
+                {waitingForRepair && (
+                  <p className="basis-full text-secondary">
+                    技术员更新修复版本后，测试员即可在此填写结果。当前无需提交测试结果。
+                  </p>
+                )}
+                {waitingForArrangement && (
+                  <p className="basis-full text-secondary">修复版本已更新，请先重新安排本轮验证，再开始测试。</p>
+                )}
+                {waitingForAssignment && (
+                  <p className="basis-full text-secondary">
+                    请技术负责人、项目经理或管理员指定测试员。测试员不能自行认领；安排后任务会出现在测试员的“我的工作”。
+                  </p>
+                )}
+                {waitingForCases && (
+                  <p className="basis-full text-secondary">请先补充本轮用例，再逐条执行并提交验收。</p>
+                )}
+                {!waitingForRepair &&
+                  !waitingForArrangement &&
+                  !waitingForAssignment &&
+                  !waitingForCases &&
+                  round.can_record && (
+                    <p className="basis-full text-secondary">
+                      {round.mode === "manual"
+                        ? "现在可以测试。按步骤填写实际结果，提交测试结果后等待项目经理或管理员验收。"
+                        : "现在可以测试。逐条执行用例并记录结果，全部完成后提交验收。"}
+                    </p>
+                  )}
                 {round.blocked_reason &&
                   (onRepair ? (
                     <Button type="button" variant="neutral-primary" size="sm" onClick={onRepair}>
@@ -180,39 +233,43 @@ export function DefectVerificationScope({
               {!retiredRound && !readyForNewRound && (
                 <RoundOwnerSummary base={base} verificationId={round.id} mode={round.mode} />
               )}
+              {round.mode === "cases" && round.status === "testing" && (round.can_record || round.can_configure) && (
+                <VerificationCaseSupplement
+                  base={base}
+                  defectId={value.id}
+                  round={round}
+                  context={context}
+                  onSaved={update}
+                />
+              )}
               <VerificationRoundView
                 round={round}
                 onExecute={(item, stepIndex, result) => setExecuting({ item, round, stepIndex, result })}
-                onManualResultChange={
-                  round.can_record ? (stepIndex, result) => setRecording({ round, stepIndex, result }) : undefined
-                }
                 showStatus={false}
                 members={context.members}
               />
-              {data.defect_status !== "resolved" && data.defect_status !== "closed" && (
-                <p className="text-12 text-secondary">修复后可提交验证结果。</p>
-              )}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-subtle pt-4">
                 <span className="text-12 text-secondary">
                   {round.status === "review"
                     ? "待项目经理 / 管理员验收"
-                    : round.can_record
-                      ? round.summary.pending
-                        ? `未执行 ${round.summary.pending} 项`
-                        : "验证结果已记录"
-                      : round.status === "accepted"
-                        ? "验收完成"
-                        : ""}
+                    : round.mode === "cases" && round.summary.total === 0
+                      ? "待补充用例"
+                      : round.can_record
+                        ? round.summary.pending
+                          ? `未执行 ${round.summary.pending} 项`
+                          : "验证结果已记录"
+                        : round.status === "accepted"
+                          ? "验收完成"
+                          : ""}
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
                   {round.mode === "manual" && round.can_record && (
                     <Button type="button" onClick={() => setRecording({ round })}>
-                      记录结果
+                      填写测试结果
                     </Button>
                   )}
                   {(
                     [
-                      ["claim", round.can_claim],
                       ["return_repair", round.can_return_repair],
                       ["return_test", round.can_return_test],
                       ["submit", round.can_submit],
@@ -266,13 +323,21 @@ export function DefectVerificationScope({
           base={base}
           defectId={value.id}
           round={recording.round}
-          initialStepIndex={recording.stepIndex}
-          initialResult={recording.result}
           onSaved={update}
           onClose={() => setRecording(undefined)}
         />
       )}
-      {executing && round && (
+      {executing && round && executing.item.source && executing.item.source !== "legacy" && (
+        <VerificationCaseExecution
+          base={base}
+          item={executing.item}
+          round={executing.round}
+          initialResult={executing.result}
+          onClose={() => setExecuting(undefined)}
+          onSaved={update}
+        />
+      )}
+      {executing && round && (!executing.item.source || executing.item.source === "legacy") && (
         <ExecutionForm
           base={base}
           stepResultsOnly
@@ -289,7 +354,7 @@ export function DefectVerificationScope({
             revision: {
               snapshot: executing.item.snapshot,
               title: executing.item.title,
-              version: executing.item.case_version,
+              version: executing.item.case_version ?? 1,
             },
           }}
           onClose={() => setExecuting(undefined)}
