@@ -13,6 +13,7 @@ from rest_framework import serializers
 from plane.knowledge.retrieval import scan_content
 from .log_evidence import summarize
 from .diagnostic_limits import timeout_seconds
+from .diagnostic_failures import DiagnosticProviderFailure, DiagnosticTimeoutFailure, agent_failure_metadata
 
 
 class DiagnosticOutputFailure(ValueError):
@@ -29,9 +30,11 @@ def safe_validation_categories(value):
         "severity_reference_not_allowed",
         "severity_reference_not_cited",
         "severity_reference_not_file",
+        "inline_reference_not_allowed",
+        "inline_reference_not_cited",
     }
     return (
-        list(dict.fromkeys(item for item in value[:5] if isinstance(item, str) and item in allowed))
+        list(dict.fromkeys(item for item in value[: len(allowed)] if isinstance(item, str) and item in allowed))
         if isinstance(value, (list, tuple))
         else []
     )
@@ -200,19 +203,30 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
                 check=True,
             )
         except subprocess.TimeoutExpired as error:
-            raise TimeoutError("AGENT_DEADLINE") from error
+            raise DiagnosticTimeoutFailure(
+                "AGENT_DEADLINE", {"source": "subprocess_deadline", "deadline_kind": "subprocess_deadline"}
+            ) from error
         except subprocess.CalledProcessError as error:
             if error.returncode == 124:
-                raise TimeoutError("AGENT_DEADLINE") from error
+                raise DiagnosticTimeoutFailure(
+                    "AGENT_DEADLINE", agent_failure_metadata(error.stderr, {"source": "agent_deadline"})
+                ) from error
             if "UsageLimitExceeded:" in (error.stderr or ""):
                 raise ValueError("AGENT_USAGE_LIMIT") from error
-            types = {"ReadTimeout", "ConnectTimeout", "APITimeoutError", "TimeoutException", "ModelTimeoutError"}
+            types = {
+                "ReadTimeout",
+                "ConnectTimeout",
+                "APITimeoutError",
+                "TimeoutException",
+                "ModelTimeoutError",
+                "ModelRequestTimeout",
+            }
             for line in reversed((error.stderr or "").splitlines()):
                 try:
                     diagnostic = json.loads(line)
                 except ValueError:
                     if line.strip() in types:
-                        raise TimeoutError("AGENT_PROVIDER_TIMEOUT") from error
+                        raise DiagnosticTimeoutFailure("AGENT_PROVIDER_TIMEOUT") from error
                     continue
                 if not isinstance(diagnostic, dict):
                     continue
@@ -222,22 +236,32 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
                     kinds = {row.get("error_type") for row in causes if isinstance(row.get("error_type"), str)}
                     statuses = [row["status_code"] for row in causes if type(row.get("status_code")) is int]
                     if any(value in {401, 403} for value in statuses):
-                        raise ValueError("AGENT_PROVIDER_AUTH") from error
+                        raise DiagnosticProviderFailure(
+                            "AGENT_PROVIDER_AUTH", diagnostic.get("model_failure")
+                        ) from error
                     if kinds & types:
-                        raise TimeoutError("AGENT_PROVIDER_TIMEOUT") from error
+                        raise DiagnosticTimeoutFailure(
+                            "AGENT_PROVIDER_TIMEOUT", diagnostic.get("model_failure")
+                        ) from error
                     if kinds & {"ModelConnectionError", "APIConnectionError"} or any(
                         value in {408, 429} or value >= 500 for value in statuses
                     ):
-                        raise ValueError("AGENT_PROVIDER_UNAVAILABLE") from error
+                        raise DiagnosticProviderFailure(
+                            "AGENT_PROVIDER_UNAVAILABLE", diagnostic.get("model_failure")
+                        ) from error
                 if diagnostic.get("error_type") in types:
-                    raise TimeoutError("AGENT_PROVIDER_TIMEOUT") from error
+                    raise DiagnosticTimeoutFailure("AGENT_PROVIDER_TIMEOUT", diagnostic.get("model_failure")) from error
                 if diagnostic.get("error_type") in {"ModelConnectionError", "APIConnectionError"}:
-                    raise ValueError("AGENT_PROVIDER_UNAVAILABLE") from error
+                    raise DiagnosticProviderFailure(
+                        "AGENT_PROVIDER_UNAVAILABLE", diagnostic.get("model_failure")
+                    ) from error
                 status = diagnostic.get("status_code")
                 if status in {401, 403}:
-                    raise ValueError("AGENT_PROVIDER_AUTH") from error
+                    raise DiagnosticProviderFailure("AGENT_PROVIDER_AUTH", diagnostic.get("model_failure")) from error
                 if status in {408, 429} or isinstance(status, int) and status >= 500:
-                    raise ValueError("AGENT_PROVIDER_UNAVAILABLE") from error
+                    raise DiagnosticProviderFailure(
+                        "AGENT_PROVIDER_UNAVAILABLE", diagnostic.get("model_failure")
+                    ) from error
                 if diagnostic.get("error_type") in {"UnexpectedModelBehavior", "ModelRetry", "ValidationError"}:
                     raise DiagnosticOutputFailure(
                         diagnostic.get("validation_errors"), diagnostic.get("validation_categories")

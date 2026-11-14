@@ -12,6 +12,61 @@ import { AssistantMarkdown } from "@/components/knowledge/assistant-markdown";
 import { DeploymentSnapshots } from "./deployment-snapshots";
 import { FileText, ChevronRight, RotateCw, CircleCheck, Download } from "lucide-react";
 import type { Context } from "./types";
+type FailureMetadata = {
+  source?: string;
+  transport_phase?: string;
+  deadline_kind?: string;
+  provider_called?: boolean;
+};
+type AttemptFailure = FailureMetadata & { attempt: number; code: string; duration_ms: number };
+
+function knownFailureLabel(labels: Record<string, string>, value = "") {
+  return Object.hasOwn(labels, value) ? labels[value] : undefined;
+}
+
+function failureLabel(value: FailureMetadata, timeout: boolean) {
+  if (value.source === "pre_model_materials") return timeout ? "材料读取超时" : "材料读取失败";
+  const phase = knownFailureLabel(
+    { connect: "连接", read: "响应", write: "发送请求", pool: "连接池等待" },
+    value.transport_phase
+  );
+  if (phase) return `${phase}${timeout ? "超时" : "失败"}`;
+  const deadline = knownFailureLabel(
+    {
+      request_timeout: "单次请求超时",
+      first_event_timeout: "首个响应超时",
+      agent_run: "分析执行超时",
+      subprocess_deadline: "诊断进程超时",
+      pre_model_materials: "材料读取超时",
+    },
+    value.deadline_kind
+  );
+  return deadline || "原因未知";
+}
+
+function failureSource(value: FailureMetadata) {
+  return (
+    knownFailureLabel(
+      {
+        agent_transport: "模型接口",
+        agent_deadline: "分析时限",
+        subprocess_deadline: "诊断进程",
+        pre_model_materials: "材料读取",
+        direct_sdk: "模型接口",
+      },
+      value.source
+    ) || "来源未知"
+  );
+}
+
+function attemptLabel(value: AttemptFailure) {
+  if (value.code === "AGENT_USAGE_LIMIT") return "调用预算耗尽";
+  if (["AGENT_INVALID_OUTPUT", "INVALID_DIAGNOSTIC_OUTPUT", "INVALID_DIAGNOSTIC_CITATION"].includes(value.code))
+    return "输出校验失败";
+  if (value.code === "AGENT_PROVIDER_AUTH") return "模型认证失败";
+  return failureLabel(value, value.code === "MODEL_TIMEOUT");
+}
+
 type Job = {
   id: string;
   status: string;
@@ -33,6 +88,8 @@ type Job = {
     model_error_code?: string;
     timeout_seconds?: number;
     retry?: { count: number; limit: number; next_at: string; last_error: string };
+    model_failure?: FailureMetadata;
+    attempt_failures?: AttemptFailure[];
     progress?: { stage: string; at: string };
     fallback?: string;
     version?: number;
@@ -586,6 +643,15 @@ export function DiagnosticsPanel({
   );
   const currentReport = data?.current_report || data?.results[0];
   const progressJob = data?.latest_attempt || currentReport;
+  const attemptFailures = (progressJob?.result.attempt_failures || [])
+    .filter(
+      (row, index, rows) =>
+        Number.isInteger(row.attempt) &&
+        row.attempt >= 1 &&
+        row.attempt <= 4 &&
+        rows.findIndex((candidate) => candidate.attempt === row.attempt) === index
+    )
+    .slice(0, 4);
   const reportFileIds =
     currentReport?.result.sources
       ?.filter(
@@ -658,6 +724,32 @@ export function DiagnosticsPanel({
                 !!progressJob.result.sources?.length && <span>已读取 {progressJob.result.sources.length} 份材料</span>
               )}
               {progressJob.result.timeout_seconds && <span>分析时限 {progressJob.result.timeout_seconds} 秒</span>}
+              {progressJob.result.model_failure && (
+                <p className="w-full">
+                  本次：{failureLabel(progressJob.result.model_failure, progressJob.result.model_status === "timeout")}
+                  {" · "}
+                  {failureSource(progressJob.result.model_failure)}
+                  {progressJob.result.model_failure.provider_called === false && " · 未调用模型接口"}
+                </p>
+              )}
+              {attemptFailures.length > 0 && (
+                <div className="w-full space-y-1">
+                  <p>此前尝试</p>
+                  <ul className="space-y-1">
+                    {attemptFailures.map((failure) => (
+                      <li key={failure.attempt}>
+                        第{failure.attempt}次 · {attemptLabel(failure)} · {failureSource(failure)}
+                        {Number.isFinite(failure.duration_ms) &&
+                        failure.duration_ms >= 0 &&
+                        failure.duration_ms <= 86400000
+                          ? ` · ${(failure.duration_ms / 1000).toFixed(1)} 秒`
+                          : ""}
+                        {failure.provider_called === false && " · 未调用模型接口"}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -14,6 +14,12 @@ from .log_evidence import summarize
 from plane.knowledge.retrieval import search
 from plane.knowledge import assistant
 from .diagnostic_limits import timeout_seconds, task_limits
+from .diagnostic_failures import (
+    append_attempt_failure,
+    failure_from_exception,
+    safe_attempt_failures,
+    safe_model_failure,
+)
 
 DIAGNOSTIC_SOFT_LIMIT, DIAGNOSTIC_HARD_LIMIT = task_limits()
 
@@ -84,6 +90,9 @@ def run_diagnostic(job_id):
     meta = {key: job.result[key] for key in ["trigger", "input", "version", "retry"] if key in job.result}
     status, code = "completed", ""
     result = dict(meta)
+    history = safe_attempt_failures(job.result.get("attempt_failures"))
+    if history:
+        result["attempt_failures"] = history
     try:
         materials = {}
         coverage = []
@@ -136,6 +145,9 @@ def run_diagnostic(job_id):
             elif time.monotonic() - started > (30 if any(row["kind"] == "image" for row in coverage) else 20):
                 result["model_status"] = "timeout"
                 result["model_error_code"] = "MODEL_TIMEOUT"
+                result["model_failure"] = safe_model_failure(
+                    {"source": "pre_model_materials", "deadline_kind": "pre_model_materials", "provider_called": False}
+                )
             else:
                 model_text = summarize(redact(text), 12000)
                 # The server may use approved knowledge without granting the collector knowledge access.
@@ -158,9 +170,10 @@ def run_diagnostic(job_id):
                     )
                     result["context_references"] = context_references
                     result.update(answer, method="hybrid", notice="规则与模型分析", model_status="completed")
-                except (TimeoutError, APITimeoutError):
+                except (TimeoutError, APITimeoutError) as error:
                     result["model_status"] = "timeout"
                     result["model_error_code"] = "MODEL_TIMEOUT"
+                    result["model_failure"] = failure_from_exception(error)
                 except Exception as error:
                     result["model_status"] = "failed"
                     safe_codes = {
@@ -174,6 +187,8 @@ def run_diagnostic(job_id):
                         "AGENT_INVALID_OUTPUT",
                     }
                     result["model_error_code"] = str(error) if str(error) in safe_codes else "MODEL_FAILED"
+                    if isinstance(getattr(error, "model_failure", None), dict):
+                        result["model_failure"] = safe_model_failure(error.model_failure)
                     if result["model_error_code"] == "AGENT_INVALID_OUTPUT":
                         from .diagnostic_model import safe_validation_details
 
@@ -188,6 +203,8 @@ def run_diagnostic(job_id):
     except Exception:
         status, code = "failed", "DIAGNOSTIC_FAILED"
     result["duration_ms"] = round((time.monotonic() - started) * 1000)
+    if result.get("model_status") in {"timeout", "failed"}:
+        append_attempt_failure(result)
     with transaction.atomic():
         # Match scheduling's defect -> job lock order before any assignment write.
         Defect.objects.select_for_update().get(pk=job.defect_id)

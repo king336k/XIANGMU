@@ -4,6 +4,7 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 from .diagnostic_limits import queue_wait_seconds
+from .diagnostic_failures import append_attempt_failure
 
 RETRYABLE = {"MODEL_TIMEOUT", "AGENT_FAILED", "AGENT_PROVIDER_UNAVAILABLE", "AGENT_INVALID_OUTPUT"}
 MAX_RETRIES = 3
@@ -17,6 +18,7 @@ def schedule_retry(job):
         count = 0
     if job.status not in {"completed", "failed"} or error not in RETRYABLE or count >= MAX_RETRIES:
         return False
+    append_attempt_failure(job.result)
     delay = 30 * 3**count
     job.result = {
         **job.result,

@@ -427,6 +427,11 @@ def diagnostic_search_query(text, sources):
         "grant_age_sec",
         "grant_expires_in_sec",
         "input_mode_conflict_warning_delay_sec",
+        "channel_status",
+        "next_channel_status",
+        "error_confirm_cycles",
+        "consecutive_error_cycles",
+        "module_error_bit",
     }
     for source in sources[:1000] if isinstance(sources, (list, tuple)) else []:
         excerpt = source.get("excerpt", "") if isinstance(source, dict) else ""
@@ -436,7 +441,10 @@ def diagnostic_search_query(text, sources):
             if scan_content(line):
                 continue
             status_tokens.extend(re.findall(r"\[([A-Z][A-Z0-9]{1,30}(?:_[A-Z0-9]{1,30})+)\]", line))
-            status_tokens.extend(key for key in re.findall(r"\b([a-z][a-z0-9_]{2,80})\s*=", line) if key in fields)
+            # Match logger assignments and JSON keys without decoding/traversing arbitrary payloads.
+            status_tokens.extend(
+                key for key in re.findall(r"\b([a-z][a-z0-9_]{2,80})[\"']?\s*[:=]", line) if key in fields
+            )
     if status_tokens:
         return " ".join(dict.fromkeys(status_tokens))[:2000]
     # Non-error material retains the prior natural-language retrieval behavior, with sensitive lines removed.
