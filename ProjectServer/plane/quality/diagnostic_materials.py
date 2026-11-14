@@ -432,6 +432,16 @@ def diagnostic_search_query(text, sources):
         "error_confirm_cycles",
         "consecutive_error_cycles",
         "module_error_bit",
+        "forced",
+        "capture_aborted",
+        "raw_status",
+        "derived_status",
+        "received",
+        "queued",
+        "written",
+        "queue_drops",
+        "write_errors",
+        "image_timestamp_drops",
     }
     for source in sources[:1000] if isinstance(sources, (list, tuple)) else []:
         excerpt = source.get("excerpt", "") if isinstance(source, dict) else ""
@@ -441,6 +451,13 @@ def diagnostic_search_query(text, sources):
             if scan_content(line):
                 continue
             status_tokens.extend(re.findall(r"\[([A-Z][A-Z0-9]{1,30}(?:_[A-Z0-9]{1,30})+)\]", line))
+            status_tokens.extend(re.findall(r"\bIMAGE_TIMESTAMP_FILTER_DROP\b", line))
+            status_tokens.extend(
+                re.findall(
+                    r"\bwarning[\"']?\s*[:=]\s*[\"']?([a-z][a-z0-9_]{2,80}_(?:failed|unavailable|aborted))\b",
+                    line,
+                )
+            )
             # Match logger assignments and JSON keys without decoding/traversing arbitrary payloads.
             status_tokens.extend(
                 key for key in re.findall(r"\b([a-z][a-z0-9_]{2,80})[\"']?\s*[:=]", line) if key in fields

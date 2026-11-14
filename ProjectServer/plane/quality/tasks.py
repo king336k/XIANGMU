@@ -157,7 +157,17 @@ def run_diagnostic(job_id):
 
                     revisions = diagnostic_search(job.project, query)
                 else:
-                    revisions = list(search(job.project, query)[:5])
+                    from plane.knowledge.diagnostic_retrieval import rank_diagnostic_rows
+
+                    # Keep the existing authorized keyword/semantic candidate set, then
+                    # prioritize the observed mechanism rather than database row order.
+                    candidates = search(job.project, query)
+                    fallback = list(candidates[:5])
+                    iterator = candidates.iterator(chunk_size=100) if hasattr(candidates, "iterator") else iter(candidates)
+                    revisions = rank_diagnostic_rows(iterator, query)
+                    selected = {row.id for row in revisions}
+                    revisions.extend(row for row in fallback if row.id not in selected)
+                    revisions = revisions[:5]
                 references = assistant.reference_payload(revisions, query)
                 try:
                     result["progress"] = {"stage": "model_analysis", "at": timezone.now().isoformat()}

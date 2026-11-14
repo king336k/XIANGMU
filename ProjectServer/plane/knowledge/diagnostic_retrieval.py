@@ -1,5 +1,6 @@
 """Server-only reuse of explicitly approved, current, sanitized diagnostic knowledge."""
 
+from heapq import nsmallest
 import re
 from .retrieval import published, scan_article, scan_content
 
@@ -51,8 +52,8 @@ def semantic_ids(project, query):
     return [pk for score, pk in sorted(scores, key=lambda item: (-item[0], str(item[1]))) if score >= 0.25][:20]
 
 
-def search(project, query, limit=5):
-    """Rank within the approved set; callers gain no knowledge browsing permission."""
+def rank_diagnostic_rows(rows, query, limit=5):
+    """Pure relevance ranking within the caller's already authorized publications."""
     limit = max(0, min(limit, 5))
     if not limit:
         return []
@@ -63,20 +64,32 @@ def search(project, query, limit=5):
             terms.update(term[i : i + 2] for i in range(len(term) - 1))
     terms = sorted(terms, key=len, reverse=True)[:40]
     literals = [term for term in terms if re.fullmatch(r"[a-z][a-z0-9_.-]*_[a-z0-9_.-]+", term)]
-    ranked = []
-    for row in approved(project):
-        title, tags, text = row.title.lower(), " ".join(row.tags).lower(), row.content.lower()
-        score = sum(
-            (5 if term in title else 0) + (3 if term in tags else 0) + (1 if term in text else 0) for term in terms
-        )
-        if score:
-            exact = any(
-                re.search(r"(?<![a-z0-9_.-])" + re.escape(term) + r"(?![a-z0-9_.-])", title + "\n" + tags + "\n" + text)
-                for term in literals
+
+    def scored():
+        for row in rows:
+            title, tags, text = row.title.lower(), " ".join(row.tags).lower(), row.content.lower()
+            score = sum(
+                (5 if term in title else 0) + (3 if term in tags else 0) + (1 if term in text else 0) for term in terms
             )
-            ranked.append((exact, score, row))
-    ranked.sort(key=lambda item: (-item[0], -item[1], str(item[2].id)))
-    ids = [str(row.id) for _, _, row in ranked[:limit]]
+            if score:
+                exact = any(
+                    re.search(
+                        r"(?<![a-z0-9_.-])" + re.escape(term) + r"(?![a-z0-9_.-])", title + "\n" + tags + "\n" + text
+                    )
+                    for term in literals
+                )
+                yield (-exact, -score, str(row.id)), row
+
+    return [row for _, row in nsmallest(limit, scored(), key=lambda item: item[0])]
+
+
+def search(project, query, limit=5):
+    """Rank within the approved set; callers gain no knowledge browsing permission."""
+    limit = max(0, min(limit, 5))
+    if not limit:
+        return []
+    query = str(query)[:2000]
+    ids = [str(row.id) for row in rank_diagnostic_rows(approved(project), query, limit)]
     if len(ids) < limit and query.strip():
         try:
             for identity in semantic_ids(project, query):
