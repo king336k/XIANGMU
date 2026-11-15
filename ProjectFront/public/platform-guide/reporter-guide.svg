@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650" viewBox="0 0 1200 650" role="img">
+<title>反馈提交者与采集端用户操作示意图</title>
+<desc>确认平台项目或 DAQ 接收项目正确。；写清发生阶段、现象、复现步骤与影响，不确定模块时如实填写。；检查补充附件后提交，等候平台回执编号；离线保存查看待上报补传。；记录编号并跟进公开进度，需要补证时补充原问题。</desc>
+<rect width="1200" height="650" rx="18" fill="#f4f7f7"/>
+<rect x="0" y="0" width="1200" height="110" rx="18" fill="#164e55"/>
+<rect x="0" y="80" width="1200" height="30" fill="#164e55"/>
+<g font-family="Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+<text x="40" y="43" fill="#b9d9dc" font-size="15">TranscEngram · 角色指南 / 操作示意</text>
+<text x="40" y="82" fill="white" font-size="29" font-weight="700">反馈提交者与采集端用户</text>
+<rect x="40" y="138" width="352" height="142" rx="10" fill="white" stroke="#cfddde"/>
+<circle cx="68" cy="167" r="15" fill="#e2f1ed"/>
+<text x="68" y="173" text-anchor="middle" font-size="17" font-weight="700" fill="#176b59">1</text>
+<text x="94" y="172" font-size="18" fill="#263d42">确认平台项目或 DAQ</text>
+<text x="94" y="197" font-size="18" fill="#263d42">接收项目正确。</text>
+<text x="402" y="219" font-size="23" fill="#769a9d">→</text>
+<rect x="424" y="138" width="352" height="142" rx="10" fill="white" stroke="#cfddde"/>
+<circle cx="452" cy="167" r="15" fill="#e2f1ed"/>
+<text x="452" y="173" text-anchor="middle" font-size="17" font-weight="700" fill="#176b59">2</text>
+<text x="478" y="172" font-size="18" fill="#263d42">写清发生阶段、现象、复现步骤与影</text>
+<text x="478" y="197" font-size="18" fill="#263d42">响，不确定模块时如实填写。</text>
+<text x="786" y="219" font-size="23" fill="#769a9d">→</text>
+<rect x="808" y="138" width="352" height="142" rx="10" fill="white" stroke="#cfddde"/>
+<circle cx="836" cy="167" r="15" fill="#e2f1ed"/>
+<text x="836" y="173" text-anchor="middle" font-size="17" font-weight="700" fill="#176b59">3</text>
+<text x="862" y="172" font-size="18" fill="#263d42">检查补充附件后提交，等候平台回执</text>
+<text x="862" y="197" font-size="18" fill="#263d42">编号；离线保存查看待上报补传。</text>
+<rect x="40" y="308" width="352" height="142" rx="10" fill="white" stroke="#cfddde"/>
+<circle cx="68" cy="337" r="15" fill="#e2f1ed"/>
+<text x="68" y="343" text-anchor="middle" font-size="17" font-weight="700" fill="#176b59">4</text>
+<text x="94" y="342" font-size="18" fill="#263d42">记录编号并跟进公开进度，需要补证</text>
+<text x="94" y="367" font-size="18" fill="#263d42">时补充原问题。</text>
+<rect x="40" y="498" width="1120" height="105" rx="10" fill="#edf3f0"/>
+<text x="60" y="529" font-size="17" font-weight="700" fill="#176b59">完成前核对</text>
+<text x="60" y="555" font-size="18" fill="#334c49">采集员是来源署名，不是独立平台业务岗位。 反馈已接收不等于设备已修复或测试已通过。</text>
+<text x="40" y="632" font-size="14" fill="#6d8083">按 2026/11/15 平台操作整理 · 示意图不包含真实业务数据 · 具体权限以当前账号为准</text>
+</g></svg>
