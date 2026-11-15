@@ -55,7 +55,8 @@ export function VerificationProgress({ round, defectStatus }: { round: Verificat
             className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-11 ${tone}`}
           >
             <span className="font-semibold">{complete ? "✓" : String(index + 1)}</span>
-            <span>{active ? currentLabel : label}</span>
+            <span>{label}</span>
+            {active && currentLabel !== label && <span className="text-11">{currentLabel}</span>}
           </li>
         );
       })}

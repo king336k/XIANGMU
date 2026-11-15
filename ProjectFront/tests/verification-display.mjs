@@ -356,6 +356,9 @@ test("回归仅有安排、执行、验收三阶段，填写结果后仍需提�
     });
     const steps = descendants(tree).filter((node) => node.type === "li");
     assert.equal(steps.length, 3);
+    for (const label of ["安排测试", "执行测试", "验收关闭"]) {
+      assert.ok(descendants(tree).some((node) => node.type === "span" && node.props.children === label));
+    }
     const active = steps.find((node) => node.props["aria-current"] === "step");
     if (state === "tested")
       assert.equal(descendants(active).findLast((node) => node.type === "span").props.children, "提交验收");
