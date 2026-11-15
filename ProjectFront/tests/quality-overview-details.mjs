@@ -212,3 +212,27 @@ test("已关闭缺陷卡片和人工结果分布均打开统一明细弹窗", ()
   manual.props.onSelect("failed");
   assert.deepEqual(selection, { kind: "manual", title: "人工验证 · 失败", result: "failed" });
 });
+
+test("缺陷用例执行明细打开原缺陷，普通执行仍打开原计划", async () => {
+  const source = load("quality-overview-details", {
+    "./api": {
+      qualityApi: {
+        read: async () => ({
+          count: 2,
+          results: [
+            { id: "new", defect_id: "defect-1", plan_id: "plan-1", case_title: "缺陷用例", result: "passed" },
+            { id: "old", plan_id: "ordinary", case_title: "普通用例", result: "passed" },
+          ],
+        }),
+      },
+    },
+  });
+  const data = await source.loadOverviewDetails("/q/", { kind: "executions", title: "通过", result: "passed" }, 1, "");
+  assert.deepEqual(
+    data.results.map((row) => row.target),
+    [
+      { kind: "defect", id: "defect-1" },
+      { kind: "plan", id: "ordinary" },
+    ]
+  );
+});

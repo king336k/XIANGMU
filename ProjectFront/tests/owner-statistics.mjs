@@ -197,7 +197,7 @@ test("owner indicators cover same metrics as each statistic source and distingui
     "total_work_items",
   ])
     assert.ok(analyticsOwnerMetrics.some((item) => item.key === key));
-  assert.equal(new Set(periodOwnerMetrics.map((item) => item.key)).size, 12);
+  assert.equal(new Set(periodOwnerMetrics.map((item) => item.key)).size, 13);
   assert.ok(periodOwnerMetrics.some((item) => item.key === "verification_case_executions"));
 });
 

@@ -1,6 +1,7 @@
 """Paged owner attribution over the exact authorized sources used by statistic cards."""
 
 from types import SimpleNamespace
+from collections import Counter
 from django.db.models import F, Q, Count, OuterRef, Subquery, Value, UUIDField, CharField, Case, When, FilteredRelation
 from django.db.models.functions import Coalesce, Cast
 from django.shortcuts import get_object_or_404
@@ -219,6 +220,25 @@ def quality_queries(project, params=None):
                 else rows.filter(owner_result=suffix)
             )
             result[f"{prefix}_{suffix}"] = specification(selected, "owner_executor", "owner_result", kind, basis)
+    if item_kind == "item":
+        snapshots = DefectVerificationCase.objects.filter(verification__in=case_rounds)
+        latest_snapshot_execution = DefectVerificationCaseExecution.objects.filter(item_id=OuterRef("pk")).order_by("-created_at", "-id")
+        snapshots = snapshots.annotate(
+            latest_execution=Subquery(latest_snapshot_execution.values("pk")[:1]),
+            owner_result=Coalesce(Subquery(latest_snapshot_execution.values("result")[:1]), Value("pending")),
+            owner_executor=Case(
+                When(latest_execution__isnull=True, then=F("verification__plan__assignee_id")),
+                default=Subquery(latest_snapshot_execution.values("created_by_id")[:1]), output_field=UUIDField(),
+            ),
+        )
+        unmapped = items.exclude(pk__in=DefectVerificationCase.objects.filter(source_plan_item__isnull=False).values("source_plan_item_id"))
+        for suffix in ["total", "executed", "passed", "failed", "blocked", "inconclusive", "skipped", "pending"]:
+            parts = []
+            for rows, kind in [(unmapped, "item"), (snapshots, "verification_case")]:
+                selected = rows if suffix == "total" else rows.exclude(owner_result="pending") if suffix == "executed" else rows.filter(owner_result=suffix)
+                parts.append(specification(selected, "owner_executor", "owner_result", kind, result["summary_" + suffix]["ownership_basis"]))
+            result["summary_" + suffix] = {"parts": parts}
+    result["execution_count"] = {"parts": [result["execution_count"], result["case_execution_count"]]}
     result["manual_accepted"] = specification(
         manual_rounds.filter(status="accepted"),
         "owner_executor",
@@ -282,6 +302,14 @@ def source_spec(view, data, project):
         options.is_valid(raise_exception=True)
         scope = period_querysets(project, options.validated_data)
         queries = {**scope["detail_queries"], **scope["current_queries"]}
+        if metric == "all_test_executions":
+            parts = []
+            for key, kind in [("test_executions", "execution"), ("verification_case_executions", "case_execution")]:
+                rows = queries[key]
+                if options.validated_data.get("result"):
+                    rows = rows.filter(result=options.validated_data["result"])
+                parts.append(specification(rows, "created_by_id", "result", kind, "区间实际执行记录，排除旧执行快照副本。"))
+            return {"parts": parts}
         if metric not in queries:
             raise serializers.ValidationError({"metric": "请选择有效工作报表指标。"})
         query = queries[metric]
@@ -363,7 +391,7 @@ def source_spec(view, data, project):
             "历史用例执行按每次实际执行人归属。",
         ),
         "total_case_round_executions": (
-            DefectVerificationCaseExecution.objects.all(),
+            DefectVerificationCaseExecution.objects.filter(source_execution__isnull=True),
             "created_by_id",
             "result",
             "case_execution",
@@ -528,6 +556,56 @@ def detail_row(row, kind, slug):
     }
 
 
+def mixed_owner_response(spec, data, slug, project):
+    parts = spec["parts"]
+    page = data["page"]
+    per_page = data.get("per_page", 20 if "owner_id" in data else 10)
+    offset = (page - 1) * per_page
+    total = sum(part["query"].order_by().values("pk").distinct().count() for part in parts)
+    common = {"page": page, "per_page": per_page, "total": total, "collaborative": False,
+              "ownership_basis": parts[0]["ownership_basis"]}
+    statuses = {}
+    records = []
+    record_count = 0
+    for part in parts:
+        rows = part["query"].order_by().distinct().annotate(
+            stat_owner=F(part["owner"]),
+            stat_status=Coalesce(Cast(F(part["status"]), CharField()), Value("none"), output_field=CharField()),
+        )
+        if data.get("owner_status"):
+            rows = rows.filter(stat_status=data["owner_status"])
+        if "owner_id" in data:
+            rows = rows.filter(stat_owner=None if data["owner_id"] == "unassigned" else data["owner_id"])
+            record_count += rows.count()
+            relations = {"item": ["revision", "plan"], "execution": ["item__revision", "item__plan"],
+                         "verification_case": ["verification__defect"], "case_execution": ["item__verification__defect"]}
+            rows = rows.select_related("project", *relations.get(part["kind"], []))
+            for row in rows.order_by("-created_at", "pk")[:offset + per_page]:
+                records.append((row.created_at, str(row.pk), detail_row(row, part["kind"], slug)))
+        else:
+            for row in rows.values("stat_owner", "stat_status").annotate(count=Count("pk", distinct=True)):
+                key = str(row["stat_owner"] or "unassigned")
+                statuses.setdefault(key, Counter())[row["stat_status"]] += row["count"]
+    if "owner_id" in data:
+        records.sort(key=lambda entry: (-entry[0].timestamp(), entry[1]))
+        return Response({**common, "count": record_count, "results": [entry[2] for entry in records[offset:offset + per_page]]})
+    groups = sorted(statuses, key=lambda key: (-sum(statuses[key].values()), key))
+    selected = groups[offset:offset + per_page]
+    users = {str(user.pk): user for user in User.objects.filter(pk__in=[key for key in selected if key != "unassigned"])}
+    active = set(str(value) for value in ProjectMember.objects.filter(
+        project=project, member_id__in=[key for key in selected if key != "unassigned"], is_active=True,
+        member__is_active=True, member__member_workspace__workspace_id=project.workspace_id,
+        member__member_workspace__is_active=True,
+    ).values_list("member_id", flat=True))
+    results = []
+    for key in selected:
+        user = users.get(key)
+        results.append({"owner_id": key, "name": (user.display_name or user.first_name or user.username) if user else "未指派",
+                        "active": bool(user and key in active), "count": sum(statuses[key].values()),
+                        "statuses": [{"status": status, "count": count} for status, count in sorted(statuses[key].items())]})
+    return Response({**common, "count": len(groups), "results": results})
+
+
 class OwnerStatistics(BaseAPIView):
     def get(self, request, slug=None, workspace_slug=None, project_id=None, **kwargs):
         self.scope_slug = slug or workspace_slug
@@ -560,6 +638,8 @@ class OwnerStatistics(BaseAPIView):
         elif data["source"] in {"defects", "quality", "period"}:
             raise serializers.ValidationError({"source": "此指标需要项目范围。"})
         spec = source_spec(self, data, project)
+        if "parts" in spec:
+            return mixed_owner_response(spec, data, self.scope_slug, project)
         if spec["kind"] == "work":
             spec["query"] = spec["query"].annotate(
                 active_owner=FilteredRelation("issue_assignee", condition=Q(issue_assignee__deleted_at__isnull=True))

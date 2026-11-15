@@ -108,7 +108,11 @@ export async function loadOverviewDetails(
           title: row.case_title,
           result: row.result,
           description: `${row.plan_name} · ${row.build} · ${row.actual_result || "未补充实际表现"}`,
-          target: row.plan_id ? { kind: "plan", id: row.plan_id } : undefined,
+          target: row.defect_id
+            ? { kind: "defect", id: row.defect_id }
+            : row.plan_id
+              ? { kind: "plan", id: row.plan_id }
+              : undefined,
         };
       }
       if (selection.kind === "manual") {

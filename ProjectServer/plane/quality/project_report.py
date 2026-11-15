@@ -21,7 +21,7 @@ from .models import (
     DefectVerificationResult,
     DefectVerificationCaseExecution,
 )
-from .views import QualityView, current_plans
+from .views import QualityView, current_plans, CombinedExecutions, execution_record_data
 from .permissions import ROLE_NAMES
 
 
@@ -41,6 +41,7 @@ class PeriodInput(serializers.Serializer):
             "defects_closed",
             "defects_reopened",
             "test_executions",
+            "all_test_executions",
             "verification_case_executions",
             "manual_executions",
             "plans_confirmed",
@@ -216,6 +217,22 @@ class ProjectPeriodReport(QualityView):
         current_queries = scope["current_queries"]
         if data.get("detail"):
             kind = data["detail"]
+            if kind == "all_test_executions":
+                queries = [period_executions, case_verification_executions]
+                if data.get("result"):
+                    queries = [rows.filter(result=data["result"]) for rows in queries]
+                queries = [rows.select_related("project", "created_by", "item__revision", "item__plan") if index == 0
+                           else rows.select_related("project", "created_by", "item__source_revision", "item__verification__plan")
+                           for index, rows in enumerate(queries)]
+                combined = CombinedExecutions(*queries)
+                offset = (data["page"] - 1) * data["per_page"]
+                records = []
+                for value in combined[offset:offset + data["per_page"]]:
+                    row = execution_record_data(value)
+                    records.append({"id": row["id"], "title": row["case_title"], "result": row["result"],
+                                    "path": f"defects?defect={row['defect_id']}" if row.get("defect_id") else f"quality?tab=plans&plan={row['plan_id']}",
+                                    "kind": "缺陷用例执行" if row.get("defect_id") else "测试执行"})
+                return Response({"count": combined.count(), "results": records, "page": data["page"], "per_page": data["per_page"]})
             if kind == "workload":
                 resource = data.get("resource")
                 status = data.get("status")

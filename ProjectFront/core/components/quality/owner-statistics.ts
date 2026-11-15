@@ -134,6 +134,8 @@ export const ownerKindNames: Record<string, string> = {
   case: "用例",
   item: "本轮用例",
   execution: "执行记录",
+  verification_case: "缺陷回归用例",
+  case_execution: "缺陷用例执行",
   verification: "验证轮次",
   manual_execution: "人工验证",
   project: "项目",

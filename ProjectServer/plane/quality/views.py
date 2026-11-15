@@ -3,6 +3,7 @@ from django.db import transaction
 from django.db.models import F, Prefetch, Q, Exists, OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from rest_framework import serializers
 from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import BasePermission, SAFE_METHODS
@@ -265,26 +266,102 @@ class PlanDetail(QualityView):
         return Response(PlanSerializer(get_object_or_404(plan_queryset(), pk=pk, project_id=self.project_id)).data)
 
 
+class CombinedExecutions:
+    """Page two indexed execution sources without loading their full history."""
+
+    def __init__(self, *querysets, ascending=False):
+        self.querysets = querysets
+        self.ascending = ascending
+
+    def count(self):
+        return sum(query.count() for query in self.querysets)
+
+    def __len__(self):
+        return self.count()
+
+    def __getitem__(self, selected):
+        limit = selected.stop
+        direction = "created_at" if self.ascending else "-created_at"
+        candidates = [row for query in self.querysets for row in query.order_by(direction, "id")[:limit]]
+        candidates.sort(key=lambda row: (
+            row.created_at.timestamp() if self.ascending else -row.created_at.timestamp(), str(row.pk)
+        ))
+        return candidates[selected]
+
+
+def execution_record_data(row):
+    from .models import DefectVerificationCaseExecution
+    if isinstance(row, DefectVerificationCaseExecution):
+        from .defect_verification import case_execution_data
+        from .authorship import authored_metadata
+        return {
+            **case_execution_data(row), **authored_metadata(row),
+            "item_id": str(row.item_id), "defect_id": str(row.item.verification.defect_id),
+            "source": "verification_case", "code": "", "round_no": row.item.verification.round_no,
+            "defect_url": f"/{row.project.workspace.slug}/projects/{row.project_id}/defects?defect={row.item.verification.defect_id}",
+        }
+    return {**ExecutionSerializer(row).data, "source": "plan"}
+
+
+def execution_querysets(project, params, user):
+    """Match execution list filters for public plans and defect-round snapshots."""
+    from .models import DefectVerificationCase, DefectVerificationCaseExecution
+    from .filters import filter_records, SPECS
+    from plane.utils.date_utils import china_date_filter
+    old = TestExecution.objects.filter(project=project).select_related("created_by", "item__revision", "item__plan")
+    new = DefectVerificationCaseExecution.objects.filter(project=project).select_related(
+        "project__workspace", "created_by", "item__source_revision", "item__verification__plan", "item__verification__defect"
+    )
+    if params.get("current_only") == "true":
+        current = current_verifications(project)
+        mapped_items = DefectVerificationCase.objects.filter(source_plan_item__isnull=False).values("source_plan_item_id")
+        latest_old = TestExecution.objects.filter(project=project, item__plan__in=current_plans(project)).exclude(
+            item_id__in=mapped_items
+        ).filter(
+            Q(item__plan__managed=False, item__plan__defect_verification__isnull=True)
+            | Q(round_no=F("item__plan__round_no"))
+        ).order_by("item_id", "-created_at", "-id").distinct("item_id").values("pk")
+        latest_new = DefectVerificationCaseExecution.objects.filter(
+            project=project, item__verification__in=current
+        ).order_by("item_id", "-created_at", "-id").distinct("item_id").values("pk")
+        old = old.filter(pk__in=Subquery(latest_old))
+        new = new.filter(pk__in=Subquery(latest_new))
+    else:
+        new = new.filter(source_execution__isnull=True)
+    # Existing validation and numbered-record matching remain authoritative.
+    old = filter_records(old, params, user)
+    for name, lookup in {
+        "result": "result", "build": "item__verification__fixed_build",
+        "environment": "item__verification__environment", "plan_id": "item__verification__plan_id",
+    }.items():
+        if params.get(name):
+            new = new.filter(**{lookup: SPECS["testexecution"][name][1].run_validation(params[name])})
+    if params.get("created_by_id"):
+        owner = str(user.id) if params["created_by_id"] == "me" else params["created_by_id"]
+        new = new.filter(created_by_id=serializers.UUIDField().run_validation(owner))
+    if params.get("view") == "created_by_me":
+        new = new.filter(created_by=user)
+    dates = {key: serializers.DateField().run_validation(params[key]) for key in ["created_after", "created_before"] if params.get(key)}
+    new = new.filter(**china_date_filter(dates.get("created_after"), dates.get("created_before")))
+    if params.get("search", "").strip():
+        term = params["search"].strip()
+        new = new.filter(Q(item__title__icontains=term) | Q(actual_result__icontains=term) | Q(item__verification__plan__name__icontains=term))
+    if params.get("code") or params.get("number"):
+        # Defect-round executions have no independent public execution number.
+        new = new.none()
+    return old, new
+
+
 class ExecutionList(QualityView):
     def get(self, request, pk=None, **kwargs):
-        project = self.project()
-        qs = TestExecution.objects.filter(project=project).select_related("created_by", "item__revision", "item__plan")
-        if request.query_params.get("current_only") == "true":
-            latest = (
-                TestExecution.objects.filter(project=project, item__plan__in=current_plans(project))
-                .filter(
-                    Q(item__plan__managed=False, item__plan__defect_verification__isnull=True)
-                    | Q(round_no=F("item__plan__round_no"))
-                )
-                .order_by("item_id", "-created_at", "-id")
-                .distinct("item_id")
-                .values("pk")
-            )
-            qs = qs.filter(pk__in=Subquery(latest))
+        old, new = execution_querysets(self.project(), request.query_params, request.user)
         if pk:
             self.obj(PlanItem, pk)
-            qs = qs.filter(item_id=pk)
-        return self.listing(qs, ExecutionSerializer)
+            return self.listing(old.filter(item_id=pk), ExecutionSerializer)
+        combined = CombinedExecutions(old, new, ascending=request.query_params.get("ordering") == "created_at")
+        paginator = QualityPagination()
+        page = paginator.paginate_queryset(combined, request)
+        return paginator.get_paginated_response([execution_record_data(row) for row in page])
 
     @transaction.atomic
     def post(self, request, pk, **kwargs):
@@ -845,7 +922,7 @@ def quality_report(project):
     totals["execution_rate"] = round(totals["executed"] * 100 / totals["total"], 1) if totals["total"] else 0
     totals["pass_rate"] = round(totals["passed"] * 100 / totals["executed"], 1) if totals["executed"] else 0
     cases = TestCase.objects.filter(project=project, archived_at__isnull=True, trashed_at__isnull=True)
-    from .models import DefectVerificationResult
+    from .models import DefectVerificationResult, DefectVerificationCaseExecution
 
     return {
         "summary": totals,
@@ -854,7 +931,9 @@ def quality_report(project):
         "case_count": cases.count(),
         "plan_count": len(plans),
         "historical_plan_count": TestPlan.objects.filter(project=project).count(),
-        "execution_count": TestExecution.objects.filter(project=project).count(),
+        "execution_count": TestExecution.objects.filter(project=project).count() + DefectVerificationCaseExecution.objects.filter(
+            project=project, source_execution__isnull=True
+        ).count(),
         "open_defects": Defect.objects.filter(project=project, archived_at__isnull=True)
         .exclude(status="closed")
         .count(),
@@ -877,15 +956,18 @@ def quality_report(project):
 
 
 def current_verifications(project):
-    from .models import DefectVerification
+    from .models import DefectVerification, DefectVerificationCase
 
     latest_round = (
         DefectVerification.objects.filter(defect_id=OuterRef("defect_id")).order_by("-round_no").values("round_no")[:1]
     )
     stale_cases = PlanItem.objects.filter(plan_id=OuterRef("plan_id")).exclude(revision__version=F("case__version"))
+    stale_round_cases = DefectVerificationCase.objects.filter(verification_id=OuterRef("pk"), source="library").exclude(
+        source_revision__version=F("source_case__version")
+    )
     return (
         DefectVerification.objects.filter(project=project)
-        .annotate(latest_round=Subquery(latest_round), stale_cases=Exists(stale_cases))
+        .annotate(latest_round=Subquery(latest_round), stale_cases=Exists(stale_cases), stale_round_cases=Exists(stale_round_cases))
         .filter(
             round_no=F("latest_round"),
             status__in=["testing", "review", "accepted"],
@@ -894,6 +976,7 @@ def current_verifications(project):
             fixed_build=F("defect__fixed_build"),
             defect__resolved_at__isnull=False,
             stale_cases=False,
+            stale_round_cases=False,
         )
         .filter(Q(resolved_at=F("defect__resolved_at")) | Q(resolved_at__isnull=True))
         .filter(Q(mode="manual") | Q(plan__build=F("fixed_build"), plan__round_no=F("round_no")))

@@ -258,7 +258,9 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
                   count: data.test_results[key] || 0,
                   color: ["#379b76", "#c94c5c", "#db8650", "#b6a05c", "#8b9ba8"][i],
                 }))}
-              onSelect={(result) => show(`测试执行 · ${resultNames[result]}`, { detail: "test_executions", result })}
+              onSelect={(result) =>
+                show(`测试执行 · ${resultNames[result]}`, { detail: "all_test_executions", result })
+              }
             />
             {data.manual_results && (
               <Distribution
@@ -358,7 +360,7 @@ export const ProjectPeriodReport = observer(function ProjectPeriodReport() {
                                 query
                               )
                             );
-                            next.set("owner_metric", "test_executions");
+                            next.set("owner_metric", "all_test_executions");
                             next.set("owner_id", row.user_id);
                             next.set("owner_name", row.name);
                             next.set("owner_detail_page", "1");

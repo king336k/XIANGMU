@@ -60,7 +60,8 @@ export const analyticsOwnerMetrics = [
 export const periodOwnerMetrics = [
   { key: "work_created", label: "新增任务与需求" },
   { key: "work_completed", label: "完成任务与需求" },
-  { key: "test_executions", label: "测试执行" },
+  { key: "test_executions", label: "计划用例执行" },
+  { key: "all_test_executions", label: "全部用例执行" },
   { key: "verification_case_executions", label: "缺陷用例验证" },
   { key: "manual_executions", label: "人工验证" },
   { key: "plans_confirmed", label: "确认测试计划" },

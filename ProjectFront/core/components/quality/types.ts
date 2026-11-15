@@ -28,6 +28,9 @@ export type RegressionRequest = {
   approved_verification: string;
 };
 export type Execution = {
+  source?: "plan" | "verification_case";
+  defect_id?: string;
+  defect_url?: string;
   reason_category: "" | "recollection" | "environment" | "other";
   next_action: string;
   code?: string;

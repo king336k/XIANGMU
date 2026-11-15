@@ -234,7 +234,12 @@ export function ExecutionList({
               {e.case_title} <span className="font-normal text-tertiary">v{e.case_version}</span>
             </h2>
             <Badge value={e.result} />
-            {e.result === "failed" && canWrite && (
+            {e.defect_url && (
+              <Link to={e.defect_url} className="text-12 text-accent-primary hover:underline">
+                查看原缺陷
+              </Link>
+            )}
+            {e.result === "failed" && !e.defect_id && canWrite && (
               <Button variant="neutral-primary" disabled={busy} onClick={() => void onDefect(e)}>
                 失败提缺陷
               </Button>
