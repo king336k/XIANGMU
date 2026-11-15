@@ -31,6 +31,7 @@ function detail(tab, writable = false, extra = {}) {
   const api = load("defect-detail", {
     react: { ...React, useState: (value) => [index++ === 3 ? tab : value, () => {}] },
     "./shared": { Modal: "Modal", Badge: "Badge" },
+    "./record-progress": { RecordProgress: "RecordProgress" },
     "@plane/utils": { renderNumericDateTime: () => "2026/11/12 23:35" },
     "./types": { can: () => writable, severityNames: { major: "严重" } },
     "./defect-disposition": { resolutionNames: {} },
@@ -208,4 +209,14 @@ test("缺陷表格与窄屏列表都保留采集员和时间", () => {
     (n) => n.type === "p" && text(n).includes("DAQ 上报 · 采集员：caiji1 · 2026/11/12 23:35")
   );
   assert.equal(labels.length, 2);
+});
+
+test("切到回归页时保留阶段图组件与进度入口，避免重新挂载强制跳页", () => {
+  for (const tab of ["diagnosis", "regression", "solution", "history"]) {
+    for (const status of ["in_progress", "closed"]) {
+      const progress = walk(detail(tab, false, { status }).tree).filter((node) => node.type === "RecordProgress");
+      assert.equal(progress.length, 1, `${status}/${tab} must retain the same progress component`);
+      assert.equal(progress[0].props.defectFlow.activeTab, tab);
+    }
+  }
 });
