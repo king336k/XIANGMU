@@ -51,9 +51,19 @@ export function RecordProgress({
     context: Context;
     activeTab: string;
     onNavigate: (tab: string) => void;
+    expanded: boolean;
+    onExpandedChange: (expanded: boolean) => void;
   };
 }) {
   const [mode, setMode] = useState("details");
+  const inlineStages = defectFlow?.expanded ?? false;
+  const selectMode = (nextMode: string) => {
+    if (nextMode === "stages" && kind === "defect" && defectFlow) {
+      defectFlow.onExpandedChange(!inlineStages);
+      return;
+    }
+    setMode(nextMode);
+  };
   const pagination = useCollectionPagination(`${base}:history:${kind}:${id}`);
   const query = new URLSearchParams(pagination.query);
   query.set("kind", kind);
@@ -84,14 +94,28 @@ export function RecordProgress({
           }
         >
           {modes.map((item) => (
-            <CustomMenu.MenuItem key={item.key} onClick={() => setMode(item.key)}>
+            <CustomMenu.MenuItem key={item.key} onClick={() => selectMode(item.key)}>
               <item.icon className="size-3.5" />
               {item.title}
             </CustomMenu.MenuItem>
           ))}
         </CustomMenu>
       </div>
-      {mode !== "details" && (
+      {inlineStages && kind === "defect" && defectFlow && (
+        <div className="mt-2 rounded-md border border-subtle bg-layer-1 p-3">
+          <DefectFlowGuidance
+            base={base}
+            value={defectFlow.value}
+            context={defectFlow.context}
+            activeTab={defectFlow.activeTab}
+            onNavigate={(tab) => {
+              selectMode("details");
+              defectFlow.onNavigate(tab);
+            }}
+          />
+        </div>
+      )}
+      {mode !== "details" && !(mode === "stages" && kind === "defect" && defectFlow) && (
         <Modal title="进度与历程" width="wide" onClose={() => setMode("details")}>
           <nav aria-label="进度展示方式" className="platform-selection-group">
             {modes.map((item) => (
@@ -99,7 +123,7 @@ export function RecordProgress({
                 key={item.key}
                 type="button"
                 aria-current={mode === item.key ? "page" : undefined}
-                onClick={() => setMode(item.key)}
+                onClick={() => selectMode(item.key)}
                 className="flex items-center gap-2 text-13"
               >
                 <item.icon className="size-3.5" />
@@ -120,19 +144,7 @@ export function RecordProgress({
               正在读取…
             </p>
           )}
-          {mode === "stages" && kind === "defect" && defectFlow && (
-            <DefectFlowGuidance
-              base={base}
-              value={defectFlow.value}
-              context={defectFlow.context}
-              activeTab={defectFlow.activeTab}
-              onNavigate={(tab) => {
-                setMode("details");
-                defectFlow.onNavigate(tab);
-              }}
-            />
-          )}
-          {data && mode === "stages" && kind !== "defect" && (
+          {data && mode === "stages" && (
             <ol aria-label="业务阶段图" className="m-0 flex list-none flex-wrap gap-3 p-0">
               {data.stages.map((stage, index) => {
                 const state = stage.key === data.current ? "current" : stage.state || "pending";

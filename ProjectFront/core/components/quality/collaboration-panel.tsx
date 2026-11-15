@@ -236,7 +236,7 @@ export function CollaborationPanel({
                 {rows.map((row) => (
                   <li key={row.id} className="m-0 list-none border-l-2 border-subtle pl-3 text-12">
                     <p className="m-0 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                      <strong className="font-medium">{row.actor}</strong>
+                      <strong className="text-14 font-semibold">{row.actor}</strong>
                       <span className={`font-medium ${row.tone}`}>{row.action}</span>
                       <time className="text-11 text-tertiary" dateTime={row.at}>
                         {renderNumericDateTime(row.at)}

@@ -41,7 +41,15 @@ const data = {
 function component(
   initial,
   sourceData = data,
-  defectFlow = { value: { id: "d" }, context: {}, activeTab: "overview", onNavigate() {} }
+  defectFlow = {
+    value: { id: "d" },
+    context: {},
+    activeTab: "overview",
+    expanded: false,
+    onExpandedChange() {},
+    onNavigate() {},
+  },
+  kind = "defect"
 ) {
   const states = [],
     requests = [],
@@ -85,12 +93,12 @@ function component(
     requests,
     render() {
       index = 0;
-      return exp.RecordProgress({ base: "/q/", kind: "defect", id: "d", projectUrl: "/w/p/P/", defectFlow });
+      return exp.RecordProgress({ base: "/q/", kind, id: "d", projectUrl: "/w/p/P/", defectFlow });
     },
   };
 }
-test("默认仅进度入口，四视图在宽弹窗切换且不挤压标题", () => {
-  const h = component("details");
+test("默认仅显示进度入口，非缺陷的阶段图保留宽弹窗", () => {
+  const h = component("details", data, null, "plan");
   let tree = h.render();
   assert.ok(!nodes(tree).some((n) => n.type === Modal));
   assert.equal(h.requests[0], null);
@@ -102,21 +110,58 @@ test("默认仅进度入口，四视图在宽弹窗切换且不挤压标题", ()
   assert.equal(modal.props.width, "wide");
   assert.equal(nodes(modal).filter((n) => n.type === "button" && n.props["aria-current"] === "page").length, 1);
 });
-test("缺陷阶段图仅在进度与历程弹窗中显示", () => {
-  const h = component("details", data, { value: {}, context: {}, activeTab: "diagnosis", onNavigate() {} });
+test("缺陷默认不显示流程图，进度菜单选择阶段图时嵌入详情；其他视图保留弹窗", () => {
+  let expandedState = false;
+  const changes = [];
+  const flow = {
+    value: {},
+    context: {},
+    activeTab: "diagnosis",
+    get expanded() {
+      return expandedState;
+    },
+    onExpandedChange(value) {
+      expandedState = value;
+      changes.push(value);
+    },
+    onNavigate() {},
+  };
+  const h = component("details", data, flow);
   assert.equal(nodes(h.render()).filter((n) => n.type === Flow).length, 0);
   nodes(h.render())
     .find((n) => n.type === Item && n.key === "stages")
     .props.onClick();
-  const modal = nodes(h.render()).find((n) => n.type === Modal);
-  assert.equal(nodes(modal).filter((n) => n.type === Flow).length, 1);
+  assert.equal(expandedState, true);
+  assert.ok(h.requests.every((request) => request === null || !String(request).includes("record-progress")));
+  const expanded = component("details", data, { ...flow, expanded: true }).render();
+  assert.equal(nodes(expanded).filter((n) => n.type === Flow).length, 1);
+  assert.equal(
+    nodes(expanded).some((n) => n.type === Modal),
+    false
+  );
+  nodes(expanded)
+    .find((n) => n.type === Item && n.key === "stages")
+    .props.onClick();
+  assert.equal(expandedState, false);
+  assert.deepEqual(changes, [true, false]);
+  const timeline = component("details", data, flow);
+  nodes(timeline.render())
+    .find((n) => n.type === Item && n.key === "timeline")
+    .props.onClick();
+  assert.ok(nodes(timeline.render()).some((n) => n.type === Modal));
+  const plan = component("details", data, null, "plan");
+  nodes(plan.render())
+    .find((n) => n.type === Item && n.key === "stages")
+    .props.onClick();
+  assert.equal(nodes(plan.render()).filter((n) => n.props?.["data-stage"]).length, 4);
+  assert.ok(nodes(plan.render()).some((n) => n.type === Modal));
 });
-test("阶段仅根据服务端本轮state显示已完成，重开后未到达不冒充完成", () => {
-  const tree = component("stages").render();
+test("非缺陷对象的阶段图仍使用原来的服务端阶段数据", () => {
+  const tree = component("stages", data, null, "plan").render();
   const modal = nodes(tree).find((n) => n.type === Modal);
   assert.ok(modal);
-  assert.equal(nodes(modal).filter((n) => n.type === Flow).length, 1);
-  assert.equal(nodes(modal).filter((n) => n.props?.["data-stage"]).length, 0);
+  assert.equal(nodes(modal).filter((n) => n.type === Flow).length, 0);
+  assert.equal(nodes(modal).filter((n) => n.props?.["data-stage"]).length, 4);
 });
 test("处理历程按真实日期分组不重复编号，历史折叠最新展开，保留具体动作", () => {
   const tree = component("timeline").render();
@@ -205,7 +250,7 @@ test("时间轴不把无效日期绘制为NaN，也不把单日期当虚构起�
   assert.match(barFor("waiting").props.className, /bg-layer-1/);
 });
 
-test("已完成阶段只使用API事实，关闭弹窗回原页面而不触发导航", () => {
+test("缺陷内嵌阶段图使用API事实并可折叠回详情", () => {
   const completed = {
     ...data,
     current: "resolved",
@@ -215,15 +260,20 @@ test("已完成阶段只使用API事实，关闭弹窗回原页面而不触发�
       { key: "resolved", name: "待回归", state: "current" },
     ],
   };
-  const h = component("stages", completed);
+  const flow = {
+    value: { id: "d" },
+    context: {},
+    activeTab: "regression",
+    expanded: true,
+    onExpandedChange() {},
+    onNavigate() {},
+  };
+  const h = component("details", completed, flow);
   let tree = h.render();
   assert.equal(nodes(tree).filter((n) => n.type === Flow).length, 1);
-  nodes(tree)
-    .find((n) => n.type === Modal)
-    .props.onClose();
-  tree = h.render();
   assert.ok(!nodes(tree).some((n) => n.type === Modal));
-  assert.equal(h.requests.at(-1), null);
+  assert.equal(nodes(tree).filter((n) => n.type === Flow).length, 1);
+  assert.ok(h.requests.every((request) => request === null || !String(request).includes("record-progress")));
 });
 
 test("缺少独立状态记录时明确提示未单独记录，不冒充完成", () => {
@@ -236,6 +286,6 @@ test("缺少独立状态记录时明确提示未单独记录，不冒充完成",
       state: s.key === "closed" ? "current" : s.key === "in_progress" ? "skipped" : "completed",
     })),
   };
-  const tree = component("stages", closed).render();
-  assert.equal(nodes(tree).filter((n) => n.type === Flow).length, 1);
+  const tree = component("stages", closed, null, "plan").render();
+  assert.equal(nodes(tree).filter((n) => n.props?.["data-state"] === "skipped").length, 1);
 });

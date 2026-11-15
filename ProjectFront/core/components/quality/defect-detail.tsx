@@ -83,6 +83,9 @@ export function DefectDetail({
   const [reassigning, setReassigning] = useState(false);
   const [property, setProperty] = useState<DefectQuickField>();
   const [activeTab, setActiveTab] = useState(value.source_kind === "daq" ? "diagnosis" : "overview");
+  const [flowExpanded, setFlowExpanded] = useState(false);
+  const canManageDisposition =
+    context.is_manager && value.status !== "closed" && !value.archived_at && value.resolution_kind === "fixed";
   const canEditReport =
     can(context, "report") &&
     value.created_by_id === context.user_id &&
@@ -171,26 +174,36 @@ export function DefectDetail({
               )}
             </div>
           </div>
-          {activeTab !== "regression" && (
-            <div className="flex flex-wrap items-center justify-between gap-2 text-12 text-secondary">
-              <span>
-                {value.source_kind === "daq" ? "DAQ 上报" : value.source_kind === "test" ? "测试提报" : "平台新建"} ·{" "}
-                {value.source_kind === "daq" ? "采集员" : "创建人"}：
-                {(value.source_kind === "daq" ? value.reporter?.username : undefined) ||
-                  value.created_by_name ||
-                  "未记录"}
-                {value.created_at ? ` · ${renderNumericDateTime(value.created_at)}` : ""}
-              </span>
-              <RecordProgress
-                base={base}
-                kind="defect"
-                id={value.id}
-                projectUrl={projectUrl}
-                defectFlow={{ value, context, activeTab, onNavigate: setActiveTab }}
-              />
-            </div>
-          )}
-          {activeTab !== "regression" && (
+          {activeTab !== "regression" &&
+            (context.is_manager || context.is_administrator) &&
+            value.status !== "closed" &&
+            !value.archived_at && (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-12 text-secondary">
+                <span>
+                  {value.source_kind === "daq" ? "DAQ 上报" : value.source_kind === "test" ? "测试提报" : "平台新建"} ·{" "}
+                  {value.source_kind === "daq" ? "采集员" : "创建人"}：
+                  {(value.source_kind === "daq" ? value.reporter?.username : undefined) ||
+                    value.created_by_name ||
+                    "未记录"}
+                  {value.created_at ? ` · ${renderNumericDateTime(value.created_at)}` : ""}
+                </span>
+                <RecordProgress
+                  base={base}
+                  kind="defect"
+                  id={value.id}
+                  projectUrl={projectUrl}
+                  defectFlow={{
+                    value,
+                    context,
+                    activeTab,
+                    onNavigate: setActiveTab,
+                    expanded: flowExpanded,
+                    onExpandedChange: setFlowExpanded,
+                  }}
+                />
+              </div>
+            )}
+          {activeTab !== "regression" && canManageDisposition && (
             <details className="text-12 text-secondary">
               <summary className="cursor-pointer">更多处理</summary>
               <div className="mt-2">

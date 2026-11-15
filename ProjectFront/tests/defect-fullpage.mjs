@@ -66,6 +66,16 @@ test("缺陷详情使用整页视觉，回归区占满卡片且没有右属性�
   assert.ok(nodes.some((node) => node.props?.["aria-label"] === "缺陷详情内容"));
   assert.ok(!nodes.some((node) => node.props?.children === "编辑缺陷"));
 });
+test("更多处理入口仅在经理可处理且分类为fixed时显示", () => {
+  const hasDisposition = (writable, extra = {}) =>
+    walk(detail("overview", writable, { resolution_kind: "fixed", ...extra }).tree).some(
+      (node) => node.props?.children === "更多处理"
+    );
+  assert.equal(hasDisposition(true), true);
+  assert.equal(hasDisposition(false), false);
+  assert.equal(hasDisposition(true, { status: "closed" }), false);
+  assert.equal(hasDisposition(true, { resolution_kind: "duplicate" }), false);
+});
 test("非回归页保留属性和授权后的编辑功能，只读账号没有保存入口", () => {
   const nodes = walk(detail("overview", true).tree);
   assert.ok(nodes.some((node) => node.type === "aside"));
@@ -160,16 +170,16 @@ const text = (node) =>
         ? node.map(text).join("")
         : text(node.props?.children);
 
-test("缺陷标题下方明确区分DAQ采集员、平台创建人与测试提报", () => {
+test("缺陷详情顶部不重复展示来源长文本", () => {
   const daq = text(
     detail("overview", false, { source_kind: "daq", created_by_name: "反馈服务", reporter: { username: "caiji1" } })
       .tree
   );
-  assert.match(daq, /DAQ 上报 · 采集员：caiji1 · 2026\/11\/12 23:35/);
+  assert.doesNotMatch(daq, /DAQ 上报.*caiji1/);
   const manual = text(detail("overview", false, { source_kind: "manual", created_by_name: "张工" }).tree);
-  assert.match(manual, /平台新建 · 创建人：张工 · 2026\/11\/12 23:35/);
+  assert.doesNotMatch(manual, /平台新建.*张工/);
   const fromTest = text(detail("overview", false, { source_kind: "test", created_by_name: "测试员" }).tree);
-  assert.match(fromTest, /测试提报 · 创建人：测试员/);
+  assert.doesNotMatch(fromTest, /测试提报.*测试员/);
 });
 
 test("缺陷表格与窄屏列表都保留采集员和时间", () => {
