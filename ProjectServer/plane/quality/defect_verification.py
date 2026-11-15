@@ -1064,7 +1064,10 @@ class DefectVerificationWorkflow(QualityView):
             new_assignee = row.plan.assignee
             new_name = (new_assignee.display_name or new_assignee.username) if new_assignee else "未安排"
             detail = f"{old_name} → {new_name}"
-        audit(defect, request.user, f"{label}，验证第{row.round_no}轮：{detail}", before)
+        note = f"{label}，验证第{row.round_no}轮"
+        if detail.strip():
+            note += f"：{detail.strip()}"
+        audit(defect, request.user, note, before)
         return Response(payload(defect, self))
 
 

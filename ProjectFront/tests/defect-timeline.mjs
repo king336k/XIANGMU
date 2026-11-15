@@ -24,7 +24,12 @@ function render(events, comments, value = {}) {
     if (id === "react") return { useState: (v) => [v, () => {}] };
     if (id === "lodash-es") return { sortBy: (rows, key) => rows.toSorted((a, b) => key(a) - key(b)) };
     if (id === "@plane/utils") return { renderNumericDateTime: String };
-    if (id === "./types") return { can: () => false, statusNames: { open: "待处理", in_progress: "处理中" } };
+    if (id === "./types")
+      return {
+        can: () => false,
+        statusNames: { open: "待处理", in_progress: "处理中" },
+        resultNames: { passed: "通过", failed: "失败", blocked: "阻塞", inconclusive: "无法判定", skipped: "跳过" },
+      };
     if (id === "swr")
       return {
         default: (url) => ({
@@ -117,6 +122,35 @@ test("通过和返修都有语义色且保留动作文字", () => {
   const spans = nodes(tree).filter((n) => n.type === "span");
   assert.ok(spans.some((n) => n.props.className?.includes("text-success-primary")));
   assert.ok(spans.some((n) => n.props.className?.includes("text-danger-primary") && n.props.children === "退回修复"));
+});
+test("回归动作展示结果语义色，旧空说明冒号清理但不改历史数据", () => {
+  const input = [
+    { ...events[0], id: "case", note: "执行用例第2轮「采集检查」：passed" },
+    { ...events[0], id: "failed", note: "执行用例第2轮「遥操检查」：failed" },
+    { ...events[0], id: "submit", note: "提交验证结果，验证第2轮：" },
+    { ...events[0], id: "closed", note: "验收关闭，验证第2轮：" },
+    { ...events[0], id: "assign", note: "指派测试员，验证第2轮：test → tester2" },
+  ];
+  const tree = render(input, []);
+  const spans = nodes(tree).filter((node) => node.type === "span");
+  assert.ok(
+    spans.some((node) => node.props.children === "执行用例" && node.props.className.includes("text-success-primary"))
+  );
+  assert.ok(
+    spans.some((node) => node.props.children === "执行用例" && node.props.className.includes("text-danger-primary"))
+  );
+  assert.ok(
+    spans.some(
+      (node) => node.props.children === "提交验证结果" && node.props.className.includes("text-warning-primary")
+    )
+  );
+  const text = nodes(tree)
+    .flatMap((node) => (typeof node.props?.children === "string" ? [node.props.children] : []))
+    .join(" ");
+  assert.ok(text.includes("执行用例第2轮「采集检查」：通过"));
+  assert.ok(!text.includes("验证第2轮： "));
+  assert.ok(text.includes("test → tester2"));
+  assert.equal(input[2].note, "提交验证结果，验证第2轮：");
 });
 
 test("DAQ创建记录显示真实采集员和问题标题，不再展示服务账号和技术说明", () => {

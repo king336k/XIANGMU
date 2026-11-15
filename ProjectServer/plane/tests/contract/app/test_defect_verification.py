@@ -949,3 +949,22 @@ def test_reassign_verification_moves_todos_and_rejects_stale_or_revoked_actor(se
         format="json",
     )
     assert response.status_code == 403
+
+
+def test_optional_workflow_comment_does_not_leave_dangling_colon(session_client, verification):
+    base, cases, defects, tester, manager = verification
+    defect = defects[0]
+    row = configure(session_client, base, defect).data['current']
+    session_client.force_authenticate(tester)
+    row = session_client.post(
+        base + f'defects/{defect.id}/verification/result/',
+        {'expected_version': row['version'], 'request_id': str(uuid4()), 'result': 'passed',
+         'actual_result': '人工测试通过', 'step_results': [{'result': 'passed', 'actual': '通过'}]},
+        format='json',
+    ).data['current']
+    row = workflow(session_client, base, defect, row, 'submit').data['current']
+    assert defect.events.latest('created_at').note == '提交验证结果，验证第1轮'
+    session_client.force_authenticate(manager)
+    response = workflow(session_client, base, defect, row, 'accept', comment='  ')
+    assert response.status_code == 200, response.content
+    assert defect.events.latest('created_at').note == '验收关闭，验证第1轮'

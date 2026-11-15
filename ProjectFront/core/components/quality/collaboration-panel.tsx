@@ -1,7 +1,7 @@
 import { sortBy } from "lodash-es";
 import { renderNumericDateTime } from "@plane/utils";
 // SPDX-License-Identifier: AGPL-3.0-only
-import { can, statusNames } from "./types";
+import { can, statusNames, resultNames } from "./types";
 import { useState } from "react";
 import useSWR from "swr";
 import { Button } from "@plane/ui";
@@ -124,17 +124,25 @@ export function CollaborationPanel({
   const timeline = sortBy(
     [
       ...(value.events || []).map((event) => {
-        const note = event.note?.trim() || "";
+        const rawNote = event.note?.trim() || "";
+        const note = rawNote
+          .replace(/^(.*验证第\d+轮)[：:]\s*$/, "$1")
+          .replace(
+            /^(记录人工实测.*|执行用例.*)[：:]\s*(passed|failed|blocked|inconclusive|skipped)$/,
+            (_, action, result: string) => `${action}：${resultNames[result] || result}`
+          );
         const specific = note.match(
-          /^(初步分派|诊断自动指派|人工改派|验证安排|验证方式|人工验证关闭|人工验证安排|记录人工实测|接收交接|拒绝交接|取消待确认交接|补充上报信息|提交验证结果|提交验证|经理验收通过|验收关闭|退回复测|退回补测|退回修复|重新打开|重开)([：，；（]|$)/
+          /^(初步分派|诊断自动指派|人工改派|验证安排|验证方式|人工验证关闭|人工验证安排|记录人工实测|执行用例|补充回归用例|更新人工验证要求|更新本轮测试要求|调整测试负责人|指派测试员|接收交接|拒绝交接|取消待确认交接|补充上报信息|提交验证结果|提交验证|经理验收通过|验收关闭|退回复测|退回补测|退回修复|重新打开|重开)(?=第\d+轮|[：，；（]|$)/
         )?.[1];
         const daqCreated = !event.previous_status && value.source_kind === "daq";
         const changed = event.previous_status !== event.status;
         const unsuccessful =
           /^(退回|拒绝|重开)/.test(note) ||
-          /^记录人工实测.*[：:]\s*failed\b/.test(note) ||
+          /^(记录人工实测|执行用例).*[：:]\s*(failed|blocked|失败|阻塞|受阻)$/.test(note) ||
           (event.status === "open" && ["resolved", "closed"].includes(event.previous_status));
-        const passed = !unsuccessful && (event.status === "closed" || /验证通过|验收通过/.test(note));
+        const passed =
+          !unsuccessful &&
+          (event.status === "closed" || /验证通过|验收通过|^验收关闭|^(记录人工实测|执行用例).*：通过$/.test(note));
         return {
           id: `event-${event.id}`,
           actor: daqCreated ? "" : event.actor || "成员",
@@ -157,9 +165,11 @@ export function CollaborationPanel({
             ? "text-danger-primary"
             : passed
               ? "text-success-primary"
-              : changed && event.status === "open"
-                ? "text-secondary"
-                : "text-accent-primary",
+              : note.startsWith("提交验证")
+                ? "text-warning-primary"
+                : changed && event.status === "open"
+                  ? "text-secondary"
+                  : "text-accent-primary",
         };
       }),
       ...(comments || []).map((comment) => ({
