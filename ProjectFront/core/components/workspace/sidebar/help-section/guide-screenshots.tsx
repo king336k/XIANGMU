@@ -8,17 +8,17 @@ export type GuideScreenshot = { src: string; title: string; caption: string; wid
 export function GuideScreenshots({ images }: { images: GuideScreenshot[] }) {
   const [expanded, setExpanded] = useState<GuideScreenshot>();
   return (
-    <section aria-label="图解与操作示例" className="space-y-4">
+    <section aria-label="操作截图" className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h4 className="text-14 font-medium">图解与操作示例</h4>
-        <span className="text-11 text-tertiary">操作示意 · 点击放大</span>
+        <h4 className="text-14 font-medium">操作截图</h4>
+        <span className="text-11 text-tertiary">项目平台实拍 · 点击放大</span>
       </div>
       {images.map((image) => (
         <figure key={image.src} className="overflow-hidden rounded-md border border-subtle">
           <button
             type="button"
             onClick={() => setExpanded(image)}
-            aria-label={`放大图解：${image.title}`}
+            aria-label={`放大截图：${image.title}`}
             className="group focus-visible:outline-accent-primary relative block w-full cursor-zoom-in bg-layer-1 focus-visible:outline-2"
           >
             <img

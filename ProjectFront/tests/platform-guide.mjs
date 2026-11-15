@@ -90,3 +90,15 @@ test("测试帮助覆盖无法判定及证据说明，报告目标区分经理�
     /项目报告接收目标.*项目经理或管理员/
   );
 });
+
+test("所有帮助配图均为真实平台页面截图，不再使用流程示意SVG", () => {
+  for (const topic of platformGuide) {
+    for (const image of topic.screenshots) {
+      assert.match(image.src, /^\/platform-guide\/[a-z-]+\.webp$/, topic.id);
+      const data = readFileSync(new URL(`../public${image.src}`, import.meta.url));
+      assert.equal(data.toString("ascii", 0, 4), "RIFF");
+      assert.equal(data.toString("ascii", 8, 12), "WEBP");
+      assert.doesNotMatch(image.title + image.caption, /操作示意图|绘制的操作示意/);
+    }
+  }
+});

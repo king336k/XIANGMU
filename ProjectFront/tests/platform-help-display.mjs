@@ -99,15 +99,15 @@ test("帮助快捷链接使用当前项目，并使用已迁移的设置入口",
     "/work/settings/daq-projects/?project=project"
   );
 });
-test("图解使用资源自身比例，放大与关闭不丢图注", () => {
+test("真实截图使用资源自身比例，放大与关闭不丢图注", () => {
   let expanded;
   const { GuideScreenshots } = load("../core/components/workspace/sidebar/help-section/guide-screenshots.tsx", {
     react: { useState: () => [expanded, (v) => (expanded = v)] },
     "@/components/quality/shared": { Modal: "Modal" },
   });
   const image = {
-    src: "/platform-guide/technician-guide.svg",
-    title: "技术员操作示意图",
+    src: "/platform-guide/solution-real.webp",
+    title: "修复方案实际截图",
     caption: "检查方案与修复交接",
     width: 1200,
     height: 650,

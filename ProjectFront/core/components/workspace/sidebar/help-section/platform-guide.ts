@@ -21,11 +21,20 @@ export const platformGuide: GuideTopic[] = [
     id: "start",
     screenshots: [
       {
-        src: "/platform-guide/start-guide.svg",
-        title: "开始使用与功能地图操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/requirements-real.webp",
+        title: "需求列表与任务、用例入口",
+        caption:
+          "2026/11/15 项目平台实际截图。需求页面保留新建、文档导入、状态及查看处理入口，可按需进入任务或关联用例。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/defects-list-real.webp",
+        title: "缺陷列表与快捷视图",
+        caption:
+          "2026/11/15 项目平台实际截图。通过全部、未关闭、指派给我等条件查找；图中是已结束的历史验证反馈。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     title: "开始使用与功能地图",
@@ -75,11 +84,12 @@ export const platformGuide: GuideTopic[] = [
     section: "common",
     screenshots: [
       {
-        src: "/platform-guide/my-work-guide.svg",
-        title: "我的工作、通知与查找操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/my-work-real.webp",
+        title: "我的工作与待办筛选",
+        caption:
+          "2026/11/15 项目平台实际截图。当前页面显示本人待办类型、搜索和数量；图中当前没有待办。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     links: [],
@@ -89,11 +99,20 @@ export const platformGuide: GuideTopic[] = [
     id: "requirements",
     screenshots: [
       {
-        src: "/platform-guide/requirements-guide.svg",
-        title: "需求与研发任务操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/requirements-real.webp",
+        title: "需求列表与任务、用例入口",
+        caption:
+          "2026/11/15 项目平台实际截图。需求页面保留新建、文档导入、状态及查看处理入口，可按需进入任务或关联用例。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/tasks-real.webp",
+        title: "研发任务页面与展示入口",
+        caption:
+          "2026/11/15 项目平台实际截图。项目任务页提供新建任务和多种显示方式；当前项目没有研发任务，页面保留测试待办入口。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     title: "需求与研发任务",
@@ -128,19 +147,20 @@ export const platformGuide: GuideTopic[] = [
     id: "defects",
     screenshots: [
       {
-        src: "/platform-guide/defect-regression-current.webp",
-        title: "当前缺陷详情：页内阶段图与回归验证",
+        src: "/platform-guide/defect-diagnosis-real.webp",
+        title: "缺陷诊断、材料与分配依据",
         caption:
-          "2026/11/15 当前平台截图。图中为历史合成联调记录，仅用于说明页签、轮次与验收记录的位置，不代表实机维修结论。",
-        width: 1440,
-        height: 728,
+          "2026/11/15 项目平台实际截图。当前整页详情包含概况、诊断、修复方案、回归测试、评论和操作记录；诊断建议需结合实际材料核查。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
       {
-        src: "/platform-guide/defects-guide.svg",
-        title: "缺陷完整闭环操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/regression-real.webp",
+        title: "回归测试轮次、执行人与验收结果",
+        caption:
+          "2026/11/15 项目平台实际截图。缺陷回归页记录方式、测试员、轮次、修复版本和实际结果；图中为已验收的人工验证历史，不是新修复或新实测结论。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     title: "缺陷完整闭环",
@@ -185,11 +205,20 @@ export const platformGuide: GuideTopic[] = [
     id: "tests",
     screenshots: [
       {
-        src: "/platform-guide/tests-guide.svg",
-        title: "用例、用例集与测试执行操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/case-library-real.webp",
+        title: "用例库与版本维护入口",
+        caption:
+          "2026/11/15 项目平台实际截图。用例库显示模块、优先级、版本、编辑和历史入口，执行结果另按测试计划或缺陷轮次保存。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/tests-real.webp",
+        title: "测试任务与每轮计划",
+        caption:
+          "2026/11/15 项目平台实际截图。测试任务页按计划展示版本、负责人、本轮结果及查看入口；图中含历史平台流程验证记录。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     title: "用例、用例集与测试执行",
@@ -232,11 +261,20 @@ export const platformGuide: GuideTopic[] = [
     id: "versions",
     screenshots: [
       {
-        src: "/platform-guide/versions-guide.svg",
-        title: "版本迭代与流程操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/versions-real.webp",
+        title: "版本迭代与发布验收入口",
+        caption:
+          "2026/11/15 项目平台实际截图。版本迭代页面提供新建版本、显示方式与发布验收入口；当前项目尚无版本计划。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/version-form-real.webp",
+        title: "新建版本的实际填写表单",
+        caption:
+          "2026/11/15 项目平台实际截图。真实版本表单包含版本号、名称、起止日期、负责人和目标；采图时未填写或保存。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 780,
+        height: 570,
       },
     ],
     title: "版本迭代与流程",
@@ -269,11 +307,20 @@ export const platformGuide: GuideTopic[] = [
     id: "planning",
     screenshots: [
       {
-        src: "/platform-guide/planning-guide.svg",
-        title: "迭代周期、功能模块与任务视图操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/cycles-real.webp",
+        title: "迭代周期的实际功能状态",
+        caption:
+          "2026/11/15 项目平台实际截图。当前项目未启用周期功能，真实页面显示管理功能入口；是否使用周期取决于项目配置。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/tasks-real.webp",
+        title: "研发任务页面与展示入口",
+        caption:
+          "2026/11/15 项目平台实际截图。项目任务页提供新建任务和多种显示方式；当前项目没有研发任务，页面保留测试待办入口。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     title: "迭代周期、功能模块与任务视图",
@@ -308,11 +355,20 @@ export const platformGuide: GuideTopic[] = [
     id: "knowledge",
     screenshots: [
       {
-        src: "/platform-guide/knowledge-guide.svg",
-        title: "文档、知识与知识问答操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/documents-real.webp",
+        title: "项目文档、知识库与知识问答导航",
+        caption:
+          "2026/11/15 项目平台实际截图。项目文档与知识库分别管理；当前项目尚无协作文档，可从上方进入知识库或知识问答。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/knowledge-real.webp",
+        title: "知识库检索与知识维护入口",
+        caption:
+          "2026/11/15 项目平台实际截图。实际知识库页面显示检索、待审核、导入文档、草稿与知识管理入口；检索结果中的适用范围和版本需要逐条核对。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     title: "文档、知识与知识问答",
@@ -355,19 +411,20 @@ export const platformGuide: GuideTopic[] = [
     id: "roles",
     screenshots: [
       {
-        src: "/platform-guide/members-current.webp",
-        title: "当前成员与权限入口",
+        src: "/platform-guide/members-real.webp",
+        title: "账号管理与业务身份",
         caption:
-          "2026/11/15 当前平台截图，账号名称已遮挡。账号管理、工作空间成员、项目成员分开维护，业务岗位和模块责任按实际分配。",
-        width: 1440,
-        height: 525,
+          "2026/11/15 项目平台实际截图。实际账号管理页面展示管理员、项目经理、技术员、测试员及模块责任；截图为管理员视角。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1280,
+        height: 645,
       },
       {
-        src: "/platform-guide/roles-guide.svg",
-        title: "成员、权限与账号操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/project-roles-real.webp",
+        title: "项目成员、继承范围与岗位",
+        caption:
+          "2026/11/15 项目平台实际截图。实际项目成员页显示直接分配或工作区继承的岗位和范围，编辑范围由有权限的人处理。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     title: "成员、权限与账号",
@@ -403,11 +460,20 @@ export const platformGuide: GuideTopic[] = [
     id: "integrations",
     screenshots: [
       {
-        src: "/platform-guide/integrations-guide.svg",
-        title: "DAQ反馈与来源材料操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/daq-projects-real.webp",
+        title: "DAQ项目授权实际页面",
+        caption:
+          "2026/11/15 项目平台实际截图。管理员选择允许接收反馈的项目；图中当前仅一项授权，不需向采集端分配平台工作区。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/defect-diagnosis-real.webp",
+        title: "缺陷诊断、材料与分配依据",
+        caption:
+          "2026/11/15 项目平台实际截图。当前整页详情包含概况、诊断、修复方案、回归测试、评论和操作记录；诊断建议需结合实际材料核查。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     title: "DAQ反馈与来源材料",
@@ -444,11 +510,20 @@ export const platformGuide: GuideTopic[] = [
     id: "reports",
     screenshots: [
       {
-        src: "/platform-guide/reports-guide.svg",
-        title: "报告与发布验收操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/reports-real.webp",
+        title: "测试结果中的缺陷验证汇总",
+        caption:
+          "2026/11/15 项目平台实际截图。测试结果下查看缺陷验证、测试报告与测试概览；图中缺陷记录可展开查看对应轮次。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/statistics-real.webp",
+        title: "缺陷统计与人员事项",
+        caption:
+          "2026/11/15 项目平台实际截图。统计页按当前筛选范围展示全部、未关闭、待回归和已关闭数量；图中是历史功能验证记录，不代表生产故障统计。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     title: "报告与发布验收",
@@ -503,11 +578,20 @@ export const platformGuide: GuideTopic[] = [
     section: "common",
     screenshots: [
       {
-        src: "/platform-guide/faq-guide.svg",
-        title: "常见问题与受阻排查操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/history-real.webp",
+        title: "操作记录与真实操作人",
+        caption:
+          "2026/11/15 项目平台实际截图。按日期追溯分诊、方案、交接、执行和验收过程；历史记录保留原操作者与时间。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/defect-diagnosis-real.webp",
+        title: "缺陷诊断、材料与分配依据",
+        caption:
+          "2026/11/15 项目平台实际截图。当前整页详情包含概况、诊断、修复方案、回归测试、评论和操作记录；诊断建议需结合实际材料核查。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     links: [],
@@ -532,11 +616,20 @@ export const platformGuide: GuideTopic[] = [
     section: "roles",
     screenshots: [
       {
-        src: "/platform-guide/administrator-guide.svg",
-        title: "管理员操作指南操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/members-real.webp",
+        title: "账号管理与业务身份",
+        caption:
+          "2026/11/15 项目平台实际截图。实际账号管理页面展示管理员、项目经理、技术员、测试员及模块责任；截图为管理员视角。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1280,
+        height: 645,
+      },
+      {
+        src: "/platform-guide/daq-projects-real.webp",
+        title: "DAQ项目授权实际页面",
+        caption:
+          "2026/11/15 项目平台实际截图。管理员选择允许接收反馈的项目；图中当前仅一项授权，不需向采集端分配平台工作区。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     links: [
@@ -588,11 +681,28 @@ export const platformGuide: GuideTopic[] = [
     section: "roles",
     screenshots: [
       {
-        src: "/platform-guide/project-manager-guide.svg",
-        title: "项目经理操作指南操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/project-roles-real.webp",
+        title: "项目成员、继承范围与岗位",
+        caption:
+          "2026/11/15 项目平台实际截图。实际项目成员页显示直接分配或工作区继承的岗位和范围，编辑范围由有权限的人处理。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/solution-real.webp",
+        title: "修复方案及审核记录",
+        caption:
+          "2026/11/15 项目平台实际截图。现有缺陷的修复方案页，保留根因分析、解决步骤、验证方法和冻结版本的审核结果；图中为已通过的历史验证方案。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/statistics-real.webp",
+        title: "缺陷统计与人员事项",
+        caption:
+          "2026/11/15 项目平台实际截图。统计页按当前筛选范围展示全部、未关闭、待回归和已关闭数量；图中是历史功能验证记录，不代表生产故障统计。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     links: [
@@ -632,11 +742,20 @@ export const platformGuide: GuideTopic[] = [
     section: "roles",
     screenshots: [
       {
-        src: "/platform-guide/technician-guide.svg",
-        title: "技术员操作指南操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/solution-real.webp",
+        title: "修复方案及审核记录",
+        caption:
+          "2026/11/15 项目平台实际截图。现有缺陷的修复方案页，保留根因分析、解决步骤、验证方法和冻结版本的审核结果；图中为已通过的历史验证方案。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/defect-diagnosis-real.webp",
+        title: "缺陷诊断、材料与分配依据",
+        caption:
+          "2026/11/15 项目平台实际截图。当前整页详情包含概况、诊断、修复方案、回归测试、评论和操作记录；诊断建议需结合实际材料核查。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     links: [
@@ -672,11 +791,28 @@ export const platformGuide: GuideTopic[] = [
     section: "roles",
     screenshots: [
       {
-        src: "/platform-guide/tester-guide.svg",
-        title: "测试员操作指南操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/regression-real.webp",
+        title: "回归测试轮次、执行人与验收结果",
+        caption:
+          "2026/11/15 项目平台实际截图。缺陷回归页记录方式、测试员、轮次、修复版本和实际结果；图中为已验收的人工验证历史，不是新修复或新实测结论。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/reports-real.webp",
+        title: "测试结果中的缺陷验证汇总",
+        caption:
+          "2026/11/15 项目平台实际截图。测试结果下查看缺陷验证、测试报告与测试概览；图中缺陷记录可展开查看对应轮次。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
+      },
+      {
+        src: "/platform-guide/case-library-real.webp",
+        title: "用例库与版本维护入口",
+        caption:
+          "2026/11/15 项目平台实际截图。用例库显示模块、优先级、版本、编辑和历史入口，执行结果另按测试计划或缺陷轮次保存。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     links: [
@@ -715,11 +851,20 @@ export const platformGuide: GuideTopic[] = [
     section: "roles",
     screenshots: [
       {
-        src: "/platform-guide/reporter-guide.svg",
-        title: "反馈提交者与采集端用户操作示意图",
-        caption: "按当前入口与交接规则绘制的操作示意图，帮助对照步骤；实际按钮随权限、状态和记录版本变化。",
-        width: 1200,
-        height: 650,
+        src: "/platform-guide/defect-report-form-real.webp",
+        title: "平台提交缺陷的实际表单",
+        caption:
+          "2026/11/15 项目平台实际截图。提交表单可补附件、标题、严重程度、重现步骤、影响版本和关联用例；图中未填写或提交。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 780,
+        height: 753,
+      },
+      {
+        src: "/platform-guide/defects-list-real.webp",
+        title: "缺陷列表与快捷视图",
+        caption:
+          "2026/11/15 项目平台实际截图。通过全部、未关闭、指派给我等条件查找；图中是已结束的历史验证反馈。 实际可见操作随当前账号权限和记录状态变化。",
+        width: 1600,
+        height: 809,
       },
     ],
     links: [
