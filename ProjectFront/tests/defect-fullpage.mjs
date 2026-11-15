@@ -105,9 +105,15 @@ test("page dialog保留native top layer和返回/ESC关闭，普通modal保留�
   assert.equal(page.type, "dialog");
   assert.match(page.props.className, /defect-page/);
   assert.equal(shows, 1);
-  walk(page)
-    .find((node) => node.type === "button" && node.props.children?.includes?.("返回缺陷列表"))
-    .props.onClick();
+  const back = walk(page).find((node) => node.type === "button" && node.props["aria-label"] === "返回缺陷列表");
+  assert.ok(back, "返回列表按钮保留完整可访问名称");
+  assert.equal(text(back), "返回列表");
+  assert.match(back.props.className, /defect-page-back-button/);
+  const navigation = walk(page).find(
+    (node) => node.props?.className === "defect-page-navigation defect-page-navigation-compact"
+  );
+  assert.ok(navigation);
+  back.props.onClick();
   page.props.onCancel({ target: page, currentTarget: page, preventDefault() {} });
   assert.equal(closed, 2);
   assert.ok(!walk(page).some((node) => node.type === "Button" && node.props.children === "关闭"));
@@ -138,7 +144,9 @@ test("缺陷整页顶部仅返回列表，宽度随窗口展开", () => {
     children: "body",
   });
   assert.ok(!walk(tree).some((n) => n.props?.className === "defect-page-topbar"));
-  assert.ok(walk(tree).some((n) => n.type === "button" && n.props.children?.includes?.("返回缺陷列表")));
+  const back = walk(tree).find((n) => n.type === "button" && n.props["aria-label"] === "返回缺陷列表");
+  assert.ok(back);
+  assert.equal(text(back), "返回列表");
   const css = readFileSync(new URL("../styles/globals.css", import.meta.url), "utf8");
   assert.doesNotMatch(css, /\.defect-page-card\s*\{[^}]*max-width:\s*1152px/);
 });

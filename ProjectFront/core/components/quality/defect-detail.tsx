@@ -19,7 +19,6 @@ import { DefectTeam } from "./defect-team";
 import { SolutionPanel } from "./solution-panel";
 import { DefectVerificationScope } from "./defect-verification-scope";
 import { VerificationAssignee } from "./verification-assignee";
-import { DefectFlowGuidance } from "./defect-flow-guidance";
 import { DefectComments } from "./defect-comments";
 import { can, severityNames } from "./types";
 import type { Context, Defect } from "./types";
@@ -182,7 +181,13 @@ export function DefectDetail({
                   "未记录"}
                 {value.created_at ? ` · ${renderNumericDateTime(value.created_at)}` : ""}
               </span>
-              <RecordProgress base={base} kind="defect" id={value.id} projectUrl={projectUrl} />
+              <RecordProgress
+                base={base}
+                kind="defect"
+                id={value.id}
+                projectUrl={projectUrl}
+                defectFlow={{ value, context, activeTab, onNavigate: setActiveTab }}
+              />
             </div>
           )}
           {activeTab !== "regression" && (
@@ -233,13 +238,6 @@ export function DefectDetail({
             </Link>
           )}
         </div>
-        <DefectFlowGuidance
-          base={base}
-          value={value}
-          context={context}
-          activeTab={activeTab}
-          onNavigate={setActiveTab}
-        />
         <nav aria-label="缺陷详情内容" className="defect-page-tabs" role="tablist">
           {[
             ["overview", "概况"],

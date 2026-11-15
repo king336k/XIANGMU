@@ -40,6 +40,42 @@ test("五个流程节点跳转到对应页面", () => {
     assert.equal(api.defectFlowTab(stage), tab);
   assert.equal(api.defectFlowTab(-1), undefined);
 });
+test("顶部无流程状态时不跳页，首次获得阶段后才进行自动同步", () => {
+  let index = 0;
+  const states = [];
+  const apiWithHooks = {};
+  new Function(
+    "require",
+    "exports",
+    ts.transpileModule(
+      readFileSync(new URL("../core/components/quality/defect-flow-guidance.tsx", import.meta.url), "utf8"),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }
+    ).outputText
+  )((id) => {
+    if (id === "react")
+      return {
+        useRef: (value) => {
+          const at = index++;
+          if (!(at in states)) states[at] = { current: value };
+          return states[at];
+        },
+        useEffect: (fn) => fn(),
+      };
+    if (id === "swr") return { default: () => ({ data: null }) };
+    if (id === "./api") return { qualityApi: { read: async () => ({}) } };
+    if (id === "react/jsx-runtime") return require(id);
+    return {};
+  }, apiWithHooks);
+  let navigations = 0;
+  apiWithHooks.DefectFlowGuidance({
+    base: "/q/",
+    value: { id: "d" },
+    context: {},
+    activeTab: "diagnosis",
+    onNavigate: () => navigations++,
+  });
+  assert.equal(navigations, 0);
+});
 test("上报人等待分诊、经理可直达诊断分配", () => {
   const value = { ...defect, assignee_id: null, module: null };
   assert.equal(api.defectFlowStep(value, context("reporter"), data("missing")).action, undefined);

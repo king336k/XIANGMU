@@ -706,11 +706,29 @@ dialog.defect-page::backdrop {
   margin: 0 24px;
   padding: 26px 0;
 }
+.defect-page-navigation-compact {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
 .defect-page-navigation button {
   display: inline-flex;
   align-items: center;
   gap: 10px;
   color: #7a8b9d;
+}
+.defect-page-navigation .defect-page-back-button {
+  min-height: 28px;
+  padding: 4px 8px 4px 4px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1rem;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+.defect-page-navigation .defect-page-back-button:hover {
+  color: #087fa6;
+  background: #edf8fb;
 }
 .defect-page-card {
   max-width: none;
@@ -797,6 +815,10 @@ dialog.defect-page::backdrop {
   .defect-page-navigation {
     margin-right: 12px;
     margin-left: 12px;
+  }
+  .defect-page-navigation-compact {
+    padding-top: 6px;
+    padding-bottom: 6px;
   }
   .defect-page-heading,
   .defect-page-regression,

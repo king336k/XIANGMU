@@ -7,6 +7,8 @@ import { CustomMenu } from "@plane/ui";
 import { ChevronDown, Flag, GitBranch, CalendarRange, List } from "lucide-react";
 import { renderNumericDateTime } from "@plane/utils";
 import { ScheduleTimeline } from "./schedule-timeline";
+import { DefectFlowGuidance } from "./defect-flow-guidance";
+import type { Context, Defect } from "./types";
 import { qualityApi, errorMessage } from "./api";
 import { Badge, Modal, Paging } from "./shared";
 import { useCollectionPagination } from "./use-collection-pagination";
@@ -38,11 +40,18 @@ export function RecordProgress({
   kind,
   id,
   projectUrl,
+  defectFlow,
 }: {
   base: string;
   kind: "plan" | "defect" | "requirement";
   id: string;
   projectUrl: string;
+  defectFlow?: {
+    value: Defect;
+    context: Context;
+    activeTab: string;
+    onNavigate: (tab: string) => void;
+  };
 }) {
   const [mode, setMode] = useState("details");
   const pagination = useCollectionPagination(`${base}:history:${kind}:${id}`);
@@ -111,7 +120,19 @@ export function RecordProgress({
               正在读取…
             </p>
           )}
-          {data && mode === "stages" && (
+          {mode === "stages" && kind === "defect" && defectFlow && (
+            <DefectFlowGuidance
+              base={base}
+              value={defectFlow.value}
+              context={defectFlow.context}
+              activeTab={defectFlow.activeTab}
+              onNavigate={(tab) => {
+                setMode("details");
+                defectFlow.onNavigate(tab);
+              }}
+            />
+          )}
+          {data && mode === "stages" && kind !== "defect" && (
             <ol aria-label="业务阶段图" className="m-0 flex list-none flex-wrap gap-3 p-0">
               {data.stages.map((stage, index) => {
                 const state = stage.key === data.current ? "current" : stage.state || "pending";
@@ -120,9 +141,7 @@ export function RecordProgress({
                     key={stage.key}
                     data-stage={stage.key}
                     data-state={state}
-                    title={
-                      state === "skipped" ? `${kind === "defect" ? "缺陷" : "业务"}状态未单独记录该阶段` : undefined
-                    }
+                    title={state === "skipped" ? "业务状态未单独记录该阶段" : undefined}
                     className="flex items-center gap-3"
                   >
                     <div

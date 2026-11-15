@@ -76,10 +76,10 @@ export function Modal({
     >
       {presentation === "page" ? (
         <>
-          <div className="defect-page-navigation">
-            <button type="button" onClick={onClose}>
-              <ChevronLeft aria-hidden="true" className="size-4" />
-              返回缺陷列表
+          <div className="defect-page-navigation defect-page-navigation-compact">
+            <button type="button" aria-label="返回缺陷列表" onClick={onClose} className="defect-page-back-button">
+              <ChevronLeft aria-hidden="true" className="size-3.5" />
+              返回列表
             </button>
           </div>
           <h2 id={titleId} className="sr-only">
