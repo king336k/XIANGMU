@@ -19,6 +19,7 @@ import { DefectTeam } from "./defect-team";
 import { SolutionPanel } from "./solution-panel";
 import { DefectVerificationScope } from "./defect-verification-scope";
 import { VerificationAssignee } from "./verification-assignee";
+import { DefectFlowGuidance } from "./defect-flow-guidance";
 import { DefectComments } from "./defect-comments";
 import { can, severityNames } from "./types";
 import type { Context, Defect } from "./types";
@@ -98,7 +99,8 @@ export function DefectDetail({
     value.status !== "closed" &&
     (context.is_administrator || context.is_manager || value.assignee_id === context.user_id);
   const updateStatus = () => {
-    if (value.has_verification && ["resolved", "closed"].includes(value.status)) setActiveTab("regression");
+    if (value.status === "resolved" || (value.has_verification && value.status === "closed"))
+      setActiveTab("regression");
     else onEdit("workflow");
   };
   const assignee = context.members.find((member) => member.id === value.assignee_id)?.name;
@@ -231,6 +233,13 @@ export function DefectDetail({
             </Link>
           )}
         </div>
+        <DefectFlowGuidance
+          base={base}
+          value={value}
+          context={context}
+          activeTab={activeTab}
+          onNavigate={setActiveTab}
+        />
         <nav aria-label="缺陷详情内容" className="defect-page-tabs" role="tablist">
           {[
             ["overview", "概况"],
@@ -295,6 +304,7 @@ export function DefectDetail({
             </div>
             <div hidden={activeTab !== "regression"} className="defect-page-verification">
               <DefectVerificationScope
+                onSolution={() => setActiveTab("solution")}
                 onRepair={canEdit ? () => onEdit("workflow") : undefined}
                 projectUrl={projectUrl}
                 base={base}

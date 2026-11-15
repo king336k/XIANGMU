@@ -36,6 +36,7 @@ export function SolutionPanel({
     await mutate();
     await onChanged?.();
     await revalidate((key) => {
+      if (key === `${base}defects/${defectId}/verification/`) return true;
       if (typeof key !== "string" || !key.startsWith(`${base}record-progress/?`)) return false;
       const query = new URLSearchParams(key.slice(key.indexOf("?") + 1));
       return query.get("kind") === "defect" && query.get("id") === defectId;

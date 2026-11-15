@@ -63,32 +63,17 @@ def test_plan_copy_can_choose_original_frozen_or_latest_case_versions(session_cl
     assert original["items"][0]["revision"]["version"] == 1
 
 
-def test_manual_defect_can_close_with_explicit_verification_without_forced_testcase(session_client, operations):
+def test_manual_close_must_use_defect_verification_panel(session_client, operations):
     base, project, case, plan = operations
     row = session_client.post(base + "defects/", {"title": "提示文案错误"}, format="json").data
     url = base + f"defects/{row['id']}/"
-    assert (
-        session_client.patch(
-            url, {"status": "resolved", "fixed_build": "v2", "resolution": "修正页面提示"}, format="json"
-        ).status_code
-        == 200
+    assert session_client.patch(
+        url, {"status": "resolved", "fixed_build": "v2", "resolution": "修正页面提示"}, format="json"
+    ).status_code == 200
+    response = session_client.patch(
+        url, {"status": "closed", "verification_method": "manual", "verification_note": "已验证"}, format="json"
     )
-    assert (
-        session_client.patch(url, {"status": "closed", "verification_method": "manual"}, format="json").status_code
-        == 400
-    )
-    closed = session_client.patch(
-        url,
-        {
-            "status": "closed",
-            "verification_method": "manual",
-            "verification_note": "已在v2打开页面，确认提示文案和展示位置符合要求",
-        },
-        format="json",
-    )
-    assert closed.status_code == 200 and closed.data["status"] == "closed", closed.content
-    assert "人工验证" in closed.data["events"][0]["note"] and "v2" in closed.data["events"][0]["note"]
-    assert closed.data["case_id"] is None
+    assert response.status_code == 409, response.content
 
 
 def test_test_generated_defect_cannot_use_manual_verification_to_skip_case_regression(session_client, operations):
@@ -101,7 +86,7 @@ def test_test_generated_defect_cannot_use_manual_verification_to_skip_case_regre
         {"status": "closed", "verification_method": "manual", "verification_note": "试图跳过已有回归用例"},
         format="json",
     )
-    assert response.status_code == 400
+    assert response.status_code == 409
 
 
 def test_daq_origin_does_not_require_retired_external_regression(session_client, operations, create_user):
@@ -114,8 +99,8 @@ def test_daq_origin_does_not_require_retired_external_regression(session_client,
         {"status": "closed", "verification_method": "manual", "verification_note": "已在修复版本现场验证功能通过"},
         format="json",
     )
-    assert response.status_code == 200, response.content
-    assert response.data["status"] == "closed" and not response.data["requires_data_regression"]
+    assert response.status_code == 409, response.content
+    assert response.data.get("status") != "closed"
 
 
 def test_nonmanager_cannot_manually_close_defect(session_client, operations, create_user):
@@ -127,7 +112,7 @@ def test_nonmanager_cannot_manually_close_defect(session_client, operations, cre
     response = session_client.patch(
         url, {"status": "closed", "verification_method": "manual", "verification_note": "成员越权关闭"}, format="json"
     )
-    assert response.status_code == 403
+    assert response.status_code == 409
 
 
 def test_plan_copy_lists_latest_versions_and_allows_case_selection(session_client, operations):

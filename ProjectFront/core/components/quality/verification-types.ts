@@ -4,6 +4,9 @@ export type VerificationItem = {
   case_id?: string | null;
   case_version?: number | null;
   revision_id?: string | null;
+  reviewer_ids?: string[];
+  pending_reviewer_ids?: string[];
+  created_by_id?: string | null;
   source?: "library" | "round" | "legacy";
   title: string;
   snapshot: { title: string; steps: Step[]; preconditions?: string; module?: string; priority?: string };
@@ -52,7 +55,21 @@ export type VerificationRound = {
   can_return_repair: boolean;
   can_reopen: boolean;
 };
+export type SolutionReviewGate = {
+  id?: string;
+  title?: string;
+  status: string;
+  revision_id?: string | null;
+  reviewer_ids?: string[];
+  pending_reviewer_ids?: string[];
+  created_by_id?: string | null;
+  blocked_reason?: string;
+  repair_note?: string;
+  test_requirements?: string;
+};
 export type VerificationData = {
+  can_configure?: boolean;
+  solution_review?: SolutionReviewGate;
   defect_id: string;
   defect_status: string;
   defect_version: number;
@@ -68,6 +85,7 @@ export function verificationNextStep(round: VerificationRound): string {
       ? "验收关闭，或退回补测"
       : "查看未通过项，退回补测或修复";
   }
+  if (round.execution_state === "waiting_solution_review") return round.blocked_reason || "等待修复方案审核通过";
   if (round.execution_state === "waiting_repair") return "待技术负责人登记修复后测试";
   if (round.execution_state === "needs_arrangement") return round.can_configure ? "重新安排测试" : "等待负责人重新安排";
   if (round.execution_state === "needs_assignment") return round.can_configure ? "指派测试员" : "等待负责人指派测试员";
@@ -78,6 +96,7 @@ export function verificationNextStep(round: VerificationRound): string {
   return round.mode === "manual" ? "填写测试结果" : `执行剩余 ${round.summary.pending} 条用例`;
 }
 export const verificationStatus: Record<string, string> = {
+  waiting_solution_review: "等待方案审核",
   waiting_repair: "等待修复",
   needs_arrangement: "待重新安排",
   needs_assignment: "待安排测试员",
@@ -95,6 +114,7 @@ export const verificationStatus: Record<string, string> = {
 };
 
 export const verificationStatusTone: Record<string, string> = {
+  waiting_solution_review: "pending",
   waiting_repair: "pending",
   needs_arrangement: "blocked",
   needs_assignment: "pending",

@@ -6,7 +6,7 @@ import type { CaseOption } from "./case-selection";
 import { qualityApi, errorMessage } from "./api";
 import { Field, fieldClass } from "./shared";
 import type { Context } from "./types";
-import type { VerificationData, VerificationItem, VerificationRound } from "./verification-types";
+import type { VerificationData, VerificationItem, VerificationRound, SolutionReviewGate } from "./verification-types";
 
 export function VerificationConfigure({
   base,
@@ -19,6 +19,7 @@ export function VerificationConfigure({
   onCancel,
   context,
   repairRequired = false,
+  solutionReview,
 }: {
   base: string;
   defectId: string;
@@ -30,10 +31,14 @@ export function VerificationConfigure({
   onCancel: () => void;
   context?: Context;
   repairRequired?: boolean;
+  solutionReview?: SolutionReviewGate;
 }) {
   const [expectedVersion] = useState(version);
+  const [solutionRevisionId] = useState(solutionReview?.revision_id);
   const [mode, setMode] = useState(initialMode || initial?.mode || "manual");
-  const [howToTest, setHowToTest] = useState(initial?.steps.map((step) => step.action).join("\n") || "");
+  const [howToTest, setHowToTest] = useState(
+    initial?.steps.map((step) => step.action).join("\n") || solutionReview?.test_requirements || ""
+  );
   const [selected, setSelected] = useState<CaseOption[]>(
     (initial?.items || [])
       .filter((item): item is VerificationItem & { case_id: string } => !!item.case_id)
@@ -46,9 +51,11 @@ export function VerificationConfigure({
       }))
   );
   const [testRequirements, setTestRequirements] = useState(
-    mode === "cases" ? initial?.steps.map((step) => step.action).join("\n") || "" : ""
+    mode === "cases"
+      ? initial?.steps.map((step) => step.action).join("\n") || solutionReview?.test_requirements || ""
+      : ""
   );
-  const [repairNote, setRepairNote] = useState("");
+  const [repairNote, setRepairNote] = useState(solutionReview?.repair_note || "");
   const [build, setBuild] = useState(initial?.fixed_build || fixedBuild);
   const [environment, setEnvironment] = useState(initial?.environment || "");
   const [assignee, setAssignee] = useState(initial?.assignee_id || "");
@@ -66,6 +73,7 @@ export function VerificationConfigure({
       const result = await qualityApi.write<VerificationData>(`${base}defects/${defectId}/verification/`, {
         expected_version: expectedVersion,
         ...(repairRequired ? { repair_and_arrange: true, repair_note: repairNote } : {}),
+        ...(solutionRevisionId ? { solution_revision_id: solutionRevisionId } : {}),
         request_id: requestId,
         mode,
         fixed_build: build,
@@ -87,7 +95,12 @@ export function VerificationConfigure({
     <fieldset disabled={busy} className="min-w-0 space-y-4">
       <div className="rounded-md border border-subtle bg-layer-1 p-3">
         <h3 className="text-13 font-medium">{repairRequired ? "修复并安排测试" : "安排测试"}</h3>
-        <p className="mt-1 text-12 text-secondary">保存后交给指派测试员执行。</p>
+        {solutionReview?.status === "approved" && (
+          <p className="mt-1 text-12 text-success-primary">修复方案已通过：{solutionReview.title}</p>
+        )}
+        <p className="mt-1 text-12 text-secondary">
+          {repairRequired ? "确认已按审核方案完成修复，填写修复版本后交给测试员验证。" : "保存后交给指派测试员执行。"}
+        </p>
       </div>
       <div role="group" aria-label="验证方式" className="flex flex-wrap gap-2">
         {(

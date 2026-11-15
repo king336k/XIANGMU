@@ -344,3 +344,44 @@ test("安排表单编辑中后台版本变化时，保存仍携带打开时的�
   await new Promise(setImmediate);
   assert.equal(h.writes[0][1].expected_version, 9);
 });
+
+test("修复交接预填已审核方案且保留测试员与修复确认", () => {
+  const h = harness("verification-configure", "VerificationConfigure", {
+    base: "/q/",
+    defectId: "d",
+    version: 3,
+    fixedBuild: "",
+    repairRequired: true,
+    solutionReview: { status: "approved", title: "边界修复", repair_note: "修复边界", test_requirements: "验证边界" },
+  });
+  const all = nodes(h.render());
+  assert.equal(all.find((n) => n.props?.label === "处理说明").props.children.props.value, "修复边界");
+  assert.equal(all.find((n) => n.props?.label === "如何测试").props.children.props.value, "验证边界");
+  assert.ok(all.find((n) => n.props?.children === "完成修复并安排测试").props.disabled);
+});
+
+test("方案刷新为新审核版本时旧表单仍提交打开时的版本与内容", async () => {
+  const h = harness("verification-configure", "VerificationConfigure", {
+    base: "/q/",
+    defectId: "d",
+    version: 3,
+    fixedBuild: "v2",
+    repairRequired: true,
+    solutionReview: { status: "approved", revision_id: "revision-A", repair_note: "修复A", test_requirements: "验证A" },
+  });
+  h.render();
+  const all = nodes(
+    h.render({
+      solutionReview: {
+        status: "approved",
+        revision_id: "revision-B",
+        repair_note: "修复B",
+        test_requirements: "验证B",
+      },
+    })
+  );
+  all.find((n) => n.props?.children === "完成修复并安排测试").props.onClick();
+  await new Promise(setImmediate);
+  assert.equal(h.writes[0][1].solution_revision_id, "revision-A");
+  assert.equal(h.writes[0][1].repair_note, "修复A");
+});

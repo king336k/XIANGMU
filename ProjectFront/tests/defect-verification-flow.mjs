@@ -65,6 +65,10 @@ function harness(current = null, canConfigure = true) {
       data.current = next;
       data.defect_version += 1;
     },
+    setReview(review, allowed = false) {
+      data.solution_review = review;
+      data.can_configure = allowed;
+    },
     setDefectStatus(status) {
       data.defect_status = status;
     },
@@ -351,4 +355,30 @@ test("未修复时不显示已完成安排或执行入口，只开放修复并�
   action.props.onClick();
   const editor = nodes(h.render()).find((n) => n.type === h.sym("VerificationConfigure"));
   assert.equal(editor.props.repairRequired, true);
+});
+
+for (const status of ["missing", "draft", "review", "rejected"]) {
+  test(`方案${status}时回归入口显示原因并跳转处理方案`, () => {
+    const h = harness();
+    h.setDefectStatus("in_progress");
+    h.setReview({ status, blocked_reason: "请先在处理方案中完成审核。" });
+    const all = nodes(h.render());
+    assert.ok(all.some((n) => n.props?.children === "请先在处理方案中完成审核。"));
+    assert.ok(all.some((n) => n.props?.children === "前往处理方案"));
+    assert.equal(
+      all.some((n) => n.props?.children === "人工验证"),
+      false
+    );
+  });
+}
+test("方案已通过时回归入口传递审核快照以复用修复和验证说明", () => {
+  const h = harness();
+  h.setDefectStatus("in_progress");
+  const review = { status: "approved", title: "边界修复", repair_note: "修复边界", test_requirements: "验证边界" };
+  h.setReview(review, true);
+  nodes(h.render())
+    .find((n) => n.props?.children === "人工验证")
+    .props.onClick();
+  const form = nodes(h.render()).find((n) => n.type === h.sym("VerificationConfigure"));
+  assert.deepEqual(form.props.solutionReview, review);
 });

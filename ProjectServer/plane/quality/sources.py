@@ -12,7 +12,7 @@ from .permissions import require_assignee
 from .models import Defect, DefectComment, DefectEvent, ProblemPackage, SourceLink
 from .serializers import DefectSerializer
 from .authorship import AuthoredRecordSerializer
-from .views import Conflict, QualityView, defect_queryset
+from .views import Conflict, QualityView, defect_queryset, notify_assignment_supervisors
 from plane.authentication.session import BaseSessionAuthentication
 from .identity import PlatformBridgeAuthentication
 
@@ -94,6 +94,11 @@ class SourceDefect(QualityView):
             status="open",
             note="从来源记录创建；不表示外部任务状态已改变。",
         )
+        from .module_routing import initial_assign
+
+        defect = initial_assign(defect, request.user)
+        notify_assignment_supervisors(defect, request.user)
+        link.defect = defect
         return Response(
             {
                 "source": SourceSerializer(link).data,

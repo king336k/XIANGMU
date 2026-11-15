@@ -37,6 +37,20 @@ def verification(session_client, workspace, create_user):
         )
         for i in range(2)
     ]
+    from plane.quality.models import Solution, SolutionRevision, SolutionReview
+    from plane.quality.solutions import FIELDS
+    for defect in defects:
+        solution = Solution.objects.create(
+            project=project, created_by=tester, defect=defect, title="已审核修复方案",
+            root_cause="已确认原因", steps="修复边界", verification="检查原场景",
+            status="approved", submitted_version=1,
+        )
+        revision = SolutionRevision.objects.create(
+            project=project, created_by=tester, solution=solution, version=1,
+            snapshot={key: getattr(solution, key) for key in FIELDS},
+            reviewer_ids=[str(create_user.pk)], required_count=1,
+        )
+        SolutionReview.objects.create(project=project, created_by=create_user, revision=revision, decision="approve")
     return base, cases, defects, tester, create_user
 
 
@@ -53,11 +67,11 @@ def configure(client, base, defect, cases=None, **extra):
         {"case_ids": [c["id"] for c in cases]} if cases else {"steps": [{"action": "操作", "expected": "成功"}]}
     )
     if "assignee_id" not in extra:
-        tester = ProjectMember.objects.filter(project=defect.project, role=15).exclude(member=defect.created_by).first()
+        tester = ProjectMember.objects.filter(project=defect.project, role=15).exclude(member=defect.created_by).order_by("created_at", "id").first()
         if tester:
             extra["assignee_id"] = str(tester.member_id)
     if "assignee_id" not in extra:
-        tester = ProjectMember.objects.filter(project=defect.project, role=15).exclude(member=defect.created_by).first()
+        tester = ProjectMember.objects.filter(project=defect.project, role=15).exclude(member=defect.created_by).order_by("created_at", "id").first()
         if tester:
             extra["assignee_id"] = str(tester.member_id)
     return client.post(base + f"defects/{defect.id}/verification/", {**payload, **extra}, format="json")
@@ -644,6 +658,8 @@ def test_strict_business_duties_and_readonly_boundaries(session_client, verifica
     BusinessRole.objects.create(
         project=defect.project, created_by=manager, user=execution_tester, role="REGRESSION_TESTER"
     )
+    defect.assignee = tester
+    defect.save(update_fields=["assignee"])
     session_client.force_authenticate(tester)
     response = configure(session_client, base, defect, assignee_id=str(execution_tester.id))
     assert response.status_code == 201, response.content

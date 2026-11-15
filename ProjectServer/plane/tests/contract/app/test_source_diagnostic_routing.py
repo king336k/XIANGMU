@@ -1,11 +1,56 @@
+import hashlib
 import json
+from uuid import uuid4
 import pytest
 from plane.quality.module_routing import evidence_modules
+from plane.quality.models import PackageFile
 from plane.tests.contract.app.test_module_owners import ready_job
 from plane.tests.contract.app.test_module_owners import routing as routing
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
 MATRIX = [
+    {
+        "id": "teleop_ros_registration_missing_during_running_service",
+        "line": (
+            'SIMULATED ERROR HTTP=503 detail="ROS node not initialized"\n'
+            "SIMULATED INFO expected_service_phase=running control_status_read=true node_registry_present=false\n"
+            "SIMULATED INFO previous_exit_log=not_observed"
+        ),
+        "expected_modules": ["teleop"],
+    },
+    {
+        "id": "generic_ros_http_503_without_control_evidence_stays_triage",
+        "line": 'SIMULATED ERROR HTTP=503 detail="ROS node not initialized"',
+        "expected_modules": [],
+        "expected_routing": "triage",
+    },
+    {
+        "id": "ros_registration_expected_start_is_not_teleop_evidence",
+        "line": (
+            'SIMULATED ERROR HTTP=503 detail="ROS node not initialized"\n'
+            "SIMULATED INFO expected_service_phase=starting control_status_read=true node_registry_present=false"
+        ),
+        "expected_modules": [],
+        "expected_routing": "triage",
+    },
+    {
+        "id": "ros_registration_present_is_not_teleop_evidence",
+        "line": (
+            'SIMULATED ERROR HTTP=503 detail="ROS node not initialized"\n'
+            "SIMULATED INFO expected_service_phase=running control_status_read=true node_registry_present=true"
+        ),
+        "expected_modules": [],
+        "expected_routing": "triage",
+    },
+    {
+        "id": "ros_registration_evidence_cannot_be_joined_across_sources",
+        "source_lines": [
+            'SIMULATED ERROR HTTP=503 detail="ROS node not initialized"',
+            "SIMULATED INFO expected_service_phase=running control_status_read=true node_registry_present=false",
+        ],
+        "expected_modules": [],
+        "expected_routing": "triage",
+    },
     {
         "id": "teleop_media_main_admission_source",
         "line": "FATAL failed to start: media encoder admission failed: selected media backend is unavailable",
@@ -207,6 +252,28 @@ MATRIX = [
 def test_verified_source_code_routing_never_uses_model_text_or_generic_scope(routing, item):
     text = json.dumps(item["structured"], ensure_ascii=False) if "structured" in item else item.get("line", "")
     job = ready_job(routing, text, item.get("description", ""))
+    if "source_lines" in item:
+        excerpt = item["source_lines"][1]
+        source_file = PackageFile.objects.get(pk=job.result["sources"][0]["file_id"])
+        digest = hashlib.sha256(excerpt.encode()).hexdigest()
+        other_file = PackageFile.objects.create(
+            project=source_file.project,
+            created_by=source_file.created_by,
+            package=source_file.package,
+            name="另一份现场记录.log",
+            storage_key=uuid4().hex,
+            size=len(excerpt.encode()),
+            sha256=digest,
+        )
+        job.result["sources"].append(
+            {
+                "file_id": str(other_file.id),
+                "sha256": digest,
+                "excerpt": excerpt,
+                "read_bytes": len(excerpt.encode()),
+                "scan_incomplete": False,
+            }
+        )
     job.result["answer"] = item.get("model_answer", "")
     if item.get("material_hash_matches") is False:
         job.result["sources"][0]["sha256"] = "wrong"

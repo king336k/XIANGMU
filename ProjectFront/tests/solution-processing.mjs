@@ -32,6 +32,7 @@ test("保存方案后刷新父缺陷版本及匹配的全部进度分页缓存",
     "/q/record-progress/?kind=defect&id=other",
     "/q/record-progress/?kind=plan&id=d",
     "/else/record-progress/?kind=defect&id=d",
+    "/q/defects/d/verification/",
   ];
   const exp = load("solution-panel", {
     react: {
@@ -82,7 +83,7 @@ test("保存方案后刷新父缺陷版本及匹配的全部进度分页缓存",
     .find((n) => n.type === "Modal")
     .props.onSubmit(new FormData());
   assert.deepEqual(events, ["write", "solutions", "defect"]);
-  assert.deepEqual(refreshed, keys.slice(0, 2));
+  assert.deepEqual(refreshed, [...keys.slice(0, 2), "/q/defects/d/verification/"]);
 });
 test("父详情收到方案变更读取新缺陷，传播真实版本而非复用旧对象", async () => {
   let index = 0;

@@ -297,6 +297,23 @@ def source_fault_modules(line, structured=None):
     return result
 
 
+def teleop_registration_mismatch(lines):
+    """Recognize one narrowly bounded same-source ROS control-registration failure."""
+    has_uninitialized_node = any(
+        re.search(r'\bHTTP=503\b', line)
+        and re.search(r'\bdetail="ROS node not initialized"', line)
+        for line in lines
+    )
+    has_missing_registration_while_running = any(
+        re.search(
+            r"\bexpected_service_phase=running\b.*\bcontrol_status_read=true\b.*\bnode_registry_present=false\b",
+            line,
+        )
+        for line in lines
+    )
+    return has_uninitialized_node and has_missing_registration_while_running
+
+
 def evidence_modules(job, defect, materials=None):
     result = job.result or {}
     sources = result.get("sources", [])
@@ -324,6 +341,10 @@ def evidence_modules(job, defect, materials=None):
         text = material.get("content", source.get("excerpt", ""))
         if not isinstance(text, str):
             continue
+        source_lines = text.splitlines()
+        if teleop_registration_mismatch(source_lines):
+            candidates.add("teleop")
+            has_failure = True
         try:
             document = json.loads(text)
         except (ValueError, TypeError, RecursionError):

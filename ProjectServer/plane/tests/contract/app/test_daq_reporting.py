@@ -317,7 +317,7 @@ def test_automatic_report_only_diagnostic_never_fetches_project_knowledge(report
     base = "/api/quality-auth/daq-reports/"
     response = call(base, {**payload, "hubProjectId": str(destination.id)}, "POST")
     assert response.status_code == 201
-    from plane.quality.models import DiagnosticJob
+    from plane.db.models import Notification
     from plane.quality.tasks import run_diagnostic
 
     file = registered_evidence(destination, user, response.data["issueId"])
@@ -370,7 +370,7 @@ def test_report_only_diagnostic_rechecks_disabled_local_account(reporting, mocke
     destination, user, payload, state = reporting
     response = call("/api/quality-auth/daq-reports/", {**payload, "hubProjectId": str(destination.id)}, "POST")
     assert response.status_code == 201, response.content
-    from plane.quality.models import DiagnosticJob
+    from plane.db.models import Notification
     from plane.quality.tasks import run_diagnostic
 
     job = DiagnosticJob.objects.create(
@@ -461,7 +461,7 @@ def test_archived_or_deleted_workspace_is_not_reportable_after_publication(repor
 def test_report_only_diagnostic_discards_late_model_result_after_source_revocation(reporting, mocker):
     destination, user, payload, state = reporting
     response = call("/api/quality-auth/daq-reports/", {**payload, "hubProjectId": str(destination.id)}, "POST")
-    from plane.quality.models import DiagnosticJob
+    from plane.db.models import Notification
     from plane.quality.tasks import run_diagnostic
 
     file = registered_evidence(destination, user, response.data["issueId"])
@@ -702,7 +702,7 @@ def test_no_legal_owner_rejects_report_without_creating_defect_then_same_event_r
 
 
 def test_review_context_separates_collectors_sharing_one_service_actor(reporting):
-    from plane.quality.models import DiagnosticJob
+    from plane.db.models import Notification
     from plane.quality.diagnostic_context import diagnostic_context
 
     destination, user, payload, state = reporting
@@ -742,3 +742,25 @@ def test_review_context_separates_collectors_sharing_one_service_actor(reporting
         current_source = {**source, "file_id": str(current_file.id), "sha256": current_file.sha256}
         refs = diagnostic_context(current, report_only=True, sources=[current_source])
         assert any(ref["reference"] == f"REVIEW-{reviewed.id}" for ref in refs) is expected
+
+
+def test_daq_report_gets_triage_owner_and_manager_todo_before_diagnosis(reporting, session_client):
+    from plane.license.models import InstanceAdmin
+    from plane.db.models import Notification
+
+    destination, _, payload, _ = reporting
+    created = call("/api/quality-auth/daq-reports/", {**payload, "hubProjectId": str(destination.id)}, "POST")
+    assert created.status_code == 201, created.content
+    defect = Defect.objects.get(pk=created.data["issueId"])
+    administrator = InstanceAdmin.objects.filter(role=20).first().user
+    assert defect.assignee_id == administrator.id
+    assert defect.assignment_origin == "triage"
+    assert defect.events.filter(note__contains="初步分诊").exists()
+    assert Notification.objects.filter(
+        receiver=administrator, entity_identifier=defect.id, title__contains="反馈已初步分派"
+    ).exists()
+    todo = session_client.get(
+        "/api/quality-auth/my-todos/", {"workspace": destination.workspace.slug, "kind": "defect"}
+    )
+    assert todo.status_code == 200, todo.content
+    assert any(row["id"] == str(defect.id) for row in todo.data["results"])

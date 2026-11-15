@@ -118,14 +118,14 @@ def test_defect_requires_new_matching_regression_before_close(session_client, qu
     retry = session_client.post(defect_url, {"severity": "major"}, format="json")
     assert retry.status_code == 200 and retry.data["id"] == defect["id"]
     url = endpoint(quality_project, f"defects/{defect['id']}/")
-    assert session_client.patch(url, {"status": "closed"}, format="json").status_code == 400
+    assert session_client.patch(url, {"status": "closed"}, format="json").status_code == 409
     early = execute(session_client, quality_project, plan, result="passed").data
     assert session_client.patch(url, {"status": "resolved", "fixed_build": "v2"}, format="json").status_code == 200
     assert (
         session_client.patch(
             url, {"status": "closed", "regression_execution_id": early["id"]}, format="json"
         ).status_code
-        == 400
+        == 409
     )
     other = make_plan(session_client, quality_project, make_case(session_client, quality_project, "其他用例"))
     wrong = execute(session_client, quality_project, other, result="passed").data
@@ -133,7 +133,7 @@ def test_defect_requires_new_matching_regression_before_close(session_client, qu
         session_client.patch(
             url, {"status": "closed", "regression_execution_id": wrong["id"]}, format="json"
         ).status_code
-        == 400
+        == 409
     )
     regression_plan = make_plan(session_client, quality_project, case)
     from plane.quality.models import TestPlan
@@ -141,7 +141,7 @@ def test_defect_requires_new_matching_regression_before_close(session_client, qu
     TestPlan.objects.filter(id=regression_plan["id"]).update(build="v2")
     regression = execute(session_client, quality_project, regression_plan, result="passed").data
     closed = session_client.patch(url, {"status": "closed", "regression_execution_id": regression["id"]}, format="json")
-    assert closed.status_code == 200 and closed.data["status"] == "closed"
+    assert closed.status_code == 409, closed.content
     assert session_client.patch(url, {"status": "open"}, format="json").status_code == 200
 
 
@@ -242,7 +242,7 @@ def test_manual_defect_and_repair_task_do_not_auto_close(session_client, quality
         session_client.patch(
             url, {"status": "closed", "regression_execution_id": old_build["id"]}, format="json"
         ).status_code
-        == 400
+        == 409
     )
 
 
@@ -260,7 +260,7 @@ def test_same_version_new_result_cannot_close_resolved_defect(session_client, qu
         session_client.patch(
             url, {"status": "closed", "regression_execution_id": passed["id"]}, format="json"
         ).status_code
-        == 400
+        == 409
     )
 
 
@@ -290,7 +290,7 @@ def test_close_cannot_change_fixed_build_without_matching_regression(session_cli
     response = session_client.patch(
         url, {"status": "closed", "fixed_build": "untested", "regression_execution_id": passed["id"]}, format="json"
     )
-    assert response.status_code == 400
+    assert response.status_code == 409
 
 
 def test_unknown_regression_is_not_found_not_server_error(session_client, quality_project):
@@ -303,7 +303,7 @@ def test_unknown_regression_is_not_found_not_server_error(session_client, qualit
     url = endpoint(quality_project, f"defects/{defect['id']}/")
     session_client.patch(url, {"status": "resolved", "fixed_build": "v2"}, format="json")
     response = session_client.patch(url, {"status": "closed", "regression_execution_id": str(uuid4())}, format="json")
-    assert response.status_code == 404
+    assert response.status_code == 409
 
 
 def test_workspace_guest_does_not_get_write_controls(session_client, quality_project, create_user):

@@ -43,6 +43,7 @@ class ConfigureInput(serializers.Serializer):
     assignee_id = serializers.UUIDField(required=False, allow_null=True)
     repair_and_arrange = serializers.BooleanField(default=False)
     repair_note = serializers.CharField(max_length=4000, allow_blank=True, default="")
+    solution_revision_id = serializers.UUIDField(required=False, allow_null=True)
 
     def validate(self, data):
         field = "steps" if data["mode"] == "manual" else "case_ids"
@@ -119,9 +120,80 @@ def scheduler(view):
     return manager(view) or has_role(view.project_id, view.request.user.id, "TECHNICIAN")
 
 
+def defect_scheduler(view, defect):
+    return manager(view) or (
+        has_role(view.project_id, view.request.user.id, "TECHNICIAN")
+        and defect.assignee_id == view.request.user.id
+    )
+
+
+def solution_review(defect):
+    from .solutions import FIELDS, current_revision
+
+    solution = defect.solutions.order_by("-created_at", "-id").first()
+    if solution is None:
+        # Historical repaired defects remain executable without inventing a proposal.
+        legacy = defect.status in {"resolved", "closed"} and defect.verification_rounds.exists()
+        return {
+            "status": "legacy" if legacy else "missing",
+            "blocked_reason": "" if legacy else "请先在处理方案中提交修复方案，由项目经理或管理员审核通过。",
+        }
+    revision = current_revision(solution)
+    approved = solution.status == "approved" and revision is not None and all(
+        revision.snapshot.get(key, "") == getattr(solution, key) for key in FIELDS
+    )
+    state = "approved" if approved else ("draft" if solution.status == "approved" else solution.status)
+    message = {
+        "draft": "修复方案尚未提交审核，请先在处理方案中提交审核。",
+        "review": "修复方案待项目经理或管理员审核，通过后才能安排测试。",
+        "rejected": "修复方案已退回，请修改后重新提交审核。",
+    }.get(state, "" if approved else "请先完成修复方案审核。")
+    return {
+        "created_by_id": str(solution.created_by_id) if solution.created_by_id else None,
+        "id": str(solution.pk),
+        "title": solution.title,
+        "status": state,
+        "revision_id": str(revision.pk) if revision else None,
+        "reviewer_ids": revision.reviewer_ids if revision else [],
+        "pending_reviewer_ids": [
+            user_id for user_id in revision.reviewer_ids
+            if user_id not in {str(value) for value in revision.reviews.values_list("created_by_id", flat=True)}
+        ] if revision and state == "review" else [],
+        "blocked_reason": message,
+        "repair_note": str(revision.snapshot.get("steps", ""))[:4000] if approved else "",
+        "test_requirements": str(revision.snapshot.get("verification", ""))[:4000] if approved else "",
+    }
+
+
+def require_reviewed_solution(defect):
+    review = solution_review(defect)
+    if review["blocked_reason"]:
+        raise Conflict(review["blocked_reason"])
+    return review
+
+
+def reviewed_revision_matches(row):
+    review = solution_review(row.defect)
+    if review["blocked_reason"]:
+        return False
+    binding = row.workflow_events.filter(action="solution_bound").first()
+    if binding:
+        return binding.snapshot.get("solution_revision_id") == review.get("revision_id")
+    if not review.get("revision_id"):
+        return True
+    from .models import SolutionRevision
+
+    # Old rounds predate explicit binding; only an earlier approved revision can apply.
+    return SolutionRevision.objects.filter(pk=review["revision_id"], created_at__lte=row.created_at).exists()
+
+
 def execution_state(row):
     if row.status != "testing":
         return row.status
+    if solution_review(row.defect)["blocked_reason"]:
+        return "waiting_solution_review"
+    if not reviewed_revision_matches(row):
+        return "needs_arrangement"
     if row.defect.status not in {"resolved", "closed"}:
         return "waiting_repair"
     if row.fixed_build != row.defect.fixed_build or row.resolved_at not in {None, row.defect.resolved_at}:
@@ -151,6 +223,7 @@ def sync_plan(row):
         "review": "review",
         "accepted": "completed",
         "waiting_repair": "pending",
+        "waiting_solution_review": "pending",
         "needs_arrangement": "pending",
         "needs_assignment": "pending",
         "returned_repair": "cancelled",
@@ -206,6 +279,9 @@ def validate_tester(view, assignee):
 
 
 def current_check(row, defect):
+    require_reviewed_solution(defect)
+    if not reviewed_revision_matches(row):
+        raise Conflict("修复方案审核版本已变更，请重新安排测试并执行本轮验证。")
     if (
         row.resolved_at is None
         and defect.status == "resolved"
@@ -366,6 +442,7 @@ def serialize(row, view):
         row.defect.status == "resolved"
         and row.fixed_build == row.defect.fixed_build
         and row.resolved_at in {None, row.defect.resolved_at}
+        and reviewed_revision_matches(row)
         and not any(item.get("stale") for item in items)
         and (
             not row.plan_id
@@ -374,7 +451,8 @@ def serialize(row, view):
     )
     administrator = is_administrator(view.request.user)
     writable = administrator or writable_member(view.project_id, view.request.user.id, view.workspace_slug)
-    mutable = writable and row.status == "testing" and fresh
+    review = solution_review(row.defect)
+    mutable = writable and row.status == "testing" and fresh and not review["blocked_reason"]
     is_manager = writable and manager(view)
     can_execute = writable and (
         administrator
@@ -382,6 +460,7 @@ def serialize(row, view):
     )
     state = execution_state(row)
     blocked = {
+        "waiting_solution_review": review["blocked_reason"],
         "waiting_repair": "等待技术员修复",
         "needs_arrangement": "修复版本已更新，请重新安排验证",
         "needs_assignment": "请技术负责人、项目经理或管理员安排测试员",
@@ -440,8 +519,9 @@ def serialize(row, view):
         "can_configure": writable
         and row.defect.status in {"open", "in_progress", "resolved"}
         and row.status not in {"review", "accepted"}
-        and scheduler(view),
-        "can_accept": row.status == "review" and is_manager and fresh,
+        and defect_scheduler(view, row.defect)
+        and not review["blocked_reason"],
+        "can_accept": row.status == "review" and is_manager and fresh and not review["blocked_reason"],
         "can_return_test": row.status == "review" and is_manager,
         "can_return_repair": row.status in {"testing", "review"} and row.defect.status == "resolved" and is_manager,
         "can_reopen": row.status == "accepted" and row.defect.status == "closed" and is_manager,
@@ -450,7 +530,16 @@ def serialize(row, view):
 
 def payload(defect, view):
     rows = list(defect.verification_rounds.select_related("plan", "defect").order_by("-round_no"))
+    review = solution_review(defect)
     return {
+        "solution_review": review,
+        "can_configure": bool(
+            not defect.archived_at
+            and defect.status in {"open", "in_progress", "resolved"}
+            and (not rows or rows[0].status not in {"review", "accepted"})
+            and defect_scheduler(view, defect)
+            and not review["blocked_reason"]
+        ),
         "defect_id": str(defect.id),
         "defect_status": defect.status,
         "defect_version": defect.edit_version,
@@ -537,6 +626,18 @@ def create_round(defect, actor, data, previous=None):
                 )
         row.plan = plan
         row.save(update_fields=["plan"])
+    review = solution_review(defect)
+    if review.get("revision_id"):
+        Event.objects.create(
+            project=defect.project,
+            created_by=actor,
+            verification=row,
+            request_id=uuid4(),
+            request_hash=fingerprint({"solution_revision_id": review["revision_id"]}),
+            action="solution_bound",
+            note=f"依据已审核修复方案：{review['title']}",
+            snapshot={"solution_id": review["id"], "solution_revision_id": review["revision_id"]},
+        )
     if previous:
         previous.status = "superseded" if previous.status == "testing" else previous.status
         previous.version += 1
@@ -570,6 +671,8 @@ class DefectVerification(QualityView):
             raise PermissionDenied("当前角色不能配置验证。")
         data = self.input(ConfigureInput)
         defect, old = lock(self, pk)
+        if not defect_scheduler(self, defect):
+            raise PermissionDenied("仅当前技术负责人、项目经理或管理员可以安排测试。")
         existing = Verification.objects.filter(defect=defect, request_id=data["request_id"]).first()
         if existing:
             if (
@@ -581,6 +684,9 @@ class DefectVerification(QualityView):
             return Response(payload(defect, self))
         if defect.edit_version != data["expected_version"]:
             raise Conflict()
+        review = require_reviewed_solution(defect)
+        if data.get("solution_revision_id") and str(data["solution_revision_id"]) != review.get("revision_id"):
+            raise Conflict("修复方案版本已变更，请刷新后按最新审核版本安排测试。")
         if not data.get("assignee_id"):
             raise ValidationError({"assignee_id": "安排验证时必须指定测试员。"})
         validate_tester(self, data["assignee_id"])
@@ -592,7 +698,7 @@ class DefectVerification(QualityView):
             raise Conflict("请先退回测试、退回修复或重开缺陷。")
         if defect.status != "resolved":
             if not data["repair_and_arrange"]:
-                raise Conflict("请完成修复并安排测试。")
+                raise Conflict("修复方案已通过，请确认修复版本并使用“完成修复并安排测试”。")
             if not manager(self) and defect.assignee_id != request.user.id:
                 raise PermissionDenied("仅当前技术负责人、项目经理或管理员可以完成修复交接。")
             if not data["repair_note"].strip():
@@ -611,6 +717,7 @@ class DefectVerification(QualityView):
             and old.fixed_build == data["fixed_build"]
             and old.resolved_at == defect.resolved_at
             and old.environment == data["environment"]
+            and reviewed_revision_matches(old)
         )
         if unchanged and old.mode == "manual":
             unchanged = True
@@ -949,6 +1056,10 @@ class DefectVerificationWorkflow(QualityView):
         ) or (action not in {"assign", "submit"} and not manager(self)):
             raise PermissionDenied("仅项目经理或管理员可以最终验收、退回或重开。")
         defect, row = lock(self, pk)
+        if action == "assign":
+            if not defect_scheduler(self, defect):
+                raise PermissionDenied("仅当前技术负责人、项目经理或管理员可以指派测试员。")
+            require_reviewed_solution(defect)
         if not row or defect.archived_at:
             raise Conflict("当前缺陷没有可操作的验证轮次。")
         existing = Event.objects.filter(verification__defect=defect, request_id=data["request_id"]).first()
@@ -1038,6 +1149,14 @@ class DefectVerificationWorkflow(QualityView):
             "reopen": "return",
         }[action]
         plan_notice(latest(defect).plan, notice_action, request.user)
+        if action in {"accept", "return_repair", "reopen"}:
+            from .notifications import defect_notice
+
+            defect_notice(defect, request.user, {
+                "accept": "缺陷已验收关闭",
+                "return_repair": "回归未通过，请继续修复",
+                "reopen": "缺陷已重新打开",
+            }[action])
         if action == "assign" and previous_assignee and previous_assignee.id != row.plan.assignee_id:
             from .notifications import notify
 
@@ -1137,6 +1256,8 @@ class DefectVerificationResults(QualityView):
 
 
 def guard_legacy(defect, data):
+    if data.get("status") == "closed" and defect.status != "closed":
+        raise Conflict("请在回归测试中记录本轮实测结果，由项目经理或管理员验收关闭。")
     if defect.verification_rounds.exists() and (
         data.get("status") == "closed" or defect.status == "closed" and data.get("status", "closed") != "closed"
     ):

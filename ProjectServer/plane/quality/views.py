@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from django.db import transaction
-from django.db.models import F, Prefetch, Q, Exists, OuterRef, Subquery
+from django.db.models import F, Prefetch, Q, Exists, OuterRef, Subquery, CharField
+from django.db.models.functions import Cast
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers
@@ -36,6 +37,16 @@ from .serializers import (
     RevisionSerializer,
     plan_summary,
 )
+
+
+def notify_assignment_supervisors(defect, actor):
+    """Notify project managers who are not already the assignee or report creator."""
+    from .notifications import defect_notice, managers
+
+    already_notified = {defect.assignee_id, defect.created_by_id}
+    receivers = set(managers(defect.project)) - already_notified
+    if receivers:
+        defect_notice(defect, actor, "新缺陷已分派", receivers=receivers)
 
 
 class Conflict(APIException):
@@ -466,9 +477,10 @@ class ExecutionDefect(QualityView):
         DefectEvent.objects.create(
             defect=defect, project=defect.project, status="open", note="由失败执行创建", created_by=request.user
         )
-        from .notifications import defect_notice
+        from .module_routing import initial_assign
 
-        defect_notice(defect, request.user, "新缺陷已分派")
+        defect = initial_assign(defect, request.user)
+        notify_assignment_supervisors(defect, request.user)
         return Response(DefectSerializer(defect_queryset().get(pk=defect.pk)).data, status=201)
 
 
@@ -502,9 +514,10 @@ class DefectList(QualityView):
         DefectEvent.objects.create(
             defect=defect, project=defect.project, status="open", note="手工提交缺陷", created_by=request.user
         )
-        from .notifications import defect_notice
+        from .module_routing import initial_assign
 
-        defect_notice(defect, request.user, "新缺陷已分派")
+        defect = initial_assign(defect, request.user)
+        notify_assignment_supervisors(defect, request.user)
         return Response(DefectSerializer(defect_queryset().get(pk=defect.pk)).data, status=201)
 
 
@@ -956,7 +969,8 @@ def quality_report(project):
 
 
 def current_verifications(project):
-    from .models import DefectVerification, DefectVerificationCase
+    from .models import DefectVerification, DefectVerificationCase, DefectVerificationEvent, Solution, SolutionRevision
+    from django.db.models.fields.json import KeyTextTransform
 
     latest_round = (
         DefectVerification.objects.filter(defect_id=OuterRef("defect_id")).order_by("-round_no").values("round_no")[:1]
@@ -965,9 +979,45 @@ def current_verifications(project):
     stale_round_cases = DefectVerificationCase.objects.filter(verification_id=OuterRef("pk"), source="library").exclude(
         source_revision__version=F("source_case__version")
     )
+    latest_solution = Solution.objects.filter(defect_id=OuterRef("defect_id")).order_by("-created_at", "-id")
+    latest_solution_revision = SolutionRevision.objects.filter(
+        solution_id=OuterRef("latest_solution_id"), version=F("solution__submitted_version")
+    ).annotate(
+        snapshot_steps=KeyTextTransform("steps", "snapshot"),
+        snapshot_root_cause=KeyTextTransform("root_cause", "snapshot"),
+        snapshot_verification=KeyTextTransform("verification", "snapshot"),
+        snapshot_title=KeyTextTransform("title", "snapshot"),
+        snapshot_risk=KeyTextTransform("risk", "snapshot"),
+        snapshot_rollback=KeyTextTransform("rollback", "snapshot"),
+        snapshot_repository=KeyTextTransform("repository", "snapshot"),
+        snapshot_commit_sha=KeyTextTransform("commit_sha", "snapshot"),
+    ).filter(
+        snapshot_steps=F("solution__steps"), snapshot_root_cause=F("solution__root_cause"),
+        snapshot_verification=F("solution__verification"), snapshot_title=F("solution__title"),
+        snapshot_risk=F("solution__risk"), snapshot_rollback=F("solution__rollback"),
+        snapshot_repository=F("solution__repository"), snapshot_commit_sha=F("solution__commit_sha"),
+    ).order_by()
+    bound_revision = DefectVerificationEvent.objects.filter(
+        verification_id=OuterRef("pk"), action="solution_bound",
+    ).annotate(bound_revision_id=KeyTextTransform("solution_revision_id", "snapshot")).filter(
+        bound_revision_id=OuterRef("solution_revision_id")
+    )
+    any_solution_binding = DefectVerificationEvent.objects.filter(
+        verification_id=OuterRef("pk"), action="solution_bound"
+    )
+    project_filter = {"project": project} if hasattr(project, "pk") else {"project_id__in": project}
     return (
-        DefectVerification.objects.filter(project=project)
-        .annotate(latest_round=Subquery(latest_round), stale_cases=Exists(stale_cases), stale_round_cases=Exists(stale_round_cases))
+        DefectVerification.objects.filter(**project_filter)
+        .annotate(
+            latest_round=Subquery(latest_round), stale_cases=Exists(stale_cases),
+            stale_round_cases=Exists(stale_round_cases),
+            latest_solution_id=Subquery(latest_solution.values("pk")[:1]),
+            solution_status=Subquery(latest_solution.values("status")[:1]),
+            solution_revision_id=Cast(Subquery(latest_solution_revision.values("pk")[:1]), CharField()),
+            solution_revision_created_at=Subquery(latest_solution_revision.values("created_at")[:1]),
+            has_solution_binding=Exists(bound_revision),
+            has_any_solution_binding=Exists(any_solution_binding),
+        )
         .filter(
             round_no=F("latest_round"),
             status__in=["testing", "review", "accepted"],
@@ -977,6 +1027,12 @@ def current_verifications(project):
             defect__resolved_at__isnull=False,
             stale_cases=False,
             stale_round_cases=False,
+        )
+        .filter(
+            Q(latest_solution_id__isnull=True, defect__status__in=["resolved", "closed"])
+            | Q(solution_status="approved", solution_revision_id__isnull=False, has_solution_binding=True)
+            | Q(solution_status="approved", solution_revision_id__isnull=False,
+                has_any_solution_binding=False, solution_revision_created_at__lte=F("created_at"))
         )
         .filter(Q(resolved_at=F("defect__resolved_at")) | Q(resolved_at__isnull=True))
         .filter(Q(mode="manual") | Q(plan__build=F("fixed_build"), plan__round_no=F("round_no")))

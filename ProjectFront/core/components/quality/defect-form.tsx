@@ -51,7 +51,7 @@ export function DefectForm({
   const transitions: Record<string, string[]> = {
     open: ["open", "in_progress", "resolved"],
     in_progress: ["open", "in_progress", "resolved"],
-    resolved: ["resolved", "open", "closed"],
+    resolved: ["resolved", "open"],
     closed: ["closed", "open"],
   };
   const [editingAssignee, setEditingAssignee] = useState(false);

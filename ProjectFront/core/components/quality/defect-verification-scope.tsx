@@ -35,12 +35,14 @@ export function DefectVerificationScope({
   value,
   context,
   onChanged,
+  onSolution,
 }: {
   base: string;
   value: Defect;
   context: Context;
   projectUrl: string;
   onRepair?: () => void;
+  onSolution?: () => void;
   onChanged: (value: Defect) => Promise<void>;
 }) {
   const endpoint = `${base}defects/${value.id}/verification/`;
@@ -75,11 +77,14 @@ export function DefectVerificationScope({
   const repairRequired = ["open", "in_progress"].includes(data?.defect_status || value.status);
   const canRepairAndArrange =
     canSchedule(context) && (context.is_administrator || context.is_manager || value.assignee_id === context.user_id);
-  const canConfigure = repairRequired
-    ? canRepairAndArrange
-    : round
-      ? round.can_configure
-      : value.status === "resolved" && canSchedule(context);
+  const solutionBlocked = !!data?.solution_review?.blocked_reason;
+  const canConfigure =
+    data?.can_configure ??
+    (repairRequired
+      ? canRepairAndArrange
+      : round
+        ? round.can_configure
+        : value.status === "resolved" && canSchedule(context));
   const update = async (result: VerificationData) => {
     await mutate(result, false);
     setEditing(false);
@@ -111,7 +116,15 @@ export function DefectVerificationScope({
     );
   return (
     <section className="space-y-5">
-      {editing ? (
+      {solutionBlocked && (
+        <div role="status" className="space-y-2 rounded-md border border-warning-subtle bg-warning-subtle p-3 text-13">
+          <p>{data.solution_review?.blocked_reason}</p>
+          <Button type="button" variant="neutral-primary" size="sm" onClick={onSolution}>
+            前往处理方案
+          </Button>
+        </div>
+      )}
+      {editing && !solutionBlocked ? (
         <VerificationConfigure
           key={round?.id || "new"}
           base={base}
@@ -124,6 +137,7 @@ export function DefectVerificationScope({
           onCancel={() => setEditing(false)}
           context={context}
           repairRequired={repairRequired}
+          solutionReview={data.solution_review}
         />
       ) : (
         <>
@@ -151,7 +165,7 @@ export function DefectVerificationScope({
               </Button>
             )}
           </div>
-          {!round && repairRequired && (
+          {!round && repairRequired && !solutionBlocked && (
             <p className="rounded-md border border-warning-subtle bg-warning-subtle p-3 text-13">
               待技术负责人修复并安排测试
             </p>
@@ -180,7 +194,12 @@ export function DefectVerificationScope({
                 <div className="min-w-0 flex-1 space-y-1">
                   <p className="font-medium">测试员：{round.assignee_name || "未安排"}</p>
                   <p className="text-secondary">
-                    下一步：{repairRequired ? "待技术负责人修复并安排测试" : verificationNextStep(round)}
+                    下一步：
+                    {solutionBlocked
+                      ? data.solution_review?.blocked_reason
+                      : repairRequired
+                        ? "待技术负责人修复并安排测试"
+                        : verificationNextStep(round)}
                   </p>
                 </div>
                 {!repairRequired && round.mode === "manual" && round.can_record && (

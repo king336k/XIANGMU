@@ -23,7 +23,7 @@ from .models import (
     DefectVerificationCaseExecution as VerificationCaseExecutionRecord,
 )
 from .permissions import ROLE_CAPABILITIES, roles_for, is_administrator
-from .views import QualityPagination
+from .views import QualityPagination, current_verifications
 
 KINDS = {
     "task": "研发任务",
@@ -201,6 +201,9 @@ def todo_query(user, options):
     active_regression = DataRegression.objects.filter(defect_id=OuterRef("pk")).exclude(
         plan__status__in=["completed", "cancelled", "failed"]
     )
+    active_verification = current_verifications(defects).filter(
+        defect_id=OuterRef("pk"), status__in=["testing", "review"]
+    )
     defect_query = (
         Defect.objects.filter(
             project_id__in=defects, archived_at__isnull=True, status__in=["open", "in_progress", "resolved"]
@@ -208,6 +211,9 @@ def todo_query(user, options):
         .filter(Q(assignee=user) | Q(pending_assignee=user))
         .annotate(active_regression=Exists(active_regression))
         .filter(~Q(status="resolved", active_regression=True) | Q(pending_assignee=user))
+    )
+    defect_query = defect_query.annotate(active_verification=Exists(active_verification)).filter(
+        ~Q(active_verification=True) | Q(pending_assignee=user)
     )
     defect_rows = projection(
         defect_query,
@@ -278,6 +284,7 @@ def todo_query(user, options):
         defect_verification__defect__archived_at__isnull=True,
         defect_verification__defect__status__in=["open", "in_progress", "resolved"],
         assignee=user,
+        pk__in=current_verifications(execute).filter(status="testing").values("plan_id"),
     )
     arrangement_plans = TestPlan.objects.filter(
         project_id__in=arrangers,
@@ -286,6 +293,7 @@ def todo_query(user, options):
         defect_verification__status="testing",
         defect_verification__defect__archived_at__isnull=True,
         defect_verification__defect__status="resolved",
+        pk__in=current_verifications(arrangers).filter(status="testing").values("plan_id"),
     )
     if is_administrator(user):
         verification_plans = TestPlan.objects.filter(
@@ -294,6 +302,7 @@ def todo_query(user, options):
             defect_verification__status__in=["testing", "review"],
             defect_verification__defect__archived_at__isnull=True,
             defect_verification__defect__status__in=["open", "in_progress", "resolved"],
+            pk__in=current_verifications(execute).filter(status="testing").values("plan_id"),
         )
         arrangement_plans = TestPlan.objects.filter(
             project_id__in=execute,
@@ -302,6 +311,7 @@ def todo_query(user, options):
             defect_verification__status="testing",
             defect_verification__defect__archived_at__isnull=True,
             defect_verification__defect__status="resolved",
+            pk__in=current_verifications(execute).filter(status="testing").values("plan_id"),
         )
     review_plans = TestPlan.objects.filter(
         project_id__in=managers,
@@ -309,6 +319,7 @@ def todo_query(user, options):
         defect_verification__status="review",
         defect_verification__defect__archived_at__isnull=True,
         defect_verification__defect__status="resolved",
+        pk__in=current_verifications(managers).filter(status="review").values("plan_id"),
     )
     plan_query = TestPlan.objects.filter(
         Q(pk__in=plan_query.filter(defect_verification__isnull=True).values("pk"))
