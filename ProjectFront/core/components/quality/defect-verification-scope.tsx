@@ -167,7 +167,7 @@ export function DefectVerificationScope({
           </div>
           {!round && repairRequired && !solutionBlocked && (
             <p className="rounded-md border border-warning-subtle bg-warning-subtle p-3 text-13">
-              待技术负责人修复并安排测试
+              {canConfigure ? "待技术负责人修复并安排测试，可选以下两种方式安排" : "待技术负责人修复并安排测试"}
             </p>
           )}
           {!round && canConfigure && (
