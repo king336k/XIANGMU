@@ -73,7 +73,9 @@ def test_case_context_retains_actual_tester_steps_and_time_after_reassign(sessio
     row = configure(session_client, base, defect, cases=cases, assignee_id=str(tester.id)).data["current"]
     session_client.force_authenticate(tester)
     for item in row["items"]:
-        assert execute(session_client, base, item).status_code == 201
+        response = execute(session_client, base, item, row["version"])
+        assert response.status_code == 201, response.content
+        row = response.data["current"]
     session_client.force_authenticate(manager)
     second = User.objects.create(username="review-context-second", email="review-context-second@local.invalid")
     WorkspaceMember.objects.create(workspace=defect.project.workspace, member=second, role=15)
@@ -85,7 +87,8 @@ def test_case_context_retains_actual_tester_steps_and_time_after_reassign(sessio
     actual = data["case_results"][0]
     assert actual.get("tested_by_id") == str(tester.id), actual
     assert actual.get("tested_at"), actual
-    assert actual.get("step_results"), actual
+    assert actual.get("actual") == "实测结果", actual
+    assert actual.get("step_results") == [], "整条用例执行不伪造逐步骤实测"
     assert data["assigned_tester_id"] == str(second.id)
 
 
@@ -93,7 +96,9 @@ def test_new_round_only_and_stale_build_are_explicit(session_client, verificatio
     base, cases, defects, tester, manager = verification
     defect = defects[0]
     row = configure(session_client, base, defect).data["current"]
+    session_client.force_authenticate(tester)
     row = record_manual(session_client, base, defect, row, "OLD_ROUND_PRIVATE_MARKER")
+    session_client.force_authenticate(manager)
     new = configure(session_client, base, defect, environment="new round environment").data["current"]
     assert new["round_no"] == 2
     defect.fixed_build = "v3"
@@ -141,6 +146,7 @@ def test_user_record_is_redacted_and_marked_as_noninstruction(session_client, ve
     base, cases, defects, tester, manager = verification
     defect = defects[0]
     row = configure(session_client, base, defect).data["current"]
+    session_client.force_authenticate(tester)
     record_manual(session_client, base, defect, row, '{"api_key":"FAKE_REVIEW_ONLY_VALUE"}')
     job, ref = ref_for(defect, manager)
     assert "FAKE_REVIEW_ONLY_VALUE" not in ref["content"]
@@ -150,7 +156,7 @@ def test_user_record_is_redacted_and_marked_as_noninstruction(session_client, ve
 def test_case_context_query_growth_is_bounded(session_client, verification):
     from django.db import connection
     from django.test.utils import CaptureQueriesContext
-    from plane.quality.models import TestCase, CaseRevision, PlanItem
+    from plane.quality.models import TestCase, CaseRevision, DefectVerificationCase
 
     base, cases, defects, tester, manager = verification
     defect = defects[0]
@@ -183,20 +189,24 @@ def test_case_context_query_growth_is_bounded(session_client, verification):
             for c in cs
         ]
         CaseRevision.objects.bulk_create(revisions)
-        PlanItem.objects.bulk_create(
+        DefectVerificationCase.objects.bulk_create(
             [
-                PlanItem(project=defect.project, created_by=manager, plan=plan, case=c, revision=r)
+                DefectVerificationCase(project=defect.project, created_by=manager, verification_id=row["id"],
+                                       source="library", source_case=c, source_revision=r,
+                                       title=r.title, snapshot=r.snapshot)
                 for c, r in zip(cs, revisions)
             ]
         )
 
     add_cases(8)
     with CaptureQueriesContext(connection) as small:
-        diagnostic_context(job)
+        refs = diagnostic_context(job)
+    assert body(next(ref for ref in refs if ref["reference"] == "PLATFORM-VERIFICATION"))["summary"]["total"] == 10
     small_count = len(small)
     add_cases(90)
     with CaptureQueriesContext(connection) as large:
-        diagnostic_context(job)
+        refs = diagnostic_context(job)
+    assert body(next(ref for ref in refs if ref["reference"] == "PLATFORM-VERIFICATION"))["summary"]["total"] == 100
     assert len(large) <= small_count + 5, (small_count, len(large))
 
 
@@ -234,7 +244,7 @@ def test_hundred_large_manual_steps_keep_valid_bounded_execution_evidence(sessio
 
 
 def test_many_large_cases_keep_full_summary_and_valid_json(session_client, verification):
-    from plane.quality.models import TestCase, CaseRevision, PlanItem, TestExecution
+    from plane.quality.models import TestCase, CaseRevision, DefectVerificationCase, DefectVerificationCaseExecution
 
     base, cases, defects, tester, manager = verification
     defect = defects[0]
@@ -257,25 +267,21 @@ def test_many_large_cases_keep_full_summary_and_valid_json(session_client, verif
         for c in cs
     ]
     CaseRevision.objects.bulk_create(revisions)
-    PlanItem.objects.bulk_create(
+    DefectVerificationCase.objects.bulk_create(
         [
-            PlanItem(project=defect.project, created_by=manager, plan=plan, case=c, revision=r)
+            DefectVerificationCase(project=defect.project, created_by=manager, verification_id=row["id"],
+                                   source="library", source_case=c, source_revision=r,
+                                   title=r.title, snapshot=r.snapshot)
             for c, r in zip(cs, revisions)
         ]
     )
-    TestExecution.objects.bulk_create(
+    DefectVerificationCaseExecution.objects.bulk_create(
         [
-            TestExecution(
-                project=defect.project,
-                created_by=tester,
-                item=i,
-                round_no=plan.round_no,
-                request_id=uuid4(),
-                result="passed",
-                actual_result="大型实际结果" * 3000,
-                step_results=[{"result": "passed", "actual": "实际详细观察" * 500} for _ in range(10)],
+            DefectVerificationCaseExecution(
+                project=defect.project, created_by=tester, item=i, request_id=uuid4(), request_hash="large",
+                result="passed", actual_result="大型实际结果" * 3000, step_results=[],
             )
-            for i in plan.items.all()
+            for i in DefectVerificationCase.objects.filter(verification_id=row["id"])
         ]
     )
     job, ref = ref_for(defect, manager)
@@ -284,3 +290,24 @@ def test_many_large_cases_keep_full_summary_and_valid_json(session_client, verif
     assert data["summary"] == {"total": 100, "passed": 100}
     assert data["truncated"] and 0 < len(data["case_results"]) <= 20
     assert all(item["tested_by_id"] == str(tester.id) for item in data["case_results"])
+    assert all(item["tested_at"] and item["actual"] == ("大型实际结果" * 3000)[:160] for item in data["case_results"])
+    assert all(item["step_results"] == [] for item in data["case_results"])
+
+
+def test_legacy_plan_case_context_still_preserves_step_evidence(session_client, verification):
+    from plane.quality.models import PlanItem, TestCase, TestExecution
+    base, cases, defects, tester, manager = verification
+    defect = defects[0]
+    row = configure(session_client, base, defect, cases=cases).data["current"]
+    verification_row = DefectVerification.objects.get(pk=row["id"])
+    verification_row.case_items.all().delete()
+    case = TestCase.objects.get(pk=cases[0]["id"])
+    item = PlanItem.objects.create(project=defect.project, created_by=manager, plan=verification_row.plan,
+                                   case=case, revision=case.revisions.get(version=case.version))
+    TestExecution.objects.create(project=defect.project, created_by=tester, item=item, round_no=row["round_no"],
+                                 request_id=uuid4(), result="passed", actual_result="旧逐步记录",
+                                 step_results=[{"result":"passed", "actual":"旧步骤通过"}])
+    _, ref = ref_for(defect, manager)
+    actual = body(ref)["case_results"][0]
+    assert actual["tested_by_id"] == str(tester.id) and actual["tested_at"]
+    assert actual["step_results"] == [{"result":"passed", "actual":"旧步骤通过"}]

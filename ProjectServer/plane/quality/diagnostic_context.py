@@ -193,15 +193,31 @@ def diagnostic_context(job, report_only=False, sources=None):
                 )
             elif row.plan_id:
                 from collections import Counter
-                from django.db.models import OuterRef, Subquery
-                from .models import TestExecution
+                from django.db.models import CharField, F, OuterRef, Subquery, Value
+                from .models import TestExecution, DefectVerificationCaseExecution
 
-                latest = TestExecution.objects.filter(item_id=OuterRef("pk"), round_no=row.round_no).order_by(
-                    "-created_at", "-id"
-                )
+                if row.case_items.exists():
+                    latest = DefectVerificationCaseExecution.objects.filter(item_id=OuterRef("pk")).order_by(
+                        "-created_at", "-id"
+                    )
+                    scoped_items = row.case_items.order_by("position", "created_at", "id").annotate(
+                        context_title=F("title"),
+                        context_source_version=F("source_revision__version"),
+                        context_current_version=F("source_case__version"),
+                        context_source=F("source"),
+                    )
+                else:
+                    latest = TestExecution.objects.filter(item_id=OuterRef("pk"), round_no=row.round_no).order_by(
+                        "-created_at", "-id"
+                    )
+                    scoped_items = row.plan.items.order_by("created_at", "id").annotate(
+                        context_title=F("revision__title"),
+                        context_source_version=F("revision__version"),
+                        context_current_version=F("case__version"),
+                        context_source=Value("library", output_field=CharField()),
+                    )
                 items = list(
-                    row.plan.items.order_by("created_at", "id")
-                    .annotate(
+                    scoped_items.annotate(
                         **{
                             "observed_" + key: Subquery(latest.values(field)[:1])
                             for key, field in {
@@ -214,9 +230,10 @@ def diagnostic_context(job, report_only=False, sources=None):
                         }
                     )
                     .values(
-                        "revision__title",
-                        "revision__version",
-                        "case__version",
+                        "context_title",
+                        "context_source_version",
+                        "context_current_version",
+                        "context_source",
                         "observed_result",
                         "observed_actual",
                         "observed_steps",
@@ -230,9 +247,10 @@ def diagnostic_context(job, report_only=False, sources=None):
                 }
                 evidence["case_results"] = [
                     {
-                        "title": item["revision__title"][:100],
+                        "title": item["context_title"][:100],
                         "result": item["observed_result"] or "pending",
-                        "stale": item["revision__version"] != item["case__version"],
+                        "stale": item["context_source"] == "library"
+                        and item["context_source_version"] != item["context_current_version"],
                         "actual": (item["observed_actual"] or "")[:160],
                         "tested_by_id": str(item["observed_actor"]) if item["observed_actor"] else None,
                         "tested_at": str(item["observed_at"]) if item["observed_at"] else None,
