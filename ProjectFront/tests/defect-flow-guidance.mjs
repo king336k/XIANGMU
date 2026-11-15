@@ -29,6 +29,17 @@ const data = (status, extra = {}) => ({
   current: null,
   ...extra,
 });
+test("五个流程节点跳转到对应页面", () => {
+  for (const [stage, tab] of [
+    [0, "overview"],
+    [1, "diagnosis"],
+    [2, "solution"],
+    [3, "regression"],
+    [4, "regression"],
+  ])
+    assert.equal(api.defectFlowTab(stage), tab);
+  assert.equal(api.defectFlowTab(-1), undefined);
+});
 test("上报人等待分诊、经理可直达诊断分配", () => {
   const value = { ...defect, assignee_id: null, module: null };
   assert.equal(api.defectFlowStep(value, context("reporter"), data("missing")).action, undefined);

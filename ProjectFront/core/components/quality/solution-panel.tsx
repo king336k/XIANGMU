@@ -66,9 +66,9 @@ export function SolutionPanel({
     : [];
   const reviewRevision = reviewing ? currentSolutionRevision(reviewing) : null;
   return (
-    <section className="space-y-4" aria-label="处理方案与审核">
+    <section className="space-y-4" aria-label="修复方案与审核">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-14 font-semibold">处理方案</h3>
+        <h3 className="text-14 font-semibold">修复方案</h3>
         {data?.can_create && (
           <Button type="button" variant="neutral-primary" size="sm" onClick={() => setEditing(null)}>
             新增方案
@@ -84,7 +84,7 @@ export function SolutionPanel({
           正在加载方案…
         </p>
       ) : !data.results.length ? (
-        <p className="text-13 text-secondary">暂无处理方案。</p>
+        <p className="text-13 text-secondary">暂无修复方案。</p>
       ) : (
         data.results.map((solution) => (
           <SolutionCard

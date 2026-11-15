@@ -1,4 +1,5 @@
 import useSWR from "swr";
+import { useEffect, useRef } from "react";
 import { Button } from "@plane/ui";
 import { qualityApi } from "./api";
 import { can } from "./types";
@@ -7,6 +8,12 @@ import { verificationNextStep } from "./verification-types";
 import type { VerificationData } from "./verification-types";
 
 type FlowAction = { tab: "diagnosis" | "solution" | "regression"; label: string };
+const stageTabs = ["overview", "diagnosis", "solution", "regression", "regression"] as const;
+
+export function defectFlowTab(stage: number) {
+  return stage >= 0 && stage < stageTabs.length ? stageTabs[stage] : undefined;
+}
+
 export function defectFlowStep(value: Defect, context: Context, data: VerificationData) {
   const review = data.solution_review;
   const round = data.current;
@@ -80,25 +87,40 @@ export function DefectFlowGuidance({
   const { data } = useSWR(`${base}defects/${value.id}/verification/`, (url: string) =>
     qualityApi.read<VerificationData>(url)
   );
-  if (!data) return null;
-  const flow = defectFlowStep(value, context, data);
+  const priorStage = useRef<number | null>(null);
+  const flow = data ? defectFlowStep(value, context, data) : null;
+  const stage = flow?.stage;
   const labels = ["上报反馈", "诊断分配", "修复方案", "回归测试", "验收关闭"];
+  useEffect(() => {
+    if (stage === undefined) return;
+    if (priorStage.current === stage) return;
+    priorStage.current = stage;
+    const tab = defectFlowTab(stage);
+    if (tab) onNavigate(tab);
+  }, [stage, onNavigate]);
+  if (!flow) return null;
   return (
     <section aria-label="缺陷处理流程" className="space-y-3 rounded-lg border border-subtle bg-layer-1 p-3 sm:p-4">
       <ol className="flex flex-wrap gap-x-5 gap-y-2 text-12" aria-label="处理阶段">
         {labels.map((label, index) => (
           <li
             key={label}
-            aria-current={flow.stage === index ? "step" : undefined}
             className={`flex items-center gap-2 ${flow.stage === index ? "font-semibold text-accent-primary" : "text-secondary"}`}
           >
-            <span
-              aria-hidden="true"
-              className={`flex h-5 w-5 items-center justify-center rounded-full text-11 ${flow.stage > index ? "bg-success-subtle text-success-primary" : flow.stage === index ? "bg-accent-subtle" : "bg-layer-2"}`}
+            <button
+              type="button"
+              aria-current={flow.stage === index ? "step" : undefined}
+              onClick={() => onNavigate(stageTabs[index])}
+              className="focus-visible:ring-accent-primary flex items-center gap-2 rounded focus-visible:ring-2 focus-visible:outline-none"
             >
-              {flow.stage > index ? "✓" : index + 1}
-            </span>
-            {label}
+              <span
+                aria-hidden="true"
+                className={`flex h-5 w-5 items-center justify-center rounded-full text-11 ${flow.stage > index ? "bg-success-subtle text-success-primary" : flow.stage === index ? "bg-accent-subtle" : "bg-layer-2"}`}
+              >
+                {flow.stage > index ? "✓" : index + 1}
+              </span>
+              {label}
+            </button>
           </li>
         ))}
       </ol>

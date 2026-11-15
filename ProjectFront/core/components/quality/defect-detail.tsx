@@ -244,7 +244,7 @@ export function DefectDetail({
           {[
             ["overview", "概况"],
             ["diagnosis", "诊断"],
-            ["solution", "处理方案"],
+            ["solution", "修复方案"],
             ["regression", "回归测试"],
             ["comments", "评论"],
             ["history", "操作记录"],
