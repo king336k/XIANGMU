@@ -15,7 +15,7 @@ function harness(current) {
     return stubs.get(name);
   };
   const exp = {},
-    data = { current };
+    data = { current, defect_status: "resolved" };
   const source = readFileSync(new URL("../core/components/quality/verification-assignee.tsx", import.meta.url), "utf8");
   new Function(
     "require",

@@ -18,6 +18,7 @@ export function VerificationConfigure({
   onSaved,
   onCancel,
   context,
+  repairRequired = false,
 }: {
   base: string;
   defectId: string;
@@ -28,7 +29,9 @@ export function VerificationConfigure({
   onSaved: (data: VerificationData) => Promise<void>;
   onCancel: () => void;
   context?: Context;
+  repairRequired?: boolean;
 }) {
+  const [expectedVersion] = useState(version);
   const [mode, setMode] = useState(initialMode || initial?.mode || "manual");
   const [howToTest, setHowToTest] = useState(initial?.steps.map((step) => step.action).join("\n") || "");
   const [selected, setSelected] = useState<CaseOption[]>(
@@ -45,6 +48,7 @@ export function VerificationConfigure({
   const [testRequirements, setTestRequirements] = useState(
     mode === "cases" ? initial?.steps.map((step) => step.action).join("\n") || "" : ""
   );
+  const [repairNote, setRepairNote] = useState("");
   const [build, setBuild] = useState(initial?.fixed_build || fixedBuild);
   const [environment, setEnvironment] = useState(initial?.environment || "");
   const [assignee, setAssignee] = useState(initial?.assignee_id || "");
@@ -60,7 +64,8 @@ export function VerificationConfigure({
     setError("");
     try {
       const result = await qualityApi.write<VerificationData>(`${base}defects/${defectId}/verification/`, {
-        expected_version: version,
+        expected_version: expectedVersion,
+        ...(repairRequired ? { repair_and_arrange: true, repair_note: repairNote } : {}),
         request_id: requestId,
         mode,
         fixed_build: build,
@@ -81,10 +86,8 @@ export function VerificationConfigure({
   return (
     <fieldset disabled={busy} className="min-w-0 space-y-4">
       <div className="rounded-md border border-subtle bg-layer-1 p-3">
-        <h3 className="text-13 font-medium">安排验证</h3>
-        <p className="mt-1 text-12 text-secondary">
-          写清测试要求并指派测试员。测试员会在缺陷页、测试任务和我的工作中看到同一项任务。
-        </p>
+        <h3 className="text-13 font-medium">{repairRequired ? "修复并安排测试" : "安排测试"}</h3>
+        <p className="mt-1 text-12 text-secondary">保存后交给指派测试员执行。</p>
       </div>
       <div role="group" aria-label="验证方式" className="flex flex-wrap gap-2">
         {(
@@ -132,6 +135,22 @@ export function VerificationConfigure({
           />
         </Field>
       </div>
+      {repairRequired && (
+        <Field label="处理说明">
+          <textarea
+            required
+            rows={3}
+            maxLength={4000}
+            className={fieldClass}
+            value={repairNote}
+            onChange={(event) => {
+              setRepairNote(event.target.value);
+              change();
+            }}
+            placeholder="简要说明修复内容"
+          />
+        </Field>
+      )}
       <Field label="指派测试员">
         <select
           aria-label="指派测试员"
@@ -212,12 +231,14 @@ export function VerificationConfigure({
           disabled={
             busy ||
             !build.trim() ||
+            !assignee ||
+            (repairRequired && !repairNote.trim()) ||
             !environment.trim() ||
             (mode === "manual" ? !howToTest.trim() : !selected.length && !testRequirements.trim())
           }
           onClick={() => void save()}
         >
-          {busy ? "正在保存…" : "保存安排"}
+          {busy ? "正在保存…" : repairRequired ? "完成修复并安排测试" : "保存安排"}
         </Button>
         <Button type="button" variant="neutral-primary" onClick={onCancel}>
           取消

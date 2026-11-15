@@ -95,6 +95,10 @@ test("人工验证安排只填写如何测试和版本，不再要求重复填�
     .find((n) => n.props?.label === "如何测试")
     .props.children.props.onChange({ target: { value: "打开控制页" } });
   tree = h.render();
+  nodes(tree)
+    .find((n) => n.type === "select" && n.props["aria-label"] === "指派测试员")
+    .props.onChange({ target: { value: "tester" } });
+  tree = h.render();
   const save = nodes(tree).find((n) => n.props?.children === "保存安排");
   assert.equal(save.props.disabled, false);
   save.props.onClick();
@@ -283,4 +287,60 @@ test("人工记录只填写简要测试结果，不重复填写证据和逐步�
   await updated.props.onSubmit(new Map([["result", "passed"]]));
   assert.equal(h.writes[0][1].evidence, "");
   assert.deepEqual(h.writes[0][1].step_results, [{ result: "passed", actual: "正常" }]);
+});
+
+test("技术负责人一次保存修复与测试交接，测试员和处理说明不可遗漏", async () => {
+  const h = harness("verification-configure", "VerificationConfigure", {
+    base: "/q/",
+    defectId: "d",
+    version: 9,
+    fixedBuild: "v2",
+    initialMode: "manual",
+    repairRequired: true,
+  });
+  let tree = h.render();
+  let save = nodes(tree).find((n) => n.props?.children === "完成修复并安排测试");
+  assert.equal(save.props.disabled, true);
+  for (const [label, value] of [
+    ["验证环境", "集成测试"],
+    ["处理说明", "修复完成"],
+    ["如何测试", "重现异常后检查结果"],
+  ]) {
+    tree = h.render();
+    nodes(tree)
+      .find((n) => n.props?.label === label)
+      .props.children.props.onChange({ target: { value } });
+  }
+  tree = h.render();
+  nodes(tree)
+    .find((n) => n.type === "select" && n.props["aria-label"] === "指派测试员")
+    .props.onChange({ target: { value: "tester" } });
+  tree = h.render();
+  save = nodes(tree).find((n) => n.props?.children === "完成修复并安排测试");
+  assert.equal(save.props.disabled, false);
+  save.props.onClick();
+  await new Promise(setImmediate);
+  const payload = h.writes[0][1];
+  assert.equal(payload.repair_and_arrange, true);
+  assert.equal(payload.repair_note, "修复完成");
+  assert.equal(payload.assignee_id, "tester");
+  assert.equal(payload.fixed_build, "v2");
+  assert.deepEqual(payload.steps, [{ action: "重现异常后检查结果", expected: "" }]);
+});
+
+test("安排表单编辑中后台版本变化时，保存仍携带打开时的版本避免覆盖他人", async () => {
+  const h = harness("verification-configure", "VerificationConfigure", {
+    base: "/q/",
+    defectId: "d",
+    version: 9,
+    fixedBuild: "v2",
+    initialMode: "manual",
+  });
+  h.render();
+  const tree = h.render({ version: 10 });
+  nodes(tree)
+    .find((node) => node.props?.children === "保存安排")
+    .props.onClick();
+  await new Promise(setImmediate);
+  assert.equal(h.writes[0][1].expected_version, 9);
 });

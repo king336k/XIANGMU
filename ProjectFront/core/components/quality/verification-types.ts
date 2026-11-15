@@ -101,7 +101,7 @@ export const verificationStatusTone: Record<string, string> = {
   needs_cases: "pending",
   pending: "pending",
   running: "running",
-  tested: "passed",
+  tested: "review",
   testing: "running",
   review: "review",
   accepted: "passed",

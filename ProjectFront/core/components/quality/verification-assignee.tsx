@@ -37,7 +37,7 @@ export function VerificationAssignee({
             修改指派
           </button>
         )}
-        {data && !current && canSchedule(context) && (
+        {data && !current && data.defect_status === "resolved" && canSchedule(context) && (
           <button type="button" className="text-12 text-accent-primary hover:underline" onClick={onArrange}>
             安排测试
           </button>

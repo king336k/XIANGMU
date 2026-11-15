@@ -303,7 +303,7 @@ test("测试员能看懂待修复时为何未执行，以及结果要在哪里�
   h.setDefectStatus("open");
   const tree = h.render();
   const all = nodes(tree);
-  assert.ok(textContent(tree).includes("待技术负责人登记修复后测试"));
+  assert.ok(textContent(tree).includes("待技术负责人修复并安排测试"));
   assert.equal(
     all.some((node) => node.props?.children === "填写测试结果"),
     false
@@ -331,4 +331,24 @@ test("修复后人工验证明确显示提交测试结果入口和步骤", () =>
   const all = nodes(tree);
   assert.ok(all.some((node) => node.props?.children === "填写测试结果"));
   assert.ok(textContent(tree).includes("填写测试结果"));
+});
+
+test("未修复时不显示已完成安排或执行入口，只开放修复并安排测试", () => {
+  const h = harness({
+    id: "r",
+    mode: "manual",
+    status: "testing",
+    execution_state: "waiting_repair",
+    can_configure: true,
+    can_record: false,
+    summary: { total: 1, pending: 1, passed: 0 },
+  });
+  h.setDefectStatus("open");
+  const all = nodes(h.render());
+  assert.ok(!all.some((n) => n.type === h.sym("VerificationProgress")), "旧提前安排不能显示完成勾");
+  const action = all.find((n) => n.props?.children === "修复并安排测试");
+  assert.ok(action);
+  action.props.onClick();
+  const editor = nodes(h.render()).find((n) => n.type === h.sym("VerificationConfigure"));
+  assert.equal(editor.props.repairRequired, true);
 });

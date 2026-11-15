@@ -15,7 +15,6 @@ import { VerificationRoundView } from "./verification-round-view";
 import { VerificationProgress } from "./verification-progress";
 import type { VerificationData, VerificationItem, VerificationRound } from "./verification-types";
 import { verificationStatus, verificationStatusTone, verificationNextStep } from "./verification-types";
-import { ProjectRouteLink } from "@/components/common/project-route-link";
 const actionLabels: Record<string, string> = {
   submit: "提交验收",
   accept: "验收关闭",
@@ -36,8 +35,6 @@ export function DefectVerificationScope({
   value,
   context,
   onChanged,
-  projectUrl,
-  onRepair,
 }: {
   base: string;
   value: Defect;
@@ -75,7 +72,14 @@ export function DefectVerificationScope({
     !!round &&
     (retiredRound || (!!round.fixed_build && round.fixed_build !== value.fixed_build)) &&
     data?.defect_status === "resolved";
-  const canConfigure = round ? round.can_configure : value.status !== "closed" && canSchedule(context);
+  const repairRequired = ["open", "in_progress"].includes(data?.defect_status || value.status);
+  const canRepairAndArrange =
+    canSchedule(context) && (context.is_administrator || context.is_manager || value.assignee_id === context.user_id);
+  const canConfigure = repairRequired
+    ? canRepairAndArrange
+    : round
+      ? round.can_configure
+      : value.status === "resolved" && canSchedule(context);
   const update = async (result: VerificationData) => {
     await mutate(result, false);
     setEditing(false);
@@ -119,6 +123,7 @@ export function DefectVerificationScope({
           onSaved={update}
           onCancel={() => setEditing(false)}
           context={context}
+          repairRequired={repairRequired}
         />
       ) : (
         <>
@@ -142,10 +147,15 @@ export function DefectVerificationScope({
                 disabled={!canConfigure}
                 onClick={() => start(round.mode)}
               >
-                {retiredRound || readyForNewRound ? "重新安排" : "修改安排"}
+                {repairRequired ? "修复并安排测试" : retiredRound || readyForNewRound ? "重新安排" : "修改安排"}
               </Button>
             )}
           </div>
+          {!round && repairRequired && (
+            <p className="rounded-md border border-warning-subtle bg-warning-subtle p-3 text-13">
+              待技术负责人修复并安排测试
+            </p>
+          )}
           {!round && canConfigure && (
             <div role="group" aria-label="选择验证方式" className="flex flex-wrap gap-2">
               <Button type="button" variant="neutral-primary" onClick={() => start("manual")}>
@@ -158,7 +168,7 @@ export function DefectVerificationScope({
           )}
           {round && (
             <>
-              <VerificationProgress round={round} defectStatus={data.defect_status} />
+              {!repairRequired && <VerificationProgress round={round} defectStatus={data.defect_status} />}
               <div
                 role="status"
                 className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border px-3 py-3 text-12 ${
@@ -169,23 +179,15 @@ export function DefectVerificationScope({
               >
                 <div className="min-w-0 flex-1 space-y-1">
                   <p className="font-medium">测试员：{round.assignee_name || "未安排"}</p>
-                  <p className="text-secondary">下一步：{verificationNextStep(round)}</p>
+                  <p className="text-secondary">
+                    下一步：{repairRequired ? "待技术负责人修复并安排测试" : verificationNextStep(round)}
+                  </p>
                 </div>
-                {round.mode === "manual" && round.can_record && (
+                {!repairRequired && round.mode === "manual" && round.can_record && (
                   <Button type="button" onClick={() => setRecording({ round })}>
                     填写测试结果
                   </Button>
                 )}
-                {waitingForRepair &&
-                  (onRepair ? (
-                    <Button type="button" variant="neutral-primary" size="sm" onClick={onRepair}>
-                      登记修复
-                    </Button>
-                  ) : (
-                    <ProjectRouteLink to={`${projectUrl}/defects/?defect=${value.id}`} className="text-accent-primary">
-                      查看缺陷
-                    </ProjectRouteLink>
-                  ))}
               </div>
               {readyForNewRound && (
                 <p className="text-12 text-secondary">当前修复版本：{value.fixed_build}；以下为上一轮结果。</p>

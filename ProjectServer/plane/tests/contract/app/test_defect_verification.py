@@ -527,13 +527,14 @@ def test_new_build_and_case_revision_invalidate_old_pass_and_plan_is_immutable(s
 def test_preconfigure_actual_execution_latest_result_and_build_change(session_client, verification):
     base, cases, defects, tester, manager = verification
     defect = defects[0]
-    defect.status, defect.fixed_build, defect.resolved_at = "open", "", None
-    defect.save()
     response = configure(session_client, base, defect, cases)
     assert response.status_code == 201, response.content
+    defect.status, defect.fixed_build, defect.resolved_at = "open", "", None
+    defect.save()
     current = response.data["current"]
+    current = session_client.get(base + f"defects/{defect.id}/verification/").data["current"]
     assert not current["can_record"] and current["can_configure"]
-    assert configure(session_client, base, defect, cases).data["current"]["id"] == current["id"]
+    assert configure(session_client, base, defect, cases).status_code == 409
     session_client.force_authenticate(tester)
     assert execute(session_client, base, current["items"][0], current["version"]).status_code == 409
     session_client.force_authenticate(manager)
@@ -541,6 +542,9 @@ def test_preconfigure_actual_execution_latest_result_and_build_change(session_cl
         base + f"defects/{defect.id}/", {"status": "resolved", "fixed_build": "v2"}, format="json"
     )
     assert resolved.status_code == 200, resolved.content
+    previous_round_id = current['id']
+    current = configure(session_client, base, defect, cases).data['current']
+    assert current['id'] != previous_round_id, '新的修复时间必须重新安排，不能沿用旧执行上下文'
     session_client.force_authenticate(tester)
     for item in current["items"]:
         execution = execute(session_client, base, item, current["version"])
@@ -812,9 +816,10 @@ def test_verification_task_owner_queue_and_result_share_one_round(session_client
 def test_prearranged_task_explains_waiting_for_repair(session_client, verification):
     base, cases, defects, tester, manager = verification
     defect = defects[0]
+    configure(session_client, base, defect, assignee_id=str(tester.id))
     defect.status, defect.fixed_build, defect.resolved_at = "open", "", None
     defect.save()
-    row = configure(session_client, base, defect, assignee_id=str(tester.id)).data["current"]
+    row = session_client.get(base + f"defects/{defect.id}/verification/").data["current"]
     assert row["execution_state"] == "waiting_repair"
     assert row["blocked_reason"] == "等待技术员修复"
     assert not row["can_record"]
@@ -968,3 +973,80 @@ def test_optional_workflow_comment_does_not_leave_dangling_colon(session_client,
     response = workflow(session_client, base, defect, row, 'accept', comment='  ')
     assert response.status_code == 200, response.content
     assert defect.events.latest('created_at').note == '验收关闭，验证第1轮'
+
+
+@pytest.mark.parametrize('mode', ['manual', 'cases'])
+def test_repair_and_assignment_are_one_atomic_technician_handoff(session_client, verification, mode):
+    from plane.quality.models import BusinessRole, ProjectRolePolicy
+    base, cases, defects, tester, manager = verification
+    defect = defects[0]
+    project = defect.project
+    tech = User.objects.create(username='handoff-technician', email='handoff-technician@test.invalid')
+    WorkspaceMember.objects.create(workspace=project.workspace, member=tech, role=15)
+    ProjectMember.objects.create(project=project, member=tech, role=15)
+    ProjectRolePolicy.objects.create(project=project, enabled=True)
+    for user, role in [(tech, 'TECHNICIAN'), (manager, 'PROJECT_MANAGER'), (tester, 'REGRESSION_TESTER')]:
+        BusinessRole.objects.create(project=project, created_by=manager, user=user, role=role)
+    defect.status, defect.resolved_at, defect.fixed_build, defect.assignee = 'in_progress', None, '', tech
+    defect.save()
+    session_client.force_authenticate(tech)
+    data = {'repair_and_arrange': True, 'repair_note': '修复完成，交给测试员验证', 'mode': mode}
+    if mode == 'cases': data.update(case_ids=[], test_requirements='请补充验证用例')
+    bad = configure(session_client, base, defect, **data, assignee_id=str(manager.pk))
+    assert bad.status_code == 400, bad.content
+    defect.refresh_from_db()
+    assert defect.status == 'in_progress' and defect.fixed_build == ''
+    assert not defect.verification_rounds.exists()
+    response = configure(session_client, base, defect, **data, assignee_id=str(tester.pk))
+    assert response.status_code == 201, response.content
+    defect.refresh_from_db()
+    row = response.data['current']
+    assert defect.status == 'resolved' and defect.fixed_build == 'v2' and defect.resolved_at
+    assert defect.resolution == data['repair_note']
+    assert row['assignee_id'] == str(tester.pk)
+    assert row['execution_state'] in {'pending', 'needs_cases'}
+    assert defect.events.filter(created_by=tech, note__contains='修复完成并安排测试').exists()
+    session_client.force_authenticate(tester)
+    assert session_client.get(base + f"defects/{defect.pk}/verification/").data['current']['can_record']
+
+
+def test_cannot_mark_arrangement_complete_before_repair(session_client, verification):
+    base, _, defects, _, _ = verification
+    defect = defects[0]
+    defect.status, defect.fixed_build, defect.resolved_at = 'open', '', None
+    defect.save()
+    response = configure(session_client, base, defect)
+    assert response.status_code == 409, response.content
+    defect.refresh_from_db()
+    assert defect.status == 'open' and not defect.verification_rounds.exists()
+
+
+def test_repair_retest_keeps_case_requirements_but_never_reuses_previous_results(session_client, verification):
+    from plane.quality.models import DefectVerificationCaseExecution
+    base, cases, defects, tester, manager = verification
+    defect = defects[0]
+    old = configure(session_client, base, defect, cases).data['current']
+    session_client.force_authenticate(tester)
+    old = session_client.post(base + f'defects/{defect.id}/verification/cases/', {
+        'expected_version': old['version'], 'request_id': str(uuid4()), 'case_ids': [],
+        'temporary_cases': [{'title': '本轮补充的异常边界', 'steps': [{'action': '再次触发并检查异常边界', 'expected': '正常'}]}],
+    }, format='json').data['current']
+    old = execute(session_client, base, old['items'][-1], old['version'], 'failed').data['current']
+    session_client.force_authenticate(manager)
+    returned = workflow(session_client, base, defect, old, 'return_repair', comment='未彻底修复，继续处理')
+    assert returned.status_code == 200, returned.content
+    assert returned.data['defect_status'] == 'open'
+    rebuilt = configure(session_client, base, defect, cases, repair_and_arrange=True,
+                        repair_note='继续修复边界条件，重新测试', fixed_build='v3')
+    assert rebuilt.status_code == 201, rebuilt.content
+    new = rebuilt.data['current']
+    assert new['round_no'] == 2 and new['fixed_build'] == 'v3'
+    assert new['summary']['total'] == 3 and new['summary']['pending'] == 3
+    assert new['summary']['passed'] == new['summary']['failed'] == 0
+    assert any(item['source'] == 'round' and item['title'] == '本轮补充的异常边界' for item in new['items'])
+    previous = rebuilt.data['history'][0]
+    assert previous['id'] == old['id'] and previous['summary']['failed'] == 1
+    assert previous['status'] == 'returned_repair'
+    assert DefectVerificationCaseExecution.objects.filter(item__verification_id=old['id']).count() == 1
+    session_client.force_authenticate(tester)
+    assert execute(session_client, base, old['items'][-1], old['version']).status_code == 409

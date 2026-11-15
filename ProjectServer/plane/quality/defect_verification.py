@@ -7,6 +7,7 @@ from uuid import uuid4
 from django.db import transaction
 from django.db.models import F, Q, OuterRef, Subquery
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
@@ -40,6 +41,8 @@ class ConfigureInput(serializers.Serializer):
     case_ids = serializers.ListField(child=serializers.UUIDField(), max_length=500, required=False, default=list)
     test_requirements = serializers.CharField(max_length=4000, allow_blank=True, required=False, default="")
     assignee_id = serializers.UUIDField(required=False, allow_null=True)
+    repair_and_arrange = serializers.BooleanField(default=False)
+    repair_note = serializers.CharField(max_length=4000, allow_blank=True, default="")
 
     def validate(self, data):
         field = "steps" if data["mode"] == "manual" else "case_ids"
@@ -521,6 +524,17 @@ def create_round(defect, actor, data, previous=None):
                 snapshot=revision.snapshot,
                 position=index,
             )
+        if previous and previous.mode == "cases":
+            for index, item in enumerate(previous.case_items.filter(source="round").order_by("position", "created_at", "id")):
+                DefectVerificationCase.objects.create(
+                    project=defect.project,
+                    created_by=actor,
+                    verification=row,
+                    source="round",
+                    title=item.title,
+                    snapshot=item.snapshot,
+                    position=len(cases) + index,
+                )
         row.plan = plan
         row.save(update_fields=["plan"])
     if previous:
@@ -576,6 +590,20 @@ class DefectVerification(QualityView):
             raise Conflict("验证版本必须与本次修复版本一致。")
         if old and old.status in {"review", "accepted"}:
             raise Conflict("请先退回测试、退回修复或重开缺陷。")
+        if defect.status != "resolved":
+            if not data["repair_and_arrange"]:
+                raise Conflict("请完成修复并安排测试。")
+            if not manager(self) and defect.assignee_id != request.user.id:
+                raise PermissionDenied("仅当前技术负责人、项目经理或管理员可以完成修复交接。")
+            if not data["repair_note"].strip():
+                raise ValidationError({"repair_note": "请填写处理说明。"})
+            previous_status = defect.status
+            defect.status = "resolved"
+            defect.fixed_build = data["fixed_build"]
+            defect.resolution = data["repair_note"].strip()
+            defect.resolved_at = timezone.now()
+            defect.save(update_fields=["status", "fixed_build", "resolution", "resolved_at", "updated_at"])
+            audit(defect, request.user, f"修复完成并安排测试：{defect.resolution}", previous_status)
         unchanged = (
             old
             and old.status == "testing"
@@ -674,7 +702,7 @@ class DefectVerification(QualityView):
             defect,
             request.user,
             f"{'人工验证安排' if row.mode == 'manual' else '用例回归安排：关联' + str(len(data['case_ids'])) + '条公共用例' + ('，填写测试要求' if data['test_requirements'].strip() else '，待补充本轮用例')}，"
-            f"第{row.round_no}轮，修复版本{row.fixed_build}，环境{row.environment}",
+            f"第{row.round_no}轮，修复版本{row.fixed_build}，测试员：{row.plan.assignee.display_name or row.plan.assignee.username}",
         )
         return Response(payload(defect, self), status=201)
 
@@ -973,7 +1001,7 @@ class DefectVerificationWorkflow(QualityView):
             snapshot_legacy_plan_items(row, request.user)
             row.status = "returned_test"
             row.save(update_fields=["status"])
-            next_round = create_round(
+            create_round(
                 defect,
                 request.user,
                 {
@@ -987,17 +1015,6 @@ class DefectVerificationWorkflow(QualityView):
                 },
                 row,
             )
-            if row.mode == "cases":
-                for index, old_item in enumerate(row.case_items.filter(source="round").order_by("position", "created_at")):
-                    DefectVerificationCase.objects.create(
-                        project=defect.project,
-                        created_by=request.user,
-                        verification=next_round,
-                        source="round",
-                        title=old_item.title,
-                        snapshot=old_item.snapshot,
-                        position=next_round.case_items.count() + index,
-                    )
         else:
             if action == "reopen" and defect.status != "closed":
                 raise Conflict("当前缺陷尚未关闭。")
