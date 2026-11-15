@@ -59,6 +59,24 @@ export type VerificationData = {
   current: VerificationRound | null;
   history: VerificationRound[];
 };
+export function verificationNextStep(round: VerificationRound): string {
+  if (round.status === "accepted") return "验收完成";
+  if (["returned_repair", "reopened"].includes(round.status)) return "待技术负责人修复后重新安排";
+  if (round.status === "review") {
+    if (!round.can_accept && !round.can_return_test) return "等待项目经理或管理员验收";
+    return round.summary.total > 0 && round.summary.passed === round.summary.total
+      ? "验收关闭，或退回补测"
+      : "查看未通过项，退回补测或修复";
+  }
+  if (round.execution_state === "waiting_repair") return "待技术负责人登记修复后测试";
+  if (round.execution_state === "needs_arrangement") return round.can_configure ? "重新安排测试" : "等待负责人重新安排";
+  if (round.execution_state === "needs_assignment") return round.can_configure ? "指派测试员" : "等待负责人指派测试员";
+  if (round.execution_state === "needs_cases")
+    return round.can_record || round.can_configure ? "补充本轮用例" : "等待补充本轮用例";
+  if (!round.can_record) return `等待 ${round.assignee_name || "指派测试员"} 测试`;
+  if (round.summary.total > 0 && round.summary.pending === 0) return "提交验收";
+  return round.mode === "manual" ? "填写测试结果" : `执行剩余 ${round.summary.pending} 条用例`;
+}
 export const verificationStatus: Record<string, string> = {
   waiting_repair: "等待修复",
   needs_arrangement: "待重新安排",

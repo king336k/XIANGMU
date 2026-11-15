@@ -1,6 +1,6 @@
 import type { VerificationRound } from "./verification-types";
 
-const labels = ["安排测试", "修复确认", "执行测试", "等待验收", "关闭缺陷"];
+const labels = ["安排测试", "执行测试", "验收关闭"];
 
 export function VerificationProgress({ round, defectStatus }: { round: VerificationRound; defectStatus: string }) {
   const returnedForRepair = round.status === "returned_repair";
@@ -10,19 +10,8 @@ export function VerificationProgress({ round, defectStatus }: { round: Verificat
   const waitingForRepair = round.execution_state === "waiting_repair";
   const needsArrangement = round.execution_state === "needs_arrangement";
   const readyToSubmit = round.execution_state === "tested";
-  const current = closed
-    ? 4
-    : waitingForOwner
-      ? round.execution_state === "needs_assignment"
-        ? 0
-        : 2
-      : returnedForRepair || returnedForTest || waitingForRepair || needsArrangement
-        ? 1
-        : round.status === "review" || readyToSubmit
-          ? 3
-          : defectStatus !== "resolved"
-            ? 1
-            : 2;
+  const current =
+    closed || round.status === "review" ? 2 : round.execution_state === "needs_assignment" || needsArrangement ? 0 : 1;
   const currentLabel = returnedForRepair
     ? "退回修复"
     : returnedForTest
@@ -37,7 +26,9 @@ export function VerificationProgress({ round, defectStatus }: { round: Verificat
             ? "重新安排验证"
             : readyToSubmit
               ? "提交验收"
-              : labels[current];
+              : round.status === "review"
+                ? "待验收"
+                : labels[current];
 
   return (
     <ol
@@ -53,7 +44,9 @@ export function VerificationProgress({ round, defectStatus }: { round: Verificat
           : failed
             ? "border-danger-subtle bg-danger-subtle text-danger-primary"
             : active
-              ? "border-accent-subtle bg-accent-subtle text-accent-primary"
+              ? round.status === "review"
+                ? "border-warning-subtle bg-warning-subtle text-warning-primary"
+                : "border-accent-subtle bg-accent-subtle text-accent-primary"
               : "border-subtle text-secondary";
         return (
           <li

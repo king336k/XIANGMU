@@ -20,7 +20,13 @@ export function RoundOwnerSummary({
     <details className="rounded border border-subtle p-3">
       <summary className="cursor-pointer text-13">本轮执行人</summary>
       <div className="mt-3">
-        <OwnerSummary endpoint={`${base}owner-statistics/`} source="quality" params={params} metrics={metrics} />
+        <OwnerSummary
+          endpoint={`${base}owner-statistics/`}
+          source="quality"
+          params={params}
+          metrics={metrics}
+          compact
+        />
       </div>
     </details>
   );

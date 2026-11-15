@@ -31,6 +31,7 @@ export function OwnerSummary({
   metrics,
   onOpenRecord,
   detailsOnly = false,
+  compact = false,
 }: {
   endpoint: string;
   source: string;
@@ -38,12 +39,15 @@ export function OwnerSummary({
   metrics: readonly OwnerMetric[];
   onOpenRecord?: (row: OwnerRecord) => void;
   detailsOnly?: boolean;
+  compact?: boolean;
 }) {
   const [route, setRoute] = useSearchParams(),
     location = useLocation();
   const scope = ownerStatisticsScope(endpoint, source, params);
   const scoped = route.get("owner_scope") === scope;
-  const metric = metrics.find((item) => item.key === (scoped ? route.get("owner_metric") : null)) || metrics[0];
+  const metric = compact
+    ? metrics[0]
+    : metrics.find((item) => item.key === (scoped ? route.get("owner_metric") : null)) || metrics[0];
   const ownerPage = Math.max(1, Number(scoped ? route.get("owner_page") : null) || 1),
     detailPage = Math.max(1, Number(scoped ? route.get("owner_detail_page") : null) || 1);
   const selectedId = scoped ? route.get("owner_id") : null,
@@ -83,34 +87,38 @@ export function OwnerSummary({
   return (
     <section
       aria-label="人员事项统计"
-      className={detailsOnly ? "" : "min-w-0 space-y-3 rounded-md border border-subtle p-4"}
+      className={
+        detailsOnly ? "" : compact ? "min-w-0 space-y-2" : "min-w-0 space-y-3 rounded-md border border-subtle p-4"
+      }
     >
       {!detailsOnly && (
         <>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-14 font-semibold">人员事项</h2>
-            <select
-              aria-label="人员统计指标"
-              value={metric.key}
-              className={`${fieldClass} !w-auto max-w-full`}
-              onChange={(event) =>
-                update({
-                  owner_metric: event.target.value,
-                  owner_page: "1",
-                  owner_id: null,
-                  owner_status: null,
-                  owner_name: null,
-                  owner_detail_page: null,
-                })
-              }
-            >
-              {metrics.map((item) => (
-                <option key={item.key} value={item.key}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!compact && (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-14 font-semibold">人员事项</h2>
+              <select
+                aria-label="人员统计指标"
+                value={metric.key}
+                className={`${fieldClass} !w-auto max-w-full`}
+                onChange={(event) =>
+                  update({
+                    owner_metric: event.target.value,
+                    owner_page: "1",
+                    owner_id: null,
+                    owner_status: null,
+                    owner_name: null,
+                    owner_detail_page: null,
+                  })
+                }
+              >
+                {metrics.map((item) => (
+                  <option key={item.key} value={item.key}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {error ? (
             <p role="alert" className="text-13 text-danger-primary">
               {errorMessage(error)}{" "}
@@ -127,10 +135,12 @@ export function OwnerSummary({
               <p className="text-12 text-secondary">
                 共 {data.total} 条{data.collaborative ? " · 多人分别计入" : ""}
               </p>
-              <details className="text-12 text-secondary">
-                <summary className="cursor-pointer">统计口径</summary>
-                <p className="mt-2">{data.ownership_basis}</p>
-              </details>
+              {!compact && (
+                <details className="text-12 text-secondary">
+                  <summary className="cursor-pointer">统计口径</summary>
+                  <p className="mt-2">{data.ownership_basis}</p>
+                </details>
+              )}
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-12">
                   <thead>

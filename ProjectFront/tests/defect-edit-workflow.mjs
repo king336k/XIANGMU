@@ -55,7 +55,7 @@ function form(mode, onWrite, original = {}) {
     if (id === "@/components/common/project-route-link") return { ProjectRouteLink: () => null };
     return require(id);
   }, exports);
-  return exports.DefectForm({
+  const tree = exports.DefectForm({
     base: "/quality/",
     context: { is_manager: true, issues: [], members: [] },
     value: {
@@ -71,6 +71,7 @@ function form(mode, onWrite, original = {}) {
     onSaved: async () => {},
     projectUrl: "/project",
   });
+  return tree.props.children[1];
 }
 test("编辑基本信息不携带状态、负责人、修复信息", async () => {
   let payload;

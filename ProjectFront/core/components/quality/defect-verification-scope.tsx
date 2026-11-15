@@ -14,7 +14,7 @@ import { VerificationCaseSupplement } from "./verification-case-supplement";
 import { VerificationRoundView } from "./verification-round-view";
 import { VerificationProgress } from "./verification-progress";
 import type { VerificationData, VerificationItem, VerificationRound } from "./verification-types";
-import { verificationStatus, verificationStatusTone } from "./verification-types";
+import { verificationStatus, verificationStatusTone, verificationNextStep } from "./verification-types";
 import { ProjectRouteLink } from "@/components/common/project-route-link";
 const actionLabels: Record<string, string> = {
   submit: "提交验收",
@@ -167,56 +167,16 @@ export function DefectVerificationScope({
                     : "border-subtle bg-layer-1"
                 }`}
               >
-                <span>指派测试员：{round.assignee_name || "未安排"}</span>
-                <span className="text-secondary">
-                  下一步：
-                  {waitingForRepair
-                    ? "等待技术员修复"
-                    : waitingForArrangement
-                      ? "等待重新安排"
-                      : waitingForAssignment
-                        ? "等待负责人安排测试员"
-                        : waitingForCases
-                          ? "等待补充本轮用例"
-                          : round.blocked_reason ||
-                            (round.status === "review"
-                              ? "经理或管理员验收"
-                              : round.status === "accepted"
-                                ? "验收完成"
-                                : round.can_record
-                                  ? round.summary.pending
-                                    ? "执行验证，填写实测结果"
-                                    : "提交验收"
-                                  : "由指派测试员继续处理")}
-                </span>
-                {waitingForRepair && (
-                  <p className="basis-full text-secondary">
-                    技术员更新修复版本后，测试员即可在此填写结果。当前无需提交测试结果。
-                  </p>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="font-medium">测试员：{round.assignee_name || "未安排"}</p>
+                  <p className="text-secondary">下一步：{verificationNextStep(round)}</p>
+                </div>
+                {round.mode === "manual" && round.can_record && (
+                  <Button type="button" onClick={() => setRecording({ round })}>
+                    填写测试结果
+                  </Button>
                 )}
-                {waitingForArrangement && (
-                  <p className="basis-full text-secondary">修复版本已更新，请先重新安排本轮验证，再开始测试。</p>
-                )}
-                {waitingForAssignment && (
-                  <p className="basis-full text-secondary">
-                    请技术负责人、项目经理或管理员指定测试员。测试员不能自行认领；安排后任务会出现在测试员的“我的工作”。
-                  </p>
-                )}
-                {waitingForCases && (
-                  <p className="basis-full text-secondary">请先补充本轮用例，再逐条执行并提交验收。</p>
-                )}
-                {!waitingForRepair &&
-                  !waitingForArrangement &&
-                  !waitingForAssignment &&
-                  !waitingForCases &&
-                  round.can_record && (
-                    <p className="basis-full text-secondary">
-                      {round.mode === "manual"
-                        ? "现在可以测试。按步骤填写实际结果，提交测试结果后等待项目经理或管理员验收。"
-                        : "现在可以测试。逐条执行用例并记录结果，全部完成后提交验收。"}
-                    </p>
-                  )}
-                {round.blocked_reason &&
+                {waitingForRepair &&
                   (onRepair ? (
                     <Button type="button" variant="neutral-primary" size="sm" onClick={onRepair}>
                       登记修复
@@ -263,11 +223,6 @@ export function DefectVerificationScope({
                           : ""}
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
-                  {round.mode === "manual" && round.can_record && (
-                    <Button type="button" onClick={() => setRecording({ round })}>
-                      填写测试结果
-                    </Button>
-                  )}
                   {(
                     [
                       ["return_repair", round.can_return_repair],
@@ -284,7 +239,7 @@ export function DefectVerificationScope({
                         type="button"
                         variant={key === "accept" || key === "submit" ? "primary" : "neutral-primary"}
                         disabled={
-                          (key === "submit" && !!round.summary.pending) ||
+                          (key === "submit" && (!round.summary.total || !!round.summary.pending)) ||
                           (key === "accept" &&
                             (!round.can_accept || !round.summary.total || round.summary.passed !== round.summary.total))
                         }

@@ -25,6 +25,91 @@ function load(name, mocks = {}) {
   return exp;
 }
 const types = load("verification-types.ts");
+const DirectExecutionButton = () => null;
+test("下一步区分安排人、被指派测试员和验收人，失败结果不能提示直接关闭", () => {
+  const base = {
+    ...round,
+    status: "testing",
+    assignee_name: "test",
+    execution_state: "pending",
+    can_record: true,
+    can_configure: false,
+    summary: { total: 10, pending: 9, passed: 1 },
+  };
+  assert.equal(types.verificationNextStep(base), "填写测试结果");
+  assert.equal(types.verificationNextStep({ ...base, mode: "cases" }), "执行剩余 9 条用例");
+  assert.equal(types.verificationNextStep({ ...base, can_record: false }), "等待 test 测试");
+  assert.equal(
+    types.verificationNextStep({ ...base, execution_state: "tested", summary: { total: 1, pending: 0, passed: 1 } }),
+    "提交验收"
+  );
+  assert.equal(
+    types.verificationNextStep({ ...base, execution_state: "needs_assignment", can_configure: true }),
+    "指派测试员"
+  );
+  assert.equal(
+    types.verificationNextStep({
+      ...base,
+      status: "review",
+      can_accept: true,
+      summary: { total: 1, pending: 0, passed: 1 },
+    }),
+    "验收关闭，或退回补测"
+  );
+  assert.equal(
+    types.verificationNextStep({
+      ...base,
+      status: "review",
+      can_accept: true,
+      summary: { total: 1, pending: 0, passed: 0 },
+    }),
+    "查看未通过项，退回补测或修复"
+  );
+  assert.equal(
+    types.verificationNextStep({ ...base, status: "review", can_accept: false, can_return_test: false }),
+    "等待项目经理或管理员验收"
+  );
+  assert.equal(
+    types.verificationNextStep({ ...base, execution_state: "waiting_repair" }),
+    "待技术负责人登记修复后测试"
+  );
+});
+test("折叠的用例仍可直接执行，已通过的结果不被步骤空记录显示为未执行", () => {
+  const { VerificationRoundView } = load("verification-round-view.tsx", {
+    "@plane/ui": { Button: DirectExecutionButton },
+    "./verification-types": types,
+    "./shared": { Badge: () => null },
+    "./verification-steps-table": { VerificationStepsTable: Table },
+  });
+  const item = {
+    item_id: "i",
+    source: "round",
+    title: "检查",
+    result: "passed",
+    stale: false,
+    snapshot: { steps: [{ action: "检查", expected: "正常" }] },
+    latest_execution: { result: "passed", actual_result: "正常", step_results: [] },
+  };
+  let selected;
+  const tree = VerificationRoundView({
+    round: { ...round, mode: "cases", can_record: true, items: [item, { ...item, item_id: "j" }] },
+    onExecute: (value) => {
+      selected = value;
+    },
+  });
+  const all = descendants(tree);
+  const actions = all.filter((node) => node.type === DirectExecutionButton);
+  assert.equal(actions.length, 2);
+  for (const details of all.filter((node) => node.type === "details")) {
+    assert.ok(!descendants(details).some((node) => node.type === DirectExecutionButton), "执行按钮不能藏在折叠区");
+  }
+  actions[0].props.onClick();
+  assert.equal(selected, item);
+  const table = all.find((node) => node.type === Table);
+  assert.equal(table.props.instructionsOnly, true, "整条用例执行不能伪造逐步结果");
+  const readonly = VerificationRoundView({ round: { ...round, mode: "cases", can_record: false, items: [item] } });
+  assert.ok(!descendants(readonly).some((node) => node.type === DirectExecutionButton));
+});
 const Badge = ({ value, label }) => React.createElement("span", { "data-tone": value }, label || value);
 const round = {
   id: "r",
@@ -114,6 +199,18 @@ test("步骤表并排展示预期与真实结果，手机使用逐行布局", ()
     assert.ok(html.includes(label), label);
   assert.match(html, /data-tone="failed"/);
   assert.match(html, /sm:table-cell/);
+});
+test("整条用例按说明执行时不展示虚假的逐步未执行状态", () => {
+  const { VerificationStepsTable } = load("verification-steps-table.tsx", { "./shared": { Badge } });
+  const html = renderToStaticMarkup(
+    React.createElement(VerificationStepsTable, {
+      steps: [{ action: "检查采集文件", expected: "文件完整" }],
+      instructionsOnly: true,
+    })
+  );
+  assert.match(html, /检查采集文件/);
+  assert.match(html, /文件完整/);
+  assert.doesNotMatch(html, /实际结果|data-tone="pending"/);
 });
 
 const View = () => null;
@@ -246,6 +343,27 @@ test("验证结果详情不显示环境等重复信息", () => {
   assert.doesNotMatch(html, />本地</);
 });
 
+test("回归仅有安排、执行、验收三阶段，填写结果后仍需提交验收", () => {
+  const { VerificationProgress } = load("verification-progress.tsx");
+  for (const state of ["pending", "tested", "review", "accepted"]) {
+    const tree = VerificationProgress({
+      round: {
+        ...round,
+        status: state === "review" ? "review" : state === "accepted" ? "accepted" : "testing",
+        execution_state: state,
+      },
+      defectStatus: state === "accepted" ? "closed" : "resolved",
+    });
+    const steps = descendants(tree).filter((node) => node.type === "li");
+    assert.equal(steps.length, 3);
+    const active = steps.find((node) => node.props["aria-current"] === "step");
+    if (state === "tested")
+      assert.equal(descendants(active).findLast((node) => node.type === "span").props.children, "提交验收");
+    if (state === "review")
+      assert.equal(descendants(active).findLast((node) => node.type === "span").props.children, "待验收");
+    if (state === "accepted") assert.equal(active, undefined);
+  }
+});
 test("缺陷验证进度显示当前阶段，并用颜色区分退回与完成", () => {
   const { VerificationProgress } = load("verification-progress.tsx");
   const value = {
@@ -257,7 +375,7 @@ test("缺陷验证进度显示当前阶段，并用颜色区分退回与完成",
   assert.match(html, /aria-current="step"[^>]*>.*退回修复/s);
   assert.match(html, /border-danger-subtle bg-danger-subtle text-danger-primary/);
   assert.match(html, /安排测试/);
-  assert.match(html, /关闭缺陷/);
+  assert.match(html, /验收关闭/);
 });
 
 test("十条用例集中在同一轮列表，管理员代测后显示实际执行人及剩余项", () => {

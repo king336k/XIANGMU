@@ -112,6 +112,9 @@ test("owner row status and count open paginated detail with URL state while pres
     metrics: [{ key: "total", label: "缺陷" }],
   };
   let tree = OwnerSummary(props);
+  const compact = OwnerSummary({ ...props, compact: true });
+  assert.ok(!nodes(compact).some((node) => node.type === "select"), "本轮执行人不需要指标下拉框");
+  assert.ok(nodes(compact).some((node) => node.props?.["aria-label"] === "技术员甲 · 待处理 3条"));
   const button = nodes(tree).find((n) => n.type === "button" && n.props["aria-label"] === "技术员甲 · 待处理 3条");
   assert.ok(button);
   button.props.onClick();

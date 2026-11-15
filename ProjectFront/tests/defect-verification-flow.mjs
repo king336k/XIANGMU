@@ -49,6 +49,13 @@ function harness(current = null, canConfigure = true) {
         errorMessage: String,
       };
     if (id === "./types") return { can: () => canConfigure };
+    if (id === "./verification-types")
+      return {
+        verificationStatus: {},
+        verificationStatusTone: {},
+        verificationNextStep: (round) =>
+          round.execution_state === "waiting_repair" ? "待技术负责人登记修复后测试" : "填写测试结果",
+      };
     return new Proxy({}, { get: (_, key) => (key === "fieldClass" ? "field" : sym(key)) });
   }, exp);
   return {
@@ -296,7 +303,7 @@ test("测试员能看懂待修复时为何未执行，以及结果要在哪里�
   h.setDefectStatus("open");
   const tree = h.render();
   const all = nodes(tree);
-  assert.ok(textContent(tree).includes("技术员更新修复版本后，测试员即可在此填写结果。当前无需提交测试结果。"));
+  assert.ok(textContent(tree).includes("待技术负责人登记修复后测试"));
   assert.equal(
     all.some((node) => node.props?.children === "填写测试结果"),
     false
@@ -323,5 +330,5 @@ test("修复后人工验证明确显示提交测试结果入口和步骤", () =>
   const tree = harness(round).render();
   const all = nodes(tree);
   assert.ok(all.some((node) => node.props?.children === "填写测试结果"));
-  assert.ok(textContent(tree).includes("现在可以测试。按步骤填写实际结果，提交测试结果后等待项目经理或管理员验收。"));
+  assert.ok(textContent(tree).includes("填写测试结果"));
 });

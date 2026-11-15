@@ -39,7 +39,7 @@ export function VerificationRoundView({
         <section className="space-y-3">
           <div>
             <h3 className="text-13 font-medium">执行验证</h3>
-            <p className="mt-1 text-12 text-secondary">按测试要求填写测试结果，提交后等待项目经理或管理员验收</p>
+            <p className="mt-1 text-12 text-secondary">按要求测试后填写结果</p>
           </div>
           <div className="rounded-md border border-subtle bg-layer-1 p-3">
             <p className="mb-1 text-12 text-secondary">如何测试</p>
@@ -122,7 +122,7 @@ export function VerificationRoundView({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-13 font-medium">执行验证</h3>
-              <p className="mt-1 text-12 text-secondary">在下方列表逐条执行用例并填写结果</p>
+              <p className="mt-1 text-12 text-secondary">逐条填写结果，完成后提交验收</p>
             </div>
             <Badge
               value={verificationStatusTone[round.execution_state || round.status] || "neutral"}
@@ -148,85 +148,92 @@ export function VerificationRoundView({
             {round.summary.skipped > 0 && <Badge value="neutral" label={`跳过 ${round.summary.skipped}`} />}
           </div>
           {round.items.map((item) => (
-            <details
-              key={item.item_id}
-              className="rounded-md border border-subtle"
-              open={round.items.length === 1 || item.result === "failed" || item.result === "blocked"}
-            >
-              <summary className="cursor-pointer px-3 py-3 text-13">
-                <span className="inline-flex max-w-full flex-wrap items-center gap-2 align-middle">
-                  <strong className="font-medium break-words">{item.title}</strong>
-                  <span className="text-12 text-secondary">
-                    {item.source === "round" ? "本轮临时用例" : item.case_version ? `v${item.case_version}` : "用例"} ·{" "}
-                    {item.snapshot.steps.length} 个步骤
-                  </span>
-                  <Badge value={item.result} />
-                  {item.stale && <Badge value="inconclusive" label="用例已更新" />}
-                </span>
-              </summary>
-              <div className="space-y-3 border-t border-subtle p-3">
-                <VerificationStepsTable
-                  steps={item.snapshot.steps}
-                  results={item.latest_execution?.step_results}
-                  onResultChange={
-                    onExecute && round.can_record && !item.stale
-                      ? (index, result) => onExecute(item, index, result)
-                      : undefined
-                  }
-                />
-                {item.latest_execution && (
-                  <div className="space-y-2 text-12">
-                    {item.latest_execution.actual_result !==
-                      item.latest_execution.step_results
-                        .map((step, index) => `${index + 1}. ${step.actual}`)
-                        .join("\n") && (
-                      <p className="break-words whitespace-pre-wrap">
-                        <span className="text-secondary">测试结果：</span>
-                        {item.latest_execution.actual_result}
-                      </p>
-                    )}
-                    {item.latest_execution.evidence && (
-                      <p className="break-words whitespace-pre-wrap text-secondary">
-                        测试备注：{item.latest_execution.evidence}
-                      </p>
-                    )}
-                    <p className="text-secondary">
-                      {item.latest_execution.executor} · {renderNumericDateTime(item.latest_execution.created_at)}
-                    </p>
-                  </div>
-                )}
-                {(item.execution_history?.length || 0) > 1 && (
-                  <details className="border-t border-subtle pt-2">
-                    <summary className="cursor-pointer text-12 text-secondary">
-                      历史执行（{item.execution_history!.length - 1}）
-                    </summary>
-                    <div className="mt-2 space-y-2">
-                      {item.execution_history!.slice(1).map((execution) => (
-                        <div key={execution.id} className="rounded border border-subtle p-2 text-12">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge value={execution.result} />
-                            <span className="text-secondary">
-                              {execution.executor} · {renderNumericDateTime(execution.created_at)}
-                            </span>
-                          </div>
-                          {execution.actual_result && (
-                            <p className="mt-1 whitespace-pre-wrap">
-                              <span className="text-secondary">测试结果：</span>
-                              {execution.actual_result}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                )}
+            <article key={item.item_id} className="min-w-0 rounded-md border border-subtle">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-subtle px-3 py-2">
+                <span className="min-w-0 flex-1 text-13 font-medium break-words">{item.title}</span>
+                <Badge value={item.result} />
                 {onExecute && round.can_record && !item.stale && (
-                  <Button type="button" size="sm" variant="primary" onClick={() => onExecute(item)}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={item.latest_execution ? "neutral-primary" : "primary"}
+                    onClick={() => onExecute(item)}
+                  >
                     {item.latest_execution ? "重新执行" : "执行用例"}
                   </Button>
                 )}
               </div>
-            </details>
+              <details open={round.items.length === 1 || item.result === "failed" || item.result === "blocked"}>
+                <summary className="cursor-pointer px-3 py-3 text-13">
+                  <span className="inline-flex max-w-full flex-wrap items-center gap-2 align-middle">
+                    <span className="text-12 text-secondary">查看步骤</span>
+                    <span className="text-12 text-secondary">
+                      {item.source === "round" ? "本轮临时用例" : item.case_version ? `v${item.case_version}` : "用例"}{" "}
+                      · {item.snapshot.steps.length} 个步骤
+                    </span>
+                    {item.stale && <Badge value="inconclusive" label="用例已更新" />}
+                  </span>
+                </summary>
+                <div className="space-y-3 border-t border-subtle p-3">
+                  <VerificationStepsTable
+                    instructionsOnly={!!item.source && item.source !== "legacy"}
+                    steps={item.snapshot.steps}
+                    results={item.latest_execution?.step_results}
+                    onResultChange={
+                      onExecute && round.can_record && !item.stale
+                        ? (index, result) => onExecute(item, index, result)
+                        : undefined
+                    }
+                  />
+                  {item.latest_execution && (
+                    <div className="space-y-2 text-12">
+                      {item.latest_execution.actual_result !==
+                        item.latest_execution.step_results
+                          .map((step, index) => `${index + 1}. ${step.actual}`)
+                          .join("\n") && (
+                        <p className="break-words whitespace-pre-wrap">
+                          <span className="text-secondary">测试结果：</span>
+                          {item.latest_execution.actual_result}
+                        </p>
+                      )}
+                      {item.latest_execution.evidence && (
+                        <p className="break-words whitespace-pre-wrap text-secondary">
+                          测试备注：{item.latest_execution.evidence}
+                        </p>
+                      )}
+                      <p className="text-secondary">
+                        {item.latest_execution.executor} · {renderNumericDateTime(item.latest_execution.created_at)}
+                      </p>
+                    </div>
+                  )}
+                  {(item.execution_history?.length || 0) > 1 && (
+                    <details className="border-t border-subtle pt-2">
+                      <summary className="cursor-pointer text-12 text-secondary">
+                        历史执行（{item.execution_history!.length - 1}）
+                      </summary>
+                      <div className="mt-2 space-y-2">
+                        {item.execution_history!.slice(1).map((execution) => (
+                          <div key={execution.id} className="rounded border border-subtle p-2 text-12">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge value={execution.result} />
+                              <span className="text-secondary">
+                                {execution.executor} · {renderNumericDateTime(execution.created_at)}
+                              </span>
+                            </div>
+                            {execution.actual_result && (
+                              <p className="mt-1 whitespace-pre-wrap">
+                                <span className="text-secondary">测试结果：</span>
+                                {execution.actual_result}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              </details>
+            </article>
           ))}
         </section>
       )}
