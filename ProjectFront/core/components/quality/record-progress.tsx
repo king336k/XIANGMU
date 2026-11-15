@@ -115,7 +115,7 @@ export function RecordProgress({
           />
         </div>
       )}
-      {mode !== "details" && !(mode === "stages" && kind === "defect" && defectFlow) && (
+      {mode !== "details" && !(kind === "defect" && defectFlow && mode === "stages") && (
         <Modal title="进度与历程" width="wide" onClose={() => setMode("details")}>
           <nav aria-label="进度展示方式" className="platform-selection-group">
             {modes.map((item) => (
@@ -144,7 +144,7 @@ export function RecordProgress({
               正在读取…
             </p>
           )}
-          {data && mode === "stages" && (
+          {data && mode === "stages" && kind !== "defect" && (
             <ol aria-label="业务阶段图" className="m-0 flex list-none flex-wrap gap-3 p-0">
               {data.stages.map((stage, index) => {
                 const state = stage.key === data.current ? "current" : stage.state || "pending";

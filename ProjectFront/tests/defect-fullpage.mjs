@@ -170,16 +170,16 @@ const text = (node) =>
         ? node.map(text).join("")
         : text(node.props?.children);
 
-test("缺陷详情顶部不重复展示来源长文本", () => {
+test("缺陷详情保留来源信息，同时独立显示进度入口", () => {
   const daq = text(
     detail("overview", false, { source_kind: "daq", created_by_name: "反馈服务", reporter: { username: "caiji1" } })
       .tree
   );
-  assert.doesNotMatch(daq, /DAQ 上报.*caiji1/);
+  assert.match(daq, /DAQ 上报.*caiji1/);
   const manual = text(detail("overview", false, { source_kind: "manual", created_by_name: "张工" }).tree);
-  assert.doesNotMatch(manual, /平台新建.*张工/);
+  assert.match(manual, /平台新建.*张工/);
   const fromTest = text(detail("overview", false, { source_kind: "test", created_by_name: "测试员" }).tree);
-  assert.doesNotMatch(fromTest, /测试提报.*测试员/);
+  assert.match(fromTest, /测试提报.*测试员/);
 });
 
 test("缺陷表格与窄屏列表都保留采集员和时间", () => {
