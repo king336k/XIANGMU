@@ -1,4 +1,6 @@
 (plane_proxy) {
+    encode gzip
+
     @document_import path_regexp document_import ^/api/workspaces/[^/]+/projects/[0-9a-fA-F-]{36}/quality/document-imports/$
     request_body @document_import {
         max_size 22MB
