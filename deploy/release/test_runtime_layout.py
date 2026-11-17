@@ -9,6 +9,19 @@ import yaml
 ROOT=Path(__file__).resolve().parents[2]
 
 
+def test_hashed_frontend_assets_are_compressed_cached_and_html_stays_fresh():
+    config=(ROOT/'deploy/release/nginx.web.conf').read_text()
+    assert 'gzip on;' in config
+    assert 'gzip_vary on;' in config
+    assert 'gzip_min_length 1024;' in config
+    assert 'gzip_comp_level 5;' in config
+    assert 'gzip_types application/javascript' in config
+    assets=config.split('location ^~ /assets/ {',1)[1].split('}',1)[0]
+    assert 'try_files $uri =404;' in assets
+    assert 'expires 1y;' in assets
+    assert '"text/html" "no-cache";' in config
+
+
 def test_release_separates_code_from_runtime_and_keeps_logs_bounded():
     value=yaml.safe_load((ROOT/'deploy/release/compose.yml').read_text())
     for name,service in value['services'].items():
