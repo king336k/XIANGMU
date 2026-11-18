@@ -126,8 +126,8 @@ def test_terminal_get_commits_permission_revocation_cleanup(remote):
     client, _, device, project = remote
     station, _ = bound(remote)
     opened=client.post(BASE,{"action":"open","device_id":device},format="json")
-    from plane.db.models import ProjectMember
-    ProjectMember.objects.filter(project=project,member=station.agent.owner).update(is_active=False)
+    station.enabled=False
+    station.save(update_fields=["enabled"])
     response=client.get(BASE+"sessions/"+opened.data["id"]+"/")
     assert response.status_code == 403
     assert RemoteTerminal.objects.get(pk=opened.data["id"]).status=="closed"
