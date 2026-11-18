@@ -24,7 +24,7 @@ export function RemoteDiagnostics() {
   const [selectedId, setSelectedId] = useState("");
   const [terminalId, setTerminalId] = useState("");
   const selected = data?.results.find((device) => device.id === selectedId);
-  const terminalDevice = !error && data?.results.find((device) => device.id === terminalId && device.can_connect);
+  const terminalDevice = data?.results.find((device) => device.id === terminalId && device.can_connect);
 
   return (
     <div className="h-full overflow-y-auto px-4 py-6 sm:px-6 xl:px-8">
@@ -43,7 +43,12 @@ export function RemoteDiagnostics() {
           刷新设备
         </button>
       </div>
-      {error ? (
+      {error && data && (
+        <p role="alert" className="mb-4 text-12 text-warning-primary">
+          设备状态刷新失败，稍后重试
+        </p>
+      )}
+      {error && !data ? (
         <p role="alert" className="text-13 text-danger-primary">
           {errorMessage(error)}
         </p>

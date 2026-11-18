@@ -219,7 +219,9 @@ function nodes(tree) {
   return [tree, ...nodes(tree.props?.children)];
 }
 
-function renderRoot(devices, selected = "", terminal = "") {
+const FileView = () => null;
+const TerminalView = () => null;
+function renderRoot(devices, selected = "", terminal = "", error = undefined, hasData = true) {
   let cursor = 0;
   const states = [selected, terminal];
   const mutations = [];
@@ -232,18 +234,20 @@ function renderRoot(devices, selected = "", terminal = "") {
       },
     },
     "react-router": { useParams: () => ({ workspaceSlug: "test" }), useSearchParams: () => [new URLSearchParams()] },
-    swr: { default: () => ({ data: { results: devices, can_manage: true }, mutate() {} }) },
+    swr: {
+      default: () => ({ data: hasData ? { results: devices, can_manage: true } : undefined, error, mutate() {} }),
+    },
     "lucide-react": { Monitor: () => null, RefreshCw: () => null },
     "@/components/quality/api": { qualityApi: {}, errorMessage: String },
     "@/components/settings/content-wrapper": { SettingsContentWrapper: () => null },
     "./agent-panel": { AgentPanel: () => null },
-    "./file-panel": { FilePanel: () => null },
-    "./terminal-panel": { TerminalPanel: () => null },
+    "./file-panel": { FilePanel: FileView },
+    "./terminal-panel": { TerminalPanel: TerminalView },
     "./types": types,
     "./feedback-picker": { FeedbackPicker: () => null },
     "./remote-feedback-history": { RemoteFeedbackHistory: () => null },
   });
-  return { tree: RemoteDiagnostics(), mutations };
+  return { tree: RemoteDiagnostics(), mutations, FileView, TerminalView };
 }
 
 const device = {
@@ -277,6 +281,38 @@ test("missing collector IP stays unknown instead of substituting hostname or loo
   const title = nodes(tree).find((node) => node.type === "h2");
   assert.equal(title.props.children.join(""), "operator@IP待确认");
   assert.doesNotMatch(JSON.stringify(title), /127\.0\.0\.1|robot-01/);
+});
+
+test("cached device refresh error keeps selected file and terminal sessions mounted with a retry notice", () => {
+  const { tree } = renderRoot([device], device.id, device.id, new Error("502"));
+  assert.equal(nodes(tree).filter((node) => node.type === FileView).length, 1);
+  assert.equal(nodes(tree).filter((node) => node.type === TerminalView).length, 1);
+  assert.match(JSON.stringify(tree), /设备状态刷新失败，稍后重试/);
+  const refresh = nodes(tree).find(
+    (node) => node.type === "button" && JSON.stringify(node.props.children).includes("刷新设备")
+  );
+  assert.equal(refresh.props.disabled, undefined);
+});
+
+test("no cached directory does not grant access and explicit removal or revoked connection closes terminal", () => {
+  const first = renderRoot([], device.id, device.id, new Error("initial error"), false);
+  assert.equal(
+    nodes(first.tree).some((node) => node.type === first.FileView || node.type === first.TerminalView),
+    false
+  );
+  assert.match(JSON.stringify(first.tree), /initial error/);
+  for (const devices of [[], [{ ...device, can_connect: false }]]) {
+    const next = renderRoot(devices, device.id, device.id);
+    assert.equal(
+      nodes(next.tree).some((node) => node.type === next.TerminalView),
+      false
+    );
+    if (devices.length)
+      assert.equal(
+        nodes(next.tree).find((node) => node.type === "button" && node.props.children === "打开终端").props.disabled,
+        true
+      );
+  }
 });
 
 test("remote diagnosis uses the workspace page and legacy settings page only redirects", () => {
