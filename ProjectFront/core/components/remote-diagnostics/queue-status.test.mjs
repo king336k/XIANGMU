@@ -135,7 +135,7 @@ test("device panel polls real queued stage through repair to completion and then
     feedback,
     "排查",
     false,
-    { id: "run", status: "queued", queue: { reason: "device_busy", position: 0 } },
+    { id: "run", status: "queued", queue: { reason: "device_busy", position: 0 }, result: {} },
     "",
     1,
   ];
@@ -167,6 +167,7 @@ test("device panel polls real queued stage through repair to completion and then
       "@/components/quality/shared": { fieldClass: "field" },
       "./types": types,
       "./feedback-picker": { FeedbackPicker: () => null },
+      "./remote-feedback-history": { RemoteFeedbackHistory: () => null },
     },
     (callback) => {
       pendingTimers.push(callback);
@@ -175,6 +176,11 @@ test("device panel polls real queued stage through repair to completion and then
   );
   const tree = api.AgentPanel({ device });
   assert.match(JSON.stringify(tree), /等待采集电脑空闲/);
+  assert.equal(
+    nodes(tree).find((node) => node.type === "button" && node.props.children === "排队中…").props.disabled,
+    true
+  );
+  assert.doesNotMatch(JSON.stringify(tree), /暂无结果|"摘要"|"下一步"|正在诊断…/);
   for (const effect of effects) effect();
   assert.equal(pendingTimers.length, 1);
   pendingTimers.shift()();

@@ -241,6 +241,7 @@ function renderRoot(devices, selected = "", terminal = "") {
     "./terminal-panel": { TerminalPanel: () => null },
     "./types": types,
     "./feedback-picker": { FeedbackPicker: () => null },
+    "./remote-feedback-history": { RemoteFeedbackHistory: () => null },
   });
   return { tree: RemoteDiagnostics(), mutations };
 }
@@ -333,6 +334,7 @@ test("Agent diagnosis starts only after explicit action and includes the selecte
     "@/components/quality/shared": { fieldClass: "field" },
     "./types": types,
     "./feedback-picker": { FeedbackPicker: () => null },
+    "./remote-feedback-history": { RemoteFeedbackHistory: () => null },
   });
   const tree = AgentPanel({ device });
   assert.equal(calls.length, 0);
@@ -371,6 +373,7 @@ test("Agent diagnosis requires original feedback and does not submit without one
     "@/components/quality/shared": { fieldClass: "field" },
     "./types": types,
     "./feedback-picker": { FeedbackPicker: () => null },
+    "./remote-feedback-history": { RemoteFeedbackHistory: () => null },
   });
   const tree = AgentPanel({ device });
   const button = nodes(tree).find((node) => node.type === "button" && node.props.children === "开始诊断");

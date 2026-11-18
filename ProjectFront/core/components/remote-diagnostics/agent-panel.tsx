@@ -8,6 +8,7 @@ import { agentRunStatusLabel, remoteDiagnosticsBase, runningAgentStatuses } from
 import type { AgentRun, RemoteDevice } from "./types";
 import { FeedbackPicker } from "./feedback-picker";
 import type { FeedbackChoice } from "./feedback-picker";
+import { RemoteFeedbackHistory } from "./remote-feedback-history";
 
 function resultText(value: unknown): string {
   if (value === null || value === undefined || value === "") return "暂无结果";
@@ -142,28 +143,7 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
           ) : !history.length ? (
             <p className="text-12 text-secondary">尚无 Agent 处理记录。</p>
           ) : (
-            history.slice((historyPage - 1) * 3, historyPage * 3).map((reply, index) => {
-              const [header, ...lines] = reply.content.split("\n");
-              const repaired = header === "Agent 远程处理：已修复";
-              const verifiedHistory = header === "Agent 远程处理：验证通过";
-              return (
-                <details
-                  key={reply.id}
-                  open={index === 0}
-                  className="rounded border border-subtle bg-surface-1 px-3 py-2"
-                >
-                  <summary className="cursor-pointer text-12">
-                    <span className={repaired || verifiedHistory ? "text-success-primary" : "text-warning-primary"}>
-                      {repaired ? "已修复" : verifiedHistory ? "验证正常" : "需跟进"}
-                    </span>
-                    <time className="ml-3 text-secondary" dateTime={reply.created_at}>
-                      {new Date(reply.created_at).toLocaleString("zh-CN", { hour12: false })}
-                    </time>
-                  </summary>
-                  <p className="mt-2 text-12 leading-6 break-words whitespace-pre-wrap">{lines.join("\n")}</p>
-                </details>
-              );
-            })
+            <RemoteFeedbackHistory replies={history} page={historyPage} feedbackId={defectId} />
           )}
           {history.length > 3 && (
             <div className="flex items-center gap-3 text-12 text-secondary">
@@ -201,7 +181,13 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
         onClick={() => void start()}
         className="rounded bg-accent-primary px-4 py-2 text-13 text-on-color disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {starting ? "正在发起…" : busy ? "正在诊断…" : "开始诊断"}
+        {starting
+          ? "正在发起…"
+          : run?.status === "queued"
+            ? "排队中…"
+            : runInProgress
+              ? `${agentRunStatusLabel(run!)}…`
+              : "开始诊断"}
       </button>
       {error && (
         <p role="alert" className="text-13 text-danger-primary">
@@ -236,12 +222,21 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
                 verification: "验证",
                 solution: "下一步",
               }) as [keyof NonNullable<AgentRun["result"]>, string][]
-            ).map(([key, label]) => (
-              <div key={key} className="grid gap-1 sm:grid-cols-[4rem_minmax(0,1fr)] sm:gap-4">
-                <h3 className="text-13 font-medium text-secondary">{label}</h3>
-                <p className="text-13 leading-6 break-words whitespace-pre-wrap">{resultText(run.result?.[key])}</p>
-              </div>
-            ))}
+            )
+              .filter(([key]) => {
+                const value = run.result?.[key];
+                return typeof value === "string"
+                  ? !!value.trim()
+                  : Array.isArray(value)
+                    ? value.length > 0
+                    : value !== undefined && value !== null;
+              })
+              .map(([key, label]) => (
+                <div key={key} className="grid gap-1 sm:grid-cols-[4rem_minmax(0,1fr)] sm:gap-4">
+                  <h3 className="text-13 font-medium text-secondary">{label}</h3>
+                  <p className="text-13 leading-6 break-words whitespace-pre-wrap">{resultText(run.result?.[key])}</p>
+                </div>
+              ))}
         </div>
       )}
     </section>

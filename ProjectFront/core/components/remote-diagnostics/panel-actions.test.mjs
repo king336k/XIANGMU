@@ -56,6 +56,7 @@ function load(file, states, extra = {}) {
     },
     "./types": api,
     "./feedback-picker": { FeedbackPicker: () => null },
+    "./remote-feedback-history": { RemoteFeedbackHistory: () => null },
     "./transfer-modal": { TransferModal: () => null },
     "@/components/quality/shared": { fieldClass: "field" },
     "@/components/quality/api": { qualityApi: {}, errorMessage: (error) => error.message },
@@ -248,9 +249,13 @@ test("Agent selected feedback history shows three rounds per page and preserves 
   );
   const tree = exports.AgentPanel({ device });
   const history = nodes(tree).find((node) => node.props?.["aria-label"] === "所选反馈处理历史");
-  assert.equal(nodes(history).filter((node) => node.type === "details").length, 3);
-  assert.match(JSON.stringify(history), /第5轮结果/);
-  assert.doesNotMatch(JSON.stringify(history), /第8轮结果/);
+  const renderedHistory = nodes(history).find((node) => Array.isArray(node.props?.replies));
+  assert.equal(renderedHistory.props.page, 2);
+  assert.deepEqual(
+    renderedHistory.props.replies.slice(3, 6).map((reply) => reply.id),
+    ["reply-4", "reply-3", "reply-2"]
+  );
+  assert.equal(renderedHistory.props.replies.length, 8);
   nodes(history)
     .find((node) => node.type === "button" && node.props.children === "上一页")
     .props.onClick();
@@ -464,9 +469,8 @@ test("explicit verification report appears in selected feedback history as green
   const history = nodes(exports.AgentPanel({ device })).find(
     (node) => node.props?.["aria-label"] === "所选反馈处理历史"
   );
-  assert.match(JSON.stringify(history), /验证正常/);
-  assert.match(JSON.stringify(history), /text-success-primary/);
-  assert.doesNotMatch(JSON.stringify(history), /需跟进/);
+  const renderedHistory = nodes(history).find((node) => Array.isArray(node.props?.replies));
+  assert.equal(renderedHistory.props.replies[0].content, "Agent 远程处理：验证通过\n结论：固定检查通过");
 });
 
 test("feedback dialog searches only the current computer and commits a candidate only on confirm", async () => {
