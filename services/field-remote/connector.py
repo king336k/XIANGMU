@@ -156,6 +156,10 @@ class Policy:
         if (not isinstance(argv, list) or not argv or len(argv) > 64
                 or any(not isinstance(arg, str) or '\x00' in arg or len(arg) > MAX_FILE for arg in argv)):
             raise ValueError('bounded argv list required')
+        if argv[0]=='daq-local-diagnostics-v1':
+            if argv not in (['daq-local-diagnostics-v1','inspect'],['daq-local-diagnostics-v1','verify']) or self.daq_local_api is None:
+                raise ValueError('only exact local read-only diagnostic operations are permitted')
+            return argv
         if not any(argv[:len(prefix)] == prefix for prefix in self.allowed):
             raise ValueError('command prefix is not approved locally')
         if '--remote' in argv or any(arg.startswith('--remote=') for arg in argv):
@@ -215,6 +219,13 @@ def kill_group(process):
 
 def run_command(policy, argv, cwd, timeout, max_output=MAX_OUTPUT, stopping=None):
     argv = policy.argv(argv)
+    if argv[0]=='daq-local-diagnostics-v1':
+        from file_browser import local_launcher_request
+        response=local_launcher_request(policy.daq_local_api,{'action':argv[1]},diagnostics=True)
+        ok=response.get('ok') is not False if argv[1]=='inspect' else response.get('verified') is True
+        output=json.dumps(response,ensure_ascii=False)
+        if len(output.encode())>max_output:raise ValueError('local diagnostics response too large')
+        return {'ok':ok,'stdout':output,'stderr':'','exit_code':0 if ok else 1,'timed_out':False,'truncated':False}
     timeout = float(timeout)
     if not math.isfinite(timeout) or not 0 < timeout <= 60:
         raise ValueError('timeout must be between 0 and 60 seconds')

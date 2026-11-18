@@ -209,6 +209,26 @@ class ConnectorTests(unittest.TestCase):
         self.assertIsNone(value['robot']['host'])
         self.assertEqual(value['simulation_robot']['host'],'10.10.10.177')
 
+    def test_local_diagnostics_exact_logical_commands_never_launch_subprocess(self):
+        self.policy.daq_local_api={'url':'http://127.0.0.1:11452/api/launcher/remote-robot-files','token_file':'/private'}
+        for op in ('inspect','verify'):
+            self.assertEqual(self.policy.argv(['daq-local-diagnostics-v1',op]),['daq-local-diagnostics-v1',op])
+        for argv in (['daq-local-diagnostics-v1','repair'],['daq-local-diagnostics-v1','inspect','/etc/passwd']):
+            with self.assertRaises(ValueError):self.policy.argv(argv)
+        with patch('file_browser.local_launcher_request',return_value={'scope':'read_only_connectivity','verified':False}) as call,patch('connector.subprocess.Popen') as process:
+            for op in ('inspect','verify'):
+                command=self.command('run',argv=['daq-local-diagnostics-v1',op],cwd='.',timeout=2)
+                self.engine.accept(command)
+                for _ in range(100):
+                    self.engine.pump()
+                    rows=[result for result in self.engine.results if result['id']==command['id']]
+                    if rows:break
+                    time.sleep(.005)
+                self.assertEqual(rows[0]['exit_code'],0 if op=='inspect' else 1)
+                self.assertEqual(json.loads(rows[0]['stdout'])['scope'],'read_only_connectivity')
+            process.assert_not_called()
+            self.assertTrue(all(row.kwargs.get('diagnostics') for row in call.call_args_list))
+
     def test_patch_duplicate_cached_and_restart_not_reexecuted(self):
         target = self.root / 'config.json'
         target.write_text('before')

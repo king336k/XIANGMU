@@ -344,7 +344,7 @@ def file_request(root, spool_fd, request):
         os.unlink(ticket, dir_fd=spool_fd); raise
 
 
-def local_launcher_request(local,request,terminal=False):
+def local_launcher_request(local,request,terminal=False,diagnostics=False):
     if not isinstance(local,dict) or local.get('url')!='http://127.0.0.1:11452/api/launcher/remote-robot-files':
         raise ValueError('invalid_local_launcher_endpoint')
     fd=os.open(local['token_file'],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
@@ -356,6 +356,7 @@ def local_launcher_request(local,request,terminal=False):
     class NoRedirect(HTTPRedirectHandler):
         def redirect_request(self,*_args):return None
     url=local['url'].replace('/remote-robot-files','/remote-robot-terminal') if terminal else local['url']
+    if diagnostics:url=local['url'].replace('/remote-robot-files','/remote-diagnostics')
     outgoing=Request(url,data=json.dumps(request).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+token},method='POST')
     try:
         with build_opener(ProxyHandler({}),NoRedirect()).open(outgoing,timeout=3 if terminal else 105) as response:
