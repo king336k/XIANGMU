@@ -64,10 +64,11 @@ function load(file, states, extra = {}) {
   new Function(
     "require",
     "exports",
+    "setTimeout",
     ts.transpileModule(readFileSync(new URL(file, import.meta.url), "utf8"), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
     }).outputText
-  )((name) => mocks[name] ?? require(name), exports);
+  )((name) => mocks[name] ?? require(name), exports, extra.setTimeout || setTimeout);
   return { exports, changes };
 }
 
@@ -109,7 +110,7 @@ test("upload sends edited filename and exact selected defect, then checks remote
   const writes = [];
   const digest = "01".repeat(32);
   const jobs = new Map();
-  const { exports } = load(
+  const { exports, changes } = load(
     "./file-panel.tsx",
     [
       "robot",
@@ -172,8 +173,23 @@ test("upload sends edited filename and exact selected defect, then checks remote
   assert.equal(writes[0].path, "incoming");
   assert.deepEqual(
     writes.map((body) => body.action),
-    ["upload_start", "upload_chunk", "upload_finish", "list"]
+    ["upload_start", "upload_chunk", "upload_finish"]
   );
+  for (const reset of [
+    [8, undefined],
+    [4, undefined],
+    [2, ""],
+    [3, undefined],
+    [10, ""],
+    [9, undefined],
+    [11, false],
+  ]) {
+    assert.ok(
+      changes.some(([index, value]) => index === reset[0] && value === reset[1]),
+      `successful upload resets state ${reset[0]}`
+    );
+  }
+  assert.ok(changes.some(([index, value]) => index === 6 && value === "已上传并校验：incoming/retry-name.zip"));
   assert.match(JSON.stringify(tree), /机器人：/);
 });
 
@@ -460,6 +476,175 @@ test("changing transfer target resets remote directory and selection without lau
   assert.equal(mutations, 0);
   modal.props.onClose();
   assert.equal(mutations, 0);
+});
+
+test("failed upload keeps modal and selections for retry without claiming success", async () => {
+  const file = new File(["data"], "retry.zip");
+  const { exports, changes } = load(
+    "./file-panel.tsx",
+    [
+      "operator",
+      "",
+      "incoming",
+      { root: "/home/caiji1", entries: [], total: 0 },
+      { name: "old" },
+      false,
+      "",
+      "",
+      file,
+      { id: "fb", code: "D-474", title: "反馈" },
+      "retry.zip",
+      true,
+      "upload",
+    ],
+    {
+      "@noble/hashes/sha256": { sha256: () => new Uint8Array(32).fill(1) },
+      "@/components/quality/api": {
+        qualityApi: {
+          async write() {
+            throw new Error("同名文件已存在");
+          },
+        },
+        errorMessage: (error) => error.message,
+      },
+    }
+  );
+  nodes(exports.FilePanel({ device }))
+    .find((node) => node.props?.onStart)
+    .props.onStart();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(changes.some(([index, value]) => index === 7 && value === "同名文件已存在"));
+  assert.equal(
+    changes.some(([index]) => [2, 3, 4, 8, 9, 10, 11].includes(index)),
+    false
+  );
+});
+
+test("verified download closes and clears both sides only after invoking browser save", async () => {
+  const previousDocument = globalThis.document;
+  let saved = false;
+  const changesAtSave = [];
+  const listing = { root: "/home/caiji1", entries: [], total: 0 };
+  let currentChanges;
+  globalThis.document = {
+    createElement: () => ({
+      click() {
+        saved = true;
+        changesAtSave.push(...currentChanges);
+      },
+    }),
+  };
+  try {
+    const loaded = load(
+      "./file-panel.tsx",
+      [
+        "operator",
+        "",
+        "logs",
+        listing,
+        { name: "trace.log" },
+        false,
+        "",
+        "",
+        undefined,
+        undefined,
+        "",
+        true,
+        "download",
+      ],
+      {
+        setTimeout: () => 0,
+        "@noble/hashes/sha256": { sha256: () => new Uint8Array(32).fill(1) },
+        "@/components/quality/api": {
+          qualityApi: {
+            async write() {
+              return { id: "download" };
+            },
+            async read() {
+              return {
+                status: "done",
+                error: "",
+                result: { ticket: "ticket", filename: "trace.log", size: 0, sha256: "01".repeat(32), skipped: 0 },
+              };
+            },
+          },
+          errorMessage: (error) => error.message,
+        },
+      }
+    );
+    currentChanges = loaded.changes;
+    nodes(loaded.exports.FilePanel({ device }))
+      .find((node) => node.props?.onStart)
+      .props.onStart();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(saved, true);
+    assert.equal(
+      changesAtSave.some(([index, value]) => index === 11 && value === false),
+      false
+    );
+    for (const [index, expected] of [
+      [8, undefined],
+      [4, undefined],
+      [2, ""],
+      [3, undefined],
+      [10, ""],
+      [9, undefined],
+      [11, false],
+    ])
+      assert.ok(loaded.changes.some(([key, value]) => key === index && value === expected));
+    assert.ok(loaded.changes.some(([index, value]) => index === 6 && value === "已校验并下载 trace.log"));
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test("a reopened transfer drops previous path file feedback and disables download until a new choice", () => {
+  const { exports, changes } = load("./file-panel.tsx", [
+    "operator",
+    "",
+    "previous",
+    { root: "/home/caiji1", entries: [], total: 0 },
+    { name: "previous.log" },
+    false,
+    "old result",
+    "",
+    new File(["data"], "old.zip"),
+    { id: "old" },
+    "old.zip",
+    false,
+    "upload",
+  ]);
+  const toolbar = nodes(exports.FilePanel({ device })).find((node) => node.props?.["aria-label"] === "文件操作");
+  nodes(toolbar)
+    .filter((node) => node.type === "button")[1]
+    .props.onClick();
+  for (const [index, expected] of [
+    [8, undefined],
+    [4, undefined],
+    [2, ""],
+    [3, undefined],
+    [10, ""],
+    [9, undefined],
+    [11, true],
+    [12, "download"],
+  ])
+    assert.ok(changes.some(([key, value]) => key === index && value === expected));
+  const blank = load("./file-panel.tsx", [
+    "operator",
+    "",
+    "",
+    { root: "/home/caiji1", entries: [], total: 0 },
+    undefined,
+    false,
+    "",
+    "",
+    undefined,
+    undefined,
+    "",
+    true,
+    "download",
+  ]).exports.FilePanel({ device });
+  assert.equal(nodes(blank).find((node) => node.props?.onStart).props.enabled, false);
 });
 
 test("selecting a file resets native input so the same package can target a second machine", () => {

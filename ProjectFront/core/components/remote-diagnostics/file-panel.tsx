@@ -41,6 +41,25 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
     []
   );
 
+  function resetTransferSelection() {
+    setLocalFile(undefined);
+    setSelected(undefined);
+    setPath("");
+    setListing(undefined);
+    setUploadName("");
+    setUploadFeedback(undefined);
+  }
+
+  function openTransfer(nextDirection: TransferDirection) {
+    if (busy) return;
+    generation.current++;
+    resetTransferSelection();
+    setDirection(nextDirection);
+    setError("");
+    setMessage("");
+    setUploadDialog(true);
+  }
+
   async function request<T>(payload: object, current: number): Promise<T> {
     const job = await qualityApi.write<{ id: string }>(`${remoteDiagnosticsBase}files/`, {
       device_id: device.id,
@@ -87,6 +106,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
     }
   }
   async function download() {
+    if (!listing || !selected) return;
     const current = ++generation.current;
     setBusy(true);
     setError("");
@@ -132,8 +152,13 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
       setMessage(
         `已校验并下载 ${prepared.filename}${prepared.skipped ? `；已跳过 ${prepared.skipped} 个密钥、链接或不可下载项` : ""}`
       );
+      resetTransferSelection();
+      setUploadDialog(false);
     } catch (cause) {
-      if (current === generation.current) setError(errorMessage(cause));
+      if (current === generation.current) {
+        setError(errorMessage(cause));
+        setMessage("");
+      }
     } finally {
       if (current === generation.current) setBusy(false);
     }
@@ -193,15 +218,8 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
       );
       if (result.uploaded !== true || result.sha256 !== digest) throw new Error("远端文件完整性校验失败。");
       setMessage(`已上传并校验：${result.path}`);
-      setLocalFile(undefined);
+      resetTransferSelection();
       setUploadDialog(false);
-      try {
-        const updated = await request<Listing>({ action: "list", path }, current);
-        setListing(updated);
-      } catch (cause) {
-        setError(`文件已上传，但目录刷新失败：${errorMessage(cause)}`);
-      }
-      setSelected(undefined);
     } catch (cause) {
       if (current === generation.current) {
         setError(errorMessage(cause));
@@ -396,11 +414,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
         <button
           type="button"
           disabled={busy || !enabled}
-          onClick={() => {
-            setDirection("upload");
-            setUploadDialog(true);
-            if (!listing) void browse(path);
-          }}
+          onClick={() => openTransfer("upload")}
           className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
         >
           <Upload className="size-3.5" />
@@ -409,11 +423,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
         <button
           type="button"
           disabled={busy || !enabled}
-          onClick={() => {
-            setDirection("download");
-            setUploadDialog(true);
-            if (!listing) void browse(path);
-          }}
+          onClick={() => openTransfer("download")}
           className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
         >
           <Download className="size-3.5" />
@@ -451,7 +461,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
             />
           }
           busy={busy}
-          enabled={enabled && !!listing && (direction === "download" || (!!localFile && !!uploadName.trim()))}
+          enabled={enabled && !!listing && (direction === "download" ? !!selected : !!localFile && !!uploadName.trim())}
           message={message}
           error={error}
           onStart={() => {
