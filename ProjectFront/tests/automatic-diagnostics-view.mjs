@@ -90,6 +90,40 @@ test("原始诊断结论以完整句分点呈现并保留未确认限定", () =>
   );
   assert.match(html, /详细证据与处理过程/);
 });
+
+test("原始诊断摘要保留原文明确的位置路径行号，不生成位置且哈希仅在证据中", () => {
+  const location =
+    "修改位置：robot177 · /home/operator/runtime/config/collector.json:42 · telemetry_enabled false→true";
+  const checksum = "a".repeat(64);
+  const answer = `采集已恢复。复测通过。\n${location}\nSHA256：${checksum}`;
+  const html = render([
+    {
+      id: "source-location",
+      status: "completed",
+      mode: "auto",
+      created_at: "now",
+      result: { answer, model_status: "completed" },
+    },
+  ]);
+  const preview = html.slice(html.indexOf('aria-label="诊断结论要点"'), html.indexOf("详细证据与处理过程"));
+  assert.match(
+    preview,
+    /robot177 · \/home\/operator\/runtime\/config\/collector.json:42 · telemetry_enabled false→true/
+  );
+  assert.ok(!preview.includes(checksum));
+  assert.ok(html.includes(checksum));
+  const unknown = render([
+    {
+      id: "unknown-location",
+      status: "completed",
+      mode: "auto",
+      created_at: "now",
+      result: { answer: "采集已恢复，具体修改位置尚未确认。", model_status: "completed" },
+    },
+  ]);
+  assert.match(unknown, /具体修改位置尚未确认/);
+  assert.doesNotMatch(unknown, /collector.json:42/);
+});
 test("最新报告默认折叠，超时保留规则与读取范围，不把诊断完成写成故障解决", () => {
   const html = render([
     {

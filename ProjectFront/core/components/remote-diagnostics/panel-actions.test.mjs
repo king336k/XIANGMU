@@ -936,6 +936,7 @@ test("view uploaded target restores only the verified destination and requests i
     }
   );
   const tree = exports.FilePanel({ device });
+  assert.match(JSON.stringify(tree), /最近上传/);
   assert.equal(
     nodes(tree).some((node) => ["select", "table"].includes(node.type)),
     false

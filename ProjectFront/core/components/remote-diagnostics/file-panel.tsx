@@ -502,6 +502,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
       {lastCompletedTransfer && !busy && (
         <div className="space-y-1 text-12 text-secondary">
           <p className="break-all">
+            最近上传：
             {lastCompletedTransfer.deviceLabel}:{lastCompletedTransfer.fullPath}
           </p>
           <div className="flex flex-wrap items-center gap-3">

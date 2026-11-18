@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-const evidenceText =
-  /(?:https?:\/\/|(?:\/[\w.-]+){2,}|--[a-z]|\b[a-f0-9]{32,}\b|\b(?:ROSA|RAI|HolmesGPT|Holmes|argv|sha256)\b)/i;
+const evidenceText = /(?:https?:\/\/|--[a-z]|\b[a-f0-9]{32,}\b|\b(?:ROSA|RAI|HolmesGPT|Holmes|argv|sha256)\b)/i;
 const qualification = /尚未|未确认|待现场|需现场|无法确认|未验证|未执行|不能确认|仅.*模拟|不代表.*实机/;
 
 /** Select source sentences only; detailed evidence stays available unchanged. */
@@ -23,6 +22,9 @@ export function compactReportText(value: string, limit = 240): string {
   }
   const caution = sentences.find((line) => qualification.test(line));
   if (caution && !picked.includes(caution)) picked.push(caution);
+  for (const location of sentences.filter((line) => /^(?:修改位置|配置位置|文件位置|位置)[:：]/.test(line))) {
+    if (!picked.includes(location)) picked.push(location);
+  }
   return picked.join(" ") || "请查看详细证据。";
 }
 
