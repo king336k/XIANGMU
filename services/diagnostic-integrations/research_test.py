@@ -132,3 +132,12 @@ class ResearchBoundaryTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class RepositorySwitchTest(unittest.TestCase):
+    def test_repository_switch_keeps_only_documentation_and_blocks_private_sources(self):
+        source={'kind':'gitea','host':'git.transcengram.com','repository':'owner/repo','ref':'test','project_ids':['a']}
+        with patch.dict(os.environ,{'REMOTE_RESEARCH_REPOSITORIES_ENABLED':'false','REMOTE_RESEARCH_SOURCES':json.dumps({'private':source})}):
+            sources=research.sources_for('a')
+            self.assertTrue(sources)
+            self.assertTrue(all(item['kind']=='docs' for item in sources.values()))
+            self.assertNotIn('private',sources)

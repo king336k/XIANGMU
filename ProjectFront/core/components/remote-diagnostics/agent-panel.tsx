@@ -1,3 +1,4 @@
+import { sortBy } from "lodash-es";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
@@ -47,11 +48,12 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
   } = useSWR(defectId ? historyUrl : null, (url: string) =>
     qualityApi.all<{ id: string; content: string; visibility: string; created_at: string }>(url)
   );
-  const history = (replies || [])
-    .filter(
+  const history = sortBy(
+    (replies || []).filter(
       (reply) => reply.visibility === "public" && /^Agent 远程处理：(已修复|验证通过|未自动修复)\n/.test(reply.content)
-    )
-    .toSorted((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+    ),
+    (reply) => -Date.parse(reply.created_at)
+  );
   const selectedFeedback = feedback?.results.find((item) => item.id === defectId);
   const mountedRef = useRef(true);
   useEffect(() => {

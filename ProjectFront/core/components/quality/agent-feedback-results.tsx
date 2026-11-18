@@ -1,3 +1,4 @@
+import { sortBy } from "lodash-es";
 // SPDX-License-Identifier: AGPL-3.0-only
 import useSWR from "swr";
 import { renderNumericDateTime } from "@plane/utils";
@@ -24,9 +25,10 @@ export function AgentFeedbackResults({
   const { data, error, mutate } = useSWR(active ? url : null, () => qualityApi.all<Reply>(url), {
     refreshInterval: active ? 10000 : 0,
   });
-  const results = (data || [])
-    .filter((reply) => reply.visibility === "public" && reply.content.startsWith(prefix))
-    .toSorted((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  const results = sortBy(
+    (data || []).filter((reply) => reply.visibility === "public" && reply.content.startsWith(prefix)),
+    (reply) => -Date.parse(reply.created_at)
+  );
   return (
     <section aria-label="Agent 现场处理" className="mt-5 space-y-3 rounded-md border border-subtle p-4">
       <header className="flex items-center justify-between gap-3">
@@ -75,7 +77,7 @@ export function AgentFeedbackResults({
                 </time>
               </summary>
               <dl className="mt-3 space-y-3 text-13">
-                {[...new Set(lines.filter(Boolean))].map((line) => {
+                {Array.from(new Set(lines.filter(Boolean))).map((line) => {
                   const separator = line.indexOf("：");
                   return (
                     <div key={line}>

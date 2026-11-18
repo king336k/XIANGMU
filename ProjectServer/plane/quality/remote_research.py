@@ -76,8 +76,11 @@ def knowledge(project, query, run=None):
 
 
 def sources_for(project_id):
+    repositories_enabled = os.environ.get('REMOTE_RESEARCH_REPOSITORIES_ENABLED', 'true').lower() == 'true'
     """Only administrator configuration can grant private repository/network access."""
-    sources = {name:dict(value) for name,value in OFFICIAL.items()}
+    sources = {name:dict(value) for name,value in OFFICIAL.items() if repositories_enabled or value.get('kind') == 'docs'}
+    if not repositories_enabled:
+        return sources
     try:
         configured = json.loads(os.environ.get('REMOTE_RESEARCH_SOURCES', '{}'))
         if not isinstance(configured, dict):
@@ -96,7 +99,7 @@ def sources_for(project_id):
                 sources[name] = source
     except (ValueError, TypeError):
         pass
-    return sources
+    return {name:source for name,source in sources.items() if repositories_enabled or source.get('kind') == 'docs'}
 
 
 def source_catalog(project_id):
