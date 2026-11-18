@@ -30,6 +30,14 @@ class Report(BaseModel):
     repair_locations: list[dict] = Field(default_factory=list, max_length=10)
 
 
+PATH_LINE = re.compile(r'(?<![\w/:])((?:/|\.{1,2}/)?(?:[\w.@+-]+/)+[\w.@+-]+|(?:/|\.{1,2}/)[\w.@+-]+|[\w.@+-]+\.[A-Za-z0-9_+-]+)[:：]([1-9][0-9]*)\b')
+
+
+def path_lines(text):
+    return {(path,int(line)) for path,line in PATH_LINE.findall(text)
+            if not re.fullmatch(r'(?:[0-9]{1,3}\.){3}[0-9]{1,3}',path)}
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -71,6 +79,47 @@ class Gateway:
         self.require_knowledge = require_knowledge
         self.knowledge_searched = False
         self.repair_locations = []
+        self.executions = []
+        self.observed_locations = set()
+
+    def observe_locations(self, value, depth=0):
+        """Retain only location handles present in actual current reads/receipts."""
+        if depth>12:
+            return
+        if isinstance(value,str):
+            self.observed_locations.update(path_lines(value))
+            try:
+                if value.lstrip().startswith(('{','[')):
+                    self.observe_locations(json.loads(value),depth+1)
+            except (ValueError,RecursionError):
+                pass
+        elif isinstance(value,dict):
+            path=value.get('path')
+            if isinstance(path,str):
+                for key in ('line','before_line','after_line'):
+                    line=value.get(key)
+                    if type(line) is int and line>0:
+                        self.observed_locations.add((path,line))
+            for item in value.values():
+                self.observe_locations(item,depth+1)
+        elif isinstance(value,list):
+            for item in value:
+                self.observe_locations(item,depth+1)
+
+    def execution_summary(self):
+        """Public executed/verified statements are deterministic receipt summaries."""
+        labels={'inspect':'现场取证','specialist':'只读专家检查','repair':'授权修复','read_file':'读取现场文件','patch_file':'写入授权文件'}
+        actions=[labels[row['phase']]+('完成' if row['success'] else '失败或结果未确认')
+                 for row in self.executions if row['phase'] in labels][-15:]
+        checks=[row for row in self.executions if row['phase']=='verify']
+        if not checks:
+            verification=['未执行固定复测，尚无功能恢复验证结果。']
+        else:
+            latest=checks[-1]
+            current=self.verification_passed and latest['success']
+            verification=[('固定复测命令执行成功（exit_code=0）。' if current else
+                          '最新固定复测失败、结果未确认或已被后续修改作废；不能确认恢复。')]
+        return actions,verification
 
     @property
     def repair_verified(self):
@@ -139,7 +188,10 @@ class Gateway:
             self.verified_mutation = 0
             self.mutation += 1
         result = self.rpc({"operation": "run", "argv": argv, "cwd": cwd, "timeout": min(30, max(1, timeout)), "purpose": "inspect" if phase == "specialist" else phase})
-        if result.get("exit_code") == 0 and result.get("ok") is not False and not result.get("error") and not result.get("timed_out"):
+        success=result.get("exit_code") == 0 and result.get("ok") is not False and not result.get("error") and not result.get("timed_out")
+        self.executions.append({'phase':phase,'success':success})
+        self.observe_locations(result)
+        if success:
             if phase == "inspect":
                 if self.inspect_argv is None or argv == self.inspect_argv:
                     self.inspected = True
@@ -165,6 +217,11 @@ class Gateway:
     def read_file(self, path: str) -> dict:
         """Read current remote file and retain its server-provided SHA256 for patching."""
         result = self.rpc({"operation": "read_file", "path": path})
+        successful=not result.get("error") and result.get("ok") is not False and isinstance(result.get("content"),str)
+        self.executions.append({'phase':'read_file','success':successful})
+        if successful:
+            self.observed_locations.update((path,line) for line in range(1,len(result['content'].splitlines())+1))
+            self.observe_locations(result)
         if not result.get("error") and result.get("ok") is not False and isinstance(result.get("content"), str):
             if self.inspect_argv is None:
                 self.inspected = True
@@ -194,6 +251,8 @@ class Gateway:
         acknowledged = result.get("ok") is True or result.get("exit_code") == 0 or bool(re.fullmatch(r"[0-9a-f]{64}", str(result.get("sha256", ""))))
         if acknowledged and not result.get("error") and result.get("ok") is not False and result.get("exit_code", 0) == 0 and not result.get("timed_out"):
             self.successful_mutation = self.mutation
+        self.executions.append({'phase':'patch_file','success':self.successful_mutation==self.mutation})
+        self.observe_locations(result)
         return result
 
 
@@ -219,6 +278,7 @@ root_cause先用1至2句写已确认原因，未确认就直接说明缺哪项�
 verification最多4条，先说原故障是否恢复及实际检查结果；哈希和各专家原始输出保留在详细证据，不反复复制。
 修复定位信息是必需内容，不能为了简短省略：actions写清目标机器、文件完整路径、实际读到的行号及配置项/函数，修改前后值；没有可靠行号则写配置键或函数，不猜行号。
 repair_locations仅填现场工具已经返回的真实位置与变化，可包含target、path、line、key、before、after、backup；不能凭历史或模型猜测。
+actions和verification最终由工具执行回执生成，不接受模型自述为已执行事实；处理建议放solution，原因分析放root_cause。summary/root_cause/solution中的明确路径:行号必须实际出现在本轮读取或执行回执中，否则保留待定位，不编造地址。
 若缺配置文件，说明文件名、完整目标目录、模板来源和必要内容；若缺Python包/系统依赖，说明目标主机或容器、解释器/虚拟环境、包名版本、实际安装命令和校验结果；若是服务或调用链，说明调用方、目标服务、接口端口及失败证据。
 solution正常恢复时最多2句，只说明是否需后续处理、重启或部署；未恢复时最多4项具体下一步。模拟验证范围只在summary或solution说明一次。
 未自动修复时，root_cause 必须区分已证实原因、候选原因与缺失证据；solution 给出针对性处理及复测步骤。
@@ -389,6 +449,9 @@ async def analyze(payload):
                 raise ModelRetry("没有真实修改及修改后成功检查，repaired 必须为 false。")
             if context.get('operation_mode') == 'verify' and not gateway.verification_attempted:
                 raise ModelRetry('本轮是复测模式，必须实际执行固定verify_argv并如实报告结果。')
+            claimed=set().union(*(path_lines(text) for text in (report.summary,report.root_cause,report.solution)))
+            if claimed-gateway.observed_locations:
+                raise ModelRetry('分析包含本轮读取或执行回执未出现的路径:行号。请实际读取该来源，或删除未证实的位置并明确待定位。')
             return report
 
         async def invoke():
@@ -423,6 +486,7 @@ async def analyze(payload):
         result['verification_passed'] = gateway.verification_passed
         # Locations come from actual execution receipts, never model-authored paths/lines.
         result['repair_locations'] = gateway.repair_locations
+        result['actions'],result['verification']=gateway.execution_summary()
         result['outcome'] = 'repaired' if result.get('repaired') and gateway.repair_verified else ('verified' if result['mode']=='verify' and gateway.verification_passed else 'unresolved')
         return redact(result, gateway.secrets)
 

@@ -206,6 +206,68 @@ class GatewayTest(unittest.TestCase):
         self.assertFalse(value['repaired'])
         self.assertEqual([body['operation'] for _,body in self.requests],['run','knowledge','catalog','read_source'])
 
+    def test_model_cannot_publish_unexecuted_repair_or_verification_as_actions(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse, ToolCallPart
+        turns=[]
+        def model(messages,info):
+            turns.append(1)
+            if len(turns)==1:
+                return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'证据待补','root_cause':'尚未确认',
+                'actions':['已修改 /invented/source.cpp 第999行'],'verification':['测试通过'],
+                'solution':'建议补充配置证据','repaired':False})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','problem':'diagnose',
+                'context':{'inspect_argv':['inspect'],'repair_allowed':False,'operation_mode':'diagnose'}}))
+        self.assertNotIn('/invented/source.cpp',json.dumps(result['actions']))
+        self.assertNotIn('测试通过',result['verification'])
+        self.assertIn('未执行固定复测',' '.join(result['verification']))
+        self.assertFalse(result['repaired'])
+
+    def test_invented_root_cause_path_line_retries_instead_of_publishing(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse, ToolCallPart
+        turns=[]
+        def model(messages,info):
+            turns.append(1)
+            if len(turns)==1:
+                return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})])
+            root_cause='/invented/Dockerfile:999 的参数错误' if len(turns)==2 else '当前证据不足，未读取源码'
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'待查','root_cause':root_cause,
+                'actions':[],'verification':[],'solution':'补充源码后定位','repaired':False})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','problem':'diagnose',
+                'context':{'inspect_argv':['inspect'],'repair_allowed':False}}))
+        self.assertEqual(len(turns),3)
+        self.assertNotIn('/invented/Dockerfile',result['root_cause'])
+
+    def test_current_file_line_reference_remains_supported(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse, ToolCallPart
+        turns=[]
+        def model(messages,info):
+            turns.append(1)
+            if len(turns)==1:
+                return ModelResponse(parts=[ToolCallPart('read_file',{'path':'/actual/config.py'})])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'已读取当前配置',
+                'root_cause':'/actual/config.py:1 为实际读取内容，原因待进一步确认','actions':[],
+                'verification':[],'solution':'继续只读核查','repaired':False})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','problem':'diagnose',
+                'context':{'repair_allowed':False}}))
+        self.assertEqual(len(turns),2)
+        self.assertIn('/actual/config.py:1',result['root_cause'])
+        self.assertEqual(result['actions'],['读取现场文件完成'])
+
+    def test_path_line_handles_do_not_treat_network_ports_as_source_lines(self):
+        self.assertEqual(runner.path_lines('10.10.10.177:8093 与 https://example.com:443 是端点'),set())
+        self.assertEqual(runner.path_lines('/actual/Dockerfile:9 与 src/main.py:12'),
+                         {('/actual/Dockerfile',9),('src/main.py',12)})
+
     def test_secret_redaction(self):
         value = runner.redact({"summary": "synthetic-token key-value", "items": ["key-value"], "synthetic-token": "safe"}, ["synthetic-token", "key-value"])
         self.assertNotIn("synthetic-token", json.dumps(value))
