@@ -80,6 +80,12 @@ def validate_manifest(value):
         if any('/quality/defects/' not in path or not path.endswith('/diagnostics/')
                for path in row.get('diagnostic_create_paths',[])):
             raise ValueError('diagnostic create paths must name a defect diagnostic collection')
+        signed=row.get('signed_feedback_requests',[])
+        if not isinstance(signed,list) or len(signed)>8 or any(
+            not isinstance(item,dict) or item.get('path')!='/api/quality-auth/daq-reports/'
+            or not isinstance(item.get('payload'),dict) or not isinstance(item.get('headers'),dict)
+            for item in signed):
+            raise ValueError('bounded signed feedback fixture requests required')
     if value['model_mode']=='real_model_e2e' and len(stations)!=1:
         raise ValueError('real model evidence must be a separate single-station run')
     return value
@@ -138,6 +144,16 @@ def submit_diagnostic(client,path):
             'started_at':completed.get('started_at'),'completed_at':completed.get('completed_at')}
     if result['status']!='completed':raise DiagnosticFailed(result)
     return result
+
+
+def submit_signed_feedback(client,request):
+    response=client.request('POST',request['path'],request['payload'],expected=(200,201),operation='signed_feedback_submit')
+    issue_id=response.get('issueId');issue_code=response.get('issueCode')
+    try:uuid.UUID(str(issue_id))
+    except (ValueError,TypeError,AttributeError):raise AssertionError('signed feedback returned no valid issueId')
+    if not isinstance(issue_code,str) or not issue_code.strip():raise AssertionError('signed feedback returned no issueCode')
+    # Persist only the returned identifier; no signatures, request payload or code.
+    return {'issue_id':str(issue_id)}
 
 
 def fixture_root(output):
@@ -265,7 +281,7 @@ def station_job(job):
 
     thread=threading.Thread(target=loop,daemon=True)
     sid=None
-    run_results=[];file_results=[];new_diagnostics=[];diagnostics_before={};diagnostics_after={}
+    run_results=[];file_results=[];new_diagnostics=[];new_feedback=[];diagnostics_before={};diagnostics_after={}
     try:
         # Read-only isolation handshake occurs before the station exchange thread.
         owner.request('GET',BASE,operation='isolation_handshake')
@@ -288,8 +304,19 @@ def station_job(job):
                 except DiagnosticFailed as exc:
                     new_diagnostics.append(exc.result)
                     raise
-            with ThreadPoolExecutor(max_workers=len(participants)) as pool:
-                file_results=list(pool.map(files_for_user,participants))
+            signed=station.get('signed_feedback_requests',[])
+            with ThreadPoolExecutor(max_workers=len(participants)+len(signed)) as pool:
+                file_futures=[pool.submit(files_for_user,identifier) for identifier in participants]
+                feedback_futures=[pool.submit(submit_signed_feedback,
+                    Http(manifest['base_url'],manifest['isolation_id'],request['headers'],samples),request)
+                    for request in signed]
+                file_results=[future.result() for future in file_futures]
+                new_feedback.extend(future.result() for future in feedback_futures)
+            if new_feedback:
+                listed=owner.request('GET',BASE+'feedback/?'+urllib.parse.urlencode({'device_id':station['device_id'],'per_page':50}),operation='signed_feedback_station_binding_verify')
+                present={row['id'] for row in listed['results']}
+                if not {row['issue_id'] for row in new_feedback}.issubset(present):
+                    raise AssertionError('signed feedback belongs to a different station or is missing')
             for identifier in participants:
                 foreign=next((job for owner_id,job in file_jobs if owner_id!=identifier),None)
                 if foreign:
@@ -366,6 +393,7 @@ def station_job(job):
             'ok':not errors and not edge_errors,'errors':errors+edge_errors,'samples':samples,'command_counts':command_counts,
             'users':file_results,'phase_intervals':phase_intervals,
             'new_rules_diagnostics':new_diagnostics,
+            'signed_feedback_count':len(new_feedback),'signed_feedback_issue_ids':[row['issue_id'] for row in new_feedback],
             'file_http_intervals':[{'started_at':sample['started_at'],'completed_at':sample['completed_at']}
                                    for sample in samples if sample['operation'].startswith('file_')],
             'run_observations':[{'id':row['id'],'mode':row['mode'],'observations':row.get('observations',[]),

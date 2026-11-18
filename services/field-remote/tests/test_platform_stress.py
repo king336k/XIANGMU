@@ -9,7 +9,7 @@ import uuid
 from unittest.mock import Mock, patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from platform_stress import Http, ApiError, validate_manifest, wait_for_markers, mixed_overlap, submit_diagnostic
+from platform_stress import Http, ApiError, validate_manifest, wait_for_markers, mixed_overlap, submit_diagnostic, submit_signed_feedback
 
 
 def fixture():
@@ -21,6 +21,23 @@ def fixture():
 
 
 class PlatformStressTests(unittest.TestCase):
+    def test_signed_feedback_validates_response_without_reporting_signatures_payload_or_code(self):
+        issue=str(uuid.uuid4());client=Mock()
+        client.request.return_value={'issueId':issue,'issueCode':'Q-TEST-001'}
+        request={'path':'/api/quality-auth/daq-reports/','payload':{'sensitive':'fixture-payload-only'},
+                 'headers':{'X-Signature':'fixture-signature-only'}}
+        result=submit_signed_feedback(client,request)
+        self.assertEqual(result,{'issue_id':issue})
+        self.assertNotIn('fixture-',json.dumps(result));self.assertNotIn('Q-TEST',json.dumps(result))
+        self.assertEqual(client.request.call_args.kwargs['expected'],(200,201))
+        for response in ({'issueId':issue},{'issueCode':'Q-TEST'},{'issueId':'invalid','issueCode':'Q-TEST'}):
+            client.request.return_value=response
+            with self.assertRaises(AssertionError):submit_signed_feedback(client,request)
+        manifest=fixture();manifest['stations'][0]['signed_feedback_requests']=[request]
+        validate_manifest(manifest)
+        request['path']='https://outside.invalid'
+        with self.assertRaises(ValueError):validate_manifest(manifest)
+
     def test_new_rules_diagnostic_submits_and_requires_real_completed_status(self):
         job_id=str(uuid.uuid4())
         path='/api/workspaces/stress/projects/'+str(uuid.uuid4())+'/quality/defects/'+str(uuid.uuid4())+'/diagnostics/'
