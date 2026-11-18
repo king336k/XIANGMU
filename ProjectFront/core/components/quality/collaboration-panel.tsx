@@ -153,7 +153,7 @@ export function CollaborationPanel({
               ? event.previous_status
                 ? `${statusNames[event.previous_status] || event.previous_status} → ${statusNames[event.status] || event.status}`
                 : "提交缺陷"
-              : specific || "更新缺陷",
+              : rawNote.match(/^(Agent [^：]+)：/)?.[1] || specific || "更新缺陷",
           content: daqCreated
             ? `采集员：${value.reporter?.username || value.created_by_name || "未记录"}\n问题：${value.title}`
             : !changed && specific && note.startsWith(`${specific}：`)
@@ -176,7 +176,11 @@ export function CollaborationPanel({
         id: `comment-${comment.id}`,
         actor: comment.actor,
         at: comment.created_at,
-        action: comment.visibility === "internal" ? "内部备注" : "采集员可见回复",
+        action: comment.content.startsWith("Agent 远程处理：")
+          ? "Agent 现场处理结果"
+          : comment.visibility === "internal"
+            ? "内部备注"
+            : "采集员可见回复",
         tone: "text-secondary",
         content: comment.content,
       })),

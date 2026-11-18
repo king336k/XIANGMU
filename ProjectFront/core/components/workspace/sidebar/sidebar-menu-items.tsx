@@ -4,7 +4,7 @@
  * See the LICENSE file for details.
  */
 
-import React, { useEffect, useMemo } from "react";
+import { Fragment, useEffect, useMemo } from "react";
 import { observer } from "mobx-react";
 // plane imports
 import {
@@ -18,6 +18,7 @@ import {
 import { usePersonalNavigationPreferences } from "@/hooks/use-navigation-preferences";
 import { useAppTheme } from "@/hooks/store/use-app-theme";
 import { SidebarItemBase } from "./sidebar-item";
+import { RemoteDiagnosticsNavigationItem } from "@/components/remote-diagnostics/navigation-item";
 
 export const SidebarMenuItems = observer(function SidebarMenuItems() {
   const { preferences: personalPreferences } = usePersonalNavigationPreferences();
@@ -70,7 +71,10 @@ export const SidebarMenuItems = observer(function SidebarMenuItems() {
   return (
     <div className="flex flex-col gap-0.5" aria-label="平台功能">
       {primaryItems.map((item) => (
-        <SidebarItemBase key={item.key} item={item} />
+        <Fragment key={item.key}>
+          <SidebarItemBase item={item} />
+          {item.key === "analytics" && <RemoteDiagnosticsNavigationItem />}
+        </Fragment>
       ))}
       {personalRecordItems.length > 0 && (
         <div className="mt-2 flex flex-col gap-0.5 border-t border-subtle pt-2" aria-label="个人记录">

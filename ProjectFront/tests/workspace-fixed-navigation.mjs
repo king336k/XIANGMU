@@ -69,6 +69,8 @@ function walk(node, predicate) {
 }
 const Item = () => null;
 const Denied = () => null;
+const RemoteItem = () => null;
+const Nav = () => null;
 
 test("旧隐藏/折叠设置不再隐藏三个工作空间入口，移除更多与固定按钮", () => {
   const api = load("../core/components/workspace/sidebar/sidebar-menu-items.tsx", {
@@ -228,4 +230,41 @@ test("我的工作直接进入跨模块待办，个人工作项仍可从资料�
     },
   });
   assert.equal(walk(tree, (node) => node.props?.href).map((node) => node.props.href)[0], "/w/my-work/");
+});
+
+test("远程诊断固定在主侧栏统计报表之后，设置侧栏没有重复入口", () => {
+  const menu = load("../core/components/workspace/sidebar/sidebar-menu-items.tsx", {
+    "./sidebar-item": { SidebarItemBase: Item },
+    "@/components/remote-diagnostics/navigation-item": { RemoteDiagnosticsNavigationItem: RemoteItem },
+  });
+  const rendered = walk(menu.SidebarMenuItems(), (node) => node.type === Item || node.type === RemoteItem).map((node) =>
+    node.type === RemoteItem ? "remote-diagnostics" : node.props.item.key
+  );
+  assert.equal(rendered.indexOf("remote-diagnostics"), rendered.indexOf("analytics") + 1);
+  const settings = readFileSync(
+    new URL("../core/components/settings/workspace/sidebar/item-categories.tsx", import.meta.url),
+    "utf8"
+  );
+  assert.doesNotMatch(settings, /remote-diagnostics/);
+});
+
+test("远程诊断主菜单仅对管理员显示并链接现有独立页面", () => {
+  for (const allowed of [true, false, undefined]) {
+    const api = load("../core/components/remote-diagnostics/navigation-item.tsx", {
+      swr: { default: () => ({ data: allowed === undefined ? undefined : { can_manage_administrators: allowed } }) },
+      "@/components/quality/api": { qualityApi: {} },
+      "@/components/sidebar/sidebar-navigation": { SidebarNavItem: Nav },
+      "next/navigation": {
+        useParams: () => ({ workspaceSlug: "w" }),
+        usePathname: () => "/w/remote-diagnostics/",
+      },
+    });
+    const tree = api.RemoteDiagnosticsNavigationItem();
+    assert.equal(tree !== null, allowed === true);
+    if (tree) {
+      const link = walk(tree, (node) => !!node.props?.href)[0];
+      assert.equal(link.props.href, "/w/remote-diagnostics/");
+      assert.equal(link.props["aria-current"], "page");
+    }
+  }
 });

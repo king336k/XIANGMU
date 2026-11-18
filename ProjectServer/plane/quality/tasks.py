@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Bounded diagnostics with evidence-gated, single-owner assignment after completion."""
+from .remote_tasks import remote_repair  # noqa: F401
 
 import time
 

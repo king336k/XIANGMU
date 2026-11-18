@@ -1,0 +1,14 @@
+# Import closure for official RAI 1.1.0 read-only native topic tools.
+# Pins from its committed poetry.lock; audio, navigation and model-provider extras omitted.
+langchain==0.3.9
+langchain-core==0.3.21
+langgraph==0.2.53
+pydantic==2.10.2
+numpy==1.26.4
+# Headless build is the same OpenCV API and version as upstream opencv-python pin.
+opencv-python-headless==4.10.0.84
+coloredlogs==15.0.1
+tomli==2.2.1
+Deprecated==1.2.15
+transforms3d==0.4.2
+requests==2.32.3

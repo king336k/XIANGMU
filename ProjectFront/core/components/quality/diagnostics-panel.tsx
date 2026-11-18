@@ -249,7 +249,7 @@ export function DiagnosticsPanel({
     }
   };
   const renderReport = (job: Job, current = false) => (
-    <details key={job.id} open={current} className="group/diagnostic min-w-0 rounded-md border border-subtle text-12">
+    <details key={job.id} className="group/diagnostic min-w-0 rounded-md border border-subtle text-12">
       <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 p-3">
         <ChevronRight className="size-3.5 text-tertiary transition-transform group-open/diagnostic:rotate-90" />
         <span className="font-medium">

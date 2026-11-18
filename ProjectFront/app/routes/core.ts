@@ -66,6 +66,7 @@ export const coreRoutes: RouteConfigEntry[] = [
         route(":workspaceSlug", "./(all)/[workspaceSlug]/(projects)/page.tsx"),
 
         route(":workspaceSlug/my-work", "./(all)/[workspaceSlug]/(projects)/my-work/page.tsx"),
+        route(":workspaceSlug/remote-diagnostics", "./(all)/[workspaceSlug]/(projects)/remote-diagnostics/page.tsx"),
 
         // Active Cycles
         layout("./(all)/[workspaceSlug]/(projects)/active-cycles/layout.tsx", [
@@ -330,6 +331,10 @@ export const coreRoutes: RouteConfigEntry[] = [
           route(
             ":workspaceSlug/settings/models",
             "./(all)/[workspaceSlug]/(settings)/settings/(management)/models/page.tsx"
+          ),
+          route(
+            ":workspaceSlug/settings/remote-diagnostics",
+            "./(all)/[workspaceSlug]/(settings)/settings/(management)/remote-diagnostics/page.tsx"
           ),
         ]),
 

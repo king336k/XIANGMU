@@ -5,6 +5,8 @@ import uuid
 
 from django.db import models
 
+from .remote_models import RemoteWorkstation, RemoteTerminal, RemoteTerminalEvent, RemoteAgentRun, RemoteCommand, RemoteFileRequest, RemoteUploadedFile  # noqa: F401
+
 
 class QualityRecord(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

@@ -1,0 +1,4 @@
+# Dedicated Python >=3.10 environment. Heavy SRE dependencies must not enter central venv.
+holmesgpt==0.46.0
+# cp310/cp312 manylinux wheels verified; do not compile an unpinned source release.
+confluent-kafka==2.16.1

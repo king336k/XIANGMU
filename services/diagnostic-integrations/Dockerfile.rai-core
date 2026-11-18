@@ -1,0 +1,12 @@
+# Build context: this directory plus a verified official checkout at rai-source/.
+FROM ros:humble-ros-base
+ARG PIP_INDEX_URL=https://pypi.org/simple
+RUN apt-get update && apt-get install -y --no-install-recommends python3-pip python3-venv ros-humble-cv-bridge ros-humble-tf-transformations && rm -rf /var/lib/apt/lists/*
+COPY requirements-rai-core.txt /opt/diagnostic-integrations/requirements-rai-core.txt
+RUN python3 -m venv --system-site-packages /opt/diagnostic-integrations/rai && /opt/diagnostic-integrations/rai/bin/python -m pip install --no-cache-dir -r /opt/diagnostic-integrations/requirements-rai-core.txt
+COPY rai-source/src/rai /opt/rai-source/src/rai
+RUN /opt/diagnostic-integrations/rai/bin/python -m pip install --no-deps /opt/rai-source/src/rai
+COPY specialist.py /opt/diagnostic-integrations/specialist.py
+ENV ROS_DOMAIN_ID=173
+ENTRYPOINT ["/ros_entrypoint.sh", "/opt/diagnostic-integrations/rai/bin/python", "/opt/diagnostic-integrations/specialist.py", "rai"]
+CMD ["health"]

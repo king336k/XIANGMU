@@ -1,0 +1,16 @@
+{
+  "approved_root": "/home/engram/Documents/tmp/artifacts/field-remote-simulation-20261118",
+  "editable_files": ["collector-config.json"],
+  "allowed_commands": [
+    [
+      "/usr/bin/python3",
+      "/home/engram/Documents/tmp/artifacts/field-remote-simulation-20261118/collector_sim.py",
+      "inspect"
+    ],
+    [
+      "/usr/bin/python3",
+      "/home/engram/Documents/tmp/artifacts/field-remote-simulation-20261118/collector_sim.py",
+      "verify"
+    ]
+  ]
+}

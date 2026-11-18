@@ -136,7 +136,7 @@ export function DeploymentSnapshots({
   const unavailable = components.filter((row) => row.status === "unavailable").length;
   return (
     <section aria-label="现场版本" className="min-w-0">
-      <details open className="platform-record-section">
+      <details open={!compact} className="platform-record-section">
         <summary className="cursor-pointer text-13 font-semibold text-primary">现场版本</summary>
         <div className="mt-3 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">

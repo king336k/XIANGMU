@@ -1,0 +1,2 @@
+# Dedicated Ubuntu 22.04 / ROS Humble Python 3.10 environment with system-site-packages.
+jpl-rosa==1.0.10

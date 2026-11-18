@@ -1,0 +1,609 @@
+#!/usr/bin/env python3
+"""Outbound-only Linux operator connector. Python standard library only."""
+
+import argparse
+import base64
+import binascii
+from concurrent.futures import ThreadPoolExecutor
+import errno
+import fcntl
+import getpass
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import re
+import select
+import signal
+import socket
+import stat
+import struct
+import subprocess
+import termios
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+
+MAX_FILE = 128 * 1024
+MAX_OUTPUT = 64 * 1024
+MAX_PENDING = 512 * 1024
+TOKEN_ENV = 'FIELD_REMOTE_TOKEN'
+
+
+def safe_environment(preserve_sim=False):
+    # Tools and the human PTY must never inherit the enrollment secret.
+    return {key: value for key, value in os.environ.items()
+            if (preserve_sim and key == 'FIELD_SIM_TOKEN') or
+            not any(word in key.upper() for word in ('TOKEN', 'SECRET', 'PASSWORD', 'API_KEY'))}
+
+
+class Policy:
+    def __init__(self, config):
+        self.file_browser_enabled = config.get('file_browser_enabled') is True
+        self.daq_local_api = config.get('daq_local_api')
+        self.root = Path(config['approved_root']).resolve(strict=True)
+        if not self.root.is_dir() or str(self.root) == '/':
+            raise ValueError('approved_root must be an existing dedicated directory')
+        self.allowed = config.get('allowed_commands', [])
+        if not isinstance(self.allowed, list) or any(
+            not isinstance(prefix, list) or not prefix or
+            any(not isinstance(arg, str) or not arg for arg in prefix)
+            for prefix in self.allowed
+        ):
+            raise ValueError('allowed_commands must contain argv prefixes')
+        self.editable_files = config.get('editable_files', [])
+        if not isinstance(self.editable_files, list) or any(not isinstance(path, str) for path in self.editable_files):
+            raise ValueError('editable_files must be an explicit list of relative configuration files')
+        for path in self.editable_files:
+            self.parts(path)
+            if Path(path).suffix.lower() in ('.py', '.pyc', '.sh', '.bash', '.js', '.mjs', '.so', '.exe'):
+                raise ValueError('editable_files cannot include executable code')
+
+    def parts(self, relative):
+        if not isinstance(relative, str) or not relative or '\x00' in relative:
+            raise ValueError('relative path required')
+        parts = relative.split('/')
+        if relative.startswith('/') or any(part in ('', '.', '..') for part in parts):
+            raise ValueError('path must remain below approved_root')
+        for part in parts:
+            lower = part.lower()
+            if (lower.startswith(('.env', '.field-')) or lower in ('.ssh', '.aws', '.git', 'id_rsa', 'id_ed25519')
+                    or any(word in lower for word in ('secret', 'credential', 'password', 'token'))
+                    or lower.endswith(('.pem', '.key', '.p12', '.pfx'))):
+                raise ValueError('secret paths are not available to file tools')
+        return parts
+
+    def parent_fd(self, relative):
+        parts = self.parts(relative)
+        fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            for part in parts[:-1]:
+                next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = next_fd
+            return fd, parts[-1]
+        except OSError as exc:
+            os.close(fd)
+            raise ValueError('symlink or inaccessible parent path') from exc
+
+    def read(self, relative):
+        parent, name = self.parent_fd(relative)
+        try:
+            try:
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+            except OSError as exc:
+                raise ValueError('file is inaccessible or a symlink') from exc
+            with os.fdopen(fd, 'rb') as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > MAX_FILE:
+                    raise ValueError('only bounded regular files without hardlinks are permitted')
+                data = stream.read(MAX_FILE + 1)
+            if len(data) > MAX_FILE:
+                raise ValueError('file too large')
+            return data
+        finally:
+            os.close(parent)
+
+    def patch(self, relative, expected_sha256, content):
+        if relative not in self.editable_files:
+            raise ValueError('patch target is not in the local editable_files allowlist')
+        if not isinstance(content, str) or len(content.encode()) > MAX_FILE:
+            raise ValueError('patch content must be bounded UTF-8 text')
+        old = self.read(relative)
+        if hashlib.sha256(old).hexdigest() != expected_sha256:
+            raise ValueError('SHA256 conflict; read the current file before patching')
+        parent, name = self.parent_fd(relative)
+        suffix = uuid.uuid4().hex
+        backup, temporary = f'{name}.backup-{suffix}', f'.field-patch-{suffix}'
+        try:
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            # Read again through the anchored directory before replacing.
+            if self.read(relative) != old:
+                raise ValueError('file changed during patch')
+            for filename, data in ((backup, old), (temporary, content.encode())):
+                fd = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=parent)
+                with os.fdopen(fd, 'wb') as stream:
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            os.chmod(temporary, stat.S_IMODE(info.st_mode) & 0o777, dir_fd=parent)
+            os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+            os.fsync(parent)
+        finally:
+            try:
+                os.unlink(temporary, dir_fd=parent)
+            except FileNotFoundError:
+                pass
+            os.close(parent)
+        backup_path = '/'.join(relative.split('/')[:-1] + [backup])
+        return {'sha256': hashlib.sha256(content.encode()).hexdigest(), 'backup': backup_path}
+
+    def cwd(self, relative):
+        if relative in ('', '.'):
+            return self.root
+        self.parts(relative)
+        path = self.root / relative
+        if path.resolve(strict=True) != path or not path.is_dir():
+            raise ValueError('cwd must be a directory without symlinks')
+        return path
+
+    def argv(self, argv):
+        if (not isinstance(argv, list) or not argv or len(argv) > 64
+                or any(not isinstance(arg, str) or '\x00' in arg or len(arg) > MAX_FILE for arg in argv)):
+            raise ValueError('bounded argv list required')
+        if not any(argv[:len(prefix)] == prefix for prefix in self.allowed):
+            raise ValueError('command prefix is not approved locally')
+        if '--remote' in argv or any(arg.startswith('--remote=') for arg in argv):
+            raise ValueError('remote helper mode is unavailable to autonomous tools')
+        for index, arg in enumerate(argv):
+            if arg == '--root':
+                if index + 1 >= len(argv) or argv[index + 1] != str(self.root):
+                    raise ValueError('tool --root must equal the approved_root')
+            elif arg.startswith('--root=') and arg != '--root=' + str(self.root):
+                raise ValueError('tool --root must equal the approved_root')
+        executable = Path(argv[0])
+        if not executable.is_absolute() or not executable.is_file():
+            raise ValueError('approved executable must be absolute')
+        if executable.name in ('sh', 'bash', 'dash', 'zsh', 'fish', 'sudo', 'su', 'env', 'ssh'):
+            raise ValueError('shells and privilege/remote launchers are not tool commands')
+        if any('..' in arg.split('=', 1)[-1].split('/') for arg in argv[1:]):
+            raise ValueError('parent traversal in tool arguments is forbidden')
+        for arg in argv[1:]:
+            value = arg.split('=', 1)[-1]
+            if value.startswith('/') and not Path(value).resolve().is_relative_to(self.root):
+                raise ValueError('absolute tool path arguments must remain under approved_root')
+        if executable.name.startswith(('python', 'node', 'perl', 'ruby')):
+            if len(argv) < 2 or argv[1].startswith('-'):
+                raise ValueError('interpreters require a locally approved script')
+            script = Path(argv[1])
+            if not script.is_absolute():
+                script = self.root / script
+            if not script.resolve().is_relative_to(self.root):
+                raise ValueError('script must be under approved_root')
+            if not any(len(prefix) >= 2 and prefix[:2] == argv[:2] for prefix in self.allowed):
+                raise ValueError('script itself must be approved')
+            if script.name == 'robot_peer.py':
+                if len(argv) < 5 or argv[2] not in ('inspect', 'repair', 'verify'):
+                    raise ValueError('fixed robot_peer operation required')
+                expected = argv[:3] + ['--root', str(self.root)]
+                if argv[2] == 'repair':
+                    if (len(argv) != 7 or argv[5] != '--expected-sha256'
+                            or not re.fullmatch('[a-f0-9]{64}', argv[6])):
+                        raise ValueError('repair only accepts a SHA256 after the fixed root')
+                    expected += ['--expected-sha256', argv[6]]
+                if argv != expected:
+                    raise ValueError('robot_peer argv must match the fixed operation/root contract')
+            elif script.name == 'collector_sim.py':
+                if (len(argv) < 3 or argv[2] not in ('inspect', 'verify')
+                        or argv[3:] not in ([], ['--root', str(self.root)])):
+                    raise ValueError('collector argv must match its fixed operation/root contract')
+        return argv
+
+
+def kill_group(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
+
+
+def run_command(policy, argv, cwd, timeout, max_output=MAX_OUTPUT, stopping=None):
+    argv = policy.argv(argv)
+    timeout = float(timeout)
+    if not math.isfinite(timeout) or not 0 < timeout <= 60:
+        raise ValueError('timeout must be between 0 and 60 seconds')
+    process = subprocess.Popen(argv, cwd=policy.cwd(cwd), stdin=subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               start_new_session=True, env=safe_environment(preserve_sim=True))
+    streams = {process.stdout: bytearray(), process.stderr: bytearray()}
+    for stream in streams:
+        os.set_blocking(stream.fileno(), False)
+    deadline, timed_out, truncated = time.monotonic() + timeout, False, False
+    try:
+        active = list(streams)
+        while active:
+            if time.monotonic() >= deadline or (stopping and stopping.is_set()):
+                timed_out = True
+                break
+            ready, _, _ = select.select(active, [], [], min(0.05, max(0, deadline - time.monotonic())))
+            for stream in ready:
+                chunk = os.read(stream.fileno(), 8192)
+                if not chunk:
+                    active.remove(stream)
+                    continue
+                available = max_output - len(streams[stream])
+                streams[stream].extend(chunk[:available])
+                truncated |= len(chunk) > available
+        if process.poll() is None or timed_out:
+            # A child holding pipes must not survive a tool call.
+            kill_group(process)
+        else:
+            process.wait()
+    finally:
+        kill_group(process)
+        process.stdout.close()
+        process.stderr.close()
+    return {'stdout': streams[process.stdout].decode('utf-8', errors='replace'),
+            'stderr': streams[process.stderr].decode('utf-8', errors='replace'),
+            'exit_code': process.returncode, 'timed_out': timed_out, 'truncated': truncated,
+            'ok': process.returncode == 0 and not timed_out}
+
+
+class Terminal:
+    def __init__(self, root, cols, rows):
+        if type(cols) is not int or type(rows) is not int or not 1 <= cols <= 500 or not 1 <= rows <= 200:
+            raise ValueError('invalid terminal dimensions')
+        self.master, slave = os.openpty()
+        self.resize(cols, rows)
+        # A fresh Python interpreter sets up its controlling terminal; no unsafe
+        # preexec_fn is run in this client's worker-thread process.
+        helper = ('import os,fcntl,termios; os.setsid(); '
+                  'fcntl.ioctl(0,termios.TIOCSCTTY,0); '
+                  'os.execv("/bin/bash",["/bin/bash","--noprofile","--norc","-i"])')
+        terminal_env = safe_environment()
+        terminal_env.update({
+            'TERM': 'xterm-256color',
+            'COLORTERM': 'truecolor',
+            'PS1': r'\[\033[1;32m\]\u@\h\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$ ',
+        })
+        self.process = subprocess.Popen(['/usr/bin/python3', '-c', helper], stdin=slave,
+                                        stdout=slave, stderr=slave, cwd=root, env=terminal_env)
+        os.close(slave)
+        self.pid = self.process.pid
+        os.set_blocking(self.master, False)
+        self.created = self.active = time.monotonic()
+
+    def resize(self, cols, rows):
+        if type(cols) is not int or type(rows) is not int or not 1 <= cols <= 500 or not 1 <= rows <= 200:
+            raise ValueError('invalid terminal dimensions')
+        fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
+
+    def close(self):
+        # The child can still be between Popen and setsid on an immediate close.
+        try:
+            os.killpg(self.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            self.process.kill()
+        self.process.wait()
+        os.close(self.master)
+
+
+class Engine:
+    def __init__(self, policy):
+        self.policy, self.terminals = policy, {}
+        self.results, self.outputs, self.seen, self.tasks = [], [], {}, {}
+        self.cache, self.closed_sessions = {}, set()
+        self.stopping = threading.Event()
+        lock_path = policy.root / '.field-remote.lock'
+        self.lock_fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(self.lock_fd)
+            raise ValueError('another connector owns this approved_root')
+        self.journal_path = policy.root / '.field-remote-state.json'
+        try:
+            info = self.journal_path.lstat()
+            if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.getuid():
+                raise ValueError('unsafe dedup journal permissions')
+            journal = json.loads(self.journal_path.read_text())
+            for key, entry in journal.items():
+                if entry['expires_at'] >= time.time():
+                    self.seen[key] = entry['expires_at']
+                    self.cache[key] = {'id': key, 'ok': entry['ok'], 'recovered': True,
+                                       'stdout': '', 'stderr': '', 'exit_code': entry['exit_code']}
+        except FileNotFoundError:
+            pass
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.last_exchange = time.monotonic()
+
+    def journal(self, command_id, expires_at, result=None):
+        """Persist only execution tombstones, never arguments or tool/PTY output."""
+        entries = {}
+        if self.journal_path.exists():
+            entries = json.loads(self.journal_path.read_text())
+        entries = {key: entry for key, entry in entries.items() if entry['expires_at'] >= time.time()}
+        entries[command_id] = {'expires_at': expires_at, 'ok': bool(result and result.get('ok')),
+                               'exit_code': result.get('exit_code', 1) if result else 1}
+        temporary = self.journal_path.with_name('.field-state-' + uuid.uuid4().hex)
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(entries, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, self.journal_path)
+        directory = os.open(self.policy.root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+
+    def output(self, event):
+        self.outputs.append({'id': str(uuid.uuid4()), **event})
+
+    def acknowledge(self, output_count, result_count):
+        for result in self.results[:result_count]:
+            cached = self.cache.get(result['id'])
+            if cached:
+                self.cache[result['id']] = {'id': result['id'], 'ok': cached['ok'],
+                                           'exit_code': cached.get('exit_code', 0),
+                                           'recovered': True, 'stdout': '', 'stderr': ''}
+        del self.outputs[:output_count]
+        del self.results[:result_count]
+
+    def accept(self, command):
+        if len(self.results) >= 256 or sum(len(json.dumps(item)) for item in self.results) > MAX_PENDING:
+            return  # The central queue will retry after the current batch is acknowledged.
+        command_id = command.get('id')
+        if not isinstance(command_id, str) or not 1 <= len(command_id) <= 128:
+            return
+        now = time.time()
+        self.seen = {key: expiry for key, expiry in self.seen.items() if expiry >= now}
+        self.cache = {key: result for key, result in self.cache.items() if key in self.seen}
+        if command_id in self.seen:
+            if command_id in self.cache:
+                self.results.append(self.cache[command_id])
+            return
+        expiry = command.get('expires_at', 0)
+        valid_expiry = isinstance(expiry, (int, float)) and math.isfinite(expiry)
+        self.seen[command_id] = max(now + 120, expiry) if valid_expiry else now + 120
+        result = {'id': command_id, 'ok': True, 'stdout': '', 'stderr': '', 'exit_code': 0}
+        try:
+            if not valid_expiry or expiry <= now:
+                raise ValueError('command expired')
+            if expiry > now + 3600 or len(self.seen) > 10000:
+                raise ValueError('command expiry or dedup capacity exceeded')
+            kind = command.get('kind')
+            if kind.startswith('terminal_'):
+                sid = command.get('session_id')
+                if not isinstance(sid, str) or not 1 <= len(sid) <= 128:
+                    raise ValueError('invalid session_id')
+                if kind == 'terminal_open':
+                    if (sid in self.closed_sessions or sid in self.terminals or len(self.terminals) >= 2
+                            or len(self.closed_sessions) >= 4096):
+                        raise ValueError('terminal already open or session limit reached')
+                    self.terminals[sid] = Terminal(self.policy.root, command['cols'], command['rows'])
+                else:
+                    terminal = self.terminals[sid]
+                    terminal.active = time.monotonic()
+                    if kind == 'terminal_input':
+                        data = base64.b64decode(command['data'], validate=True)
+                        if len(data) > 4096:
+                            raise ValueError('terminal input exceeds 4096 bytes')
+                        written = os.write(terminal.master, data)
+                        if written != len(data):
+                            raise ValueError('terminal input backpressure; input partially written')
+                    elif kind == 'terminal_resize':
+                        terminal.resize(command['cols'], command['rows'])
+                    elif kind == 'terminal_close':
+                        terminal.close()
+                        del self.terminals[sid]
+                        self.closed_sessions.add(sid)
+                        self.output({'session_id': sid, 'kind': 'exit', 'code': -signal.SIGKILL})
+                    else:
+                        raise ValueError('unknown terminal command')
+            elif kind == 'file_browser':
+                if not self.policy.file_browser_enabled:
+                    raise ValueError('file_browser_not_enabled')
+                if self.tasks:
+                    raise ValueError('one file or tool operation may run at a time')
+                from file_browser import dispatch
+                self.tasks[command_id] = self.executor.submit(
+                    lambda: {'ok': True, 'exit_code': 0, 'file_result': dispatch(self.policy.root, command['request'], self.policy.daq_local_api)})
+                return
+            elif kind == 'run':
+                if self.tasks:
+                    raise ValueError('one tool command may run at a time')
+                self.policy.argv(command['argv'])
+                self.journal(command_id, self.seen[command_id])
+                self.tasks[command_id] = self.executor.submit(
+                    run_command, self.policy, command['argv'], command.get('cwd', '.'),
+                    command.get('timeout', 15), stopping=self.stopping)
+                return
+            elif kind == 'read_file':
+                data = self.policy.read(command['path'])
+                result.update(content=data.decode('utf-8'), sha256=hashlib.sha256(data).hexdigest())
+            elif kind == 'patch_file':
+                self.journal(command_id, self.seen[command_id])
+                result.update(self.policy.patch(command['path'], command['expected_sha256'], command['content']))
+            else:
+                raise ValueError('unknown command kind')
+        except (ValueError, OSError, KeyError, TypeError, AttributeError, binascii.Error) as exc:
+            result.update(ok=False, stderr=str(exc)[:512], exit_code=1)
+        self.cache[command_id] = result
+        if command.get('kind') == 'patch_file':
+            self.journal(command_id, self.seen[command_id], result)
+        self.results.append(result)
+
+    def pump(self):
+        for command_id, future in list(self.tasks.items()):
+            if future.done():
+                try:
+                    result = future.result()
+                except (ValueError, OSError) as exc:
+                    result = {'ok': False, 'stderr': str(exc)[:512], 'stdout': '', 'exit_code': 1}
+                cached = {'id': command_id, **result}
+                self.cache[command_id] = cached
+                self.journal(command_id, self.seen[command_id], cached)
+                self.results.append(cached)
+                del self.tasks[command_id]
+        pending = sum(len(event.get('data', '')) for event in self.outputs)
+        for sid, terminal in list(self.terminals.items()):
+            if (time.monotonic() - terminal.active > 300 or time.monotonic() - terminal.created > 3600
+                    or time.monotonic() - self.last_exchange > 30):
+                terminal.close()
+                del self.terminals[sid]
+                self.closed_sessions.add(sid)
+                self.output({'session_id': sid, 'kind': 'exit', 'code': -signal.SIGKILL})
+                continue
+            if pending < MAX_PENDING:
+                try:
+                    data = os.read(terminal.master, min(8192, MAX_PENDING - pending))
+                except OSError as exc:
+                    if exc.errno not in (errno.EAGAIN, errno.EIO):
+                        raise
+                    data = None if exc.errno == errno.EAGAIN else b''
+                if data:
+                    encoded = base64.b64encode(data).decode()
+                    self.output({'session_id': sid, 'kind': 'data', 'data': encoded})
+                    pending += len(encoded)
+                elif data == b'' and terminal.process.poll() is not None:
+                    code = terminal.process.returncode
+                    terminal.close()
+                    del self.terminals[sid]
+                    self.closed_sessions.add(sid)
+                    self.output({'session_id': sid, 'kind': 'exit', 'code': code})
+
+    def close(self):
+        self.stopping.set()
+        for terminal in self.terminals.values():
+            terminal.close()
+        self.terminals.clear()
+        self.executor.shutdown(wait=True, cancel_futures=True)
+        if self.lock_fd is not None:
+            os.close(self.lock_fd)
+            self.lock_fd = None
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError('exchange redirects are forbidden')
+
+
+def identity(policy=None):
+    try:
+        boot_id = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    except OSError:
+        boot_id = str(uuid.uuid4())
+    result = {'username': getpass.getuser(), 'hostname': socket.gethostname(), 'boot_id': boot_id}
+    if policy is not None:
+        # Observed local capabilities only. Server-owned enrollment context remains
+        # authoritative; these device claims cannot grant tools or root access.
+        result['capabilities'] = {
+            'terminal': {'ready': Path('/bin/bash').is_file() and Path('/usr/bin/python3').is_file(),
+                         'backend': 'host-pty', 'max_sessions': 2, 'max_input_bytes': 4096},
+            'file_browser': {'ready': policy.file_browser_enabled, 'read_only': True, 'max_bytes': 256 * 1024 * 1024},
+            'tools': {'ready': bool(policy.allowed), 'approved_root': str(policy.root),
+                      'allowed_commands': policy.allowed, 'file_patch': True,
+                      'specialists_probed': False},
+        }
+        try:
+            peer = json.loads((policy.root / 'robot-peer.json').read_text())
+            username = peer.get('username', '')
+            host = peer.get('host', '')
+            if isinstance(username, str) and isinstance(host, str):
+                result['capabilities']['robot'] = {'username': username[:120], 'host': host[:120], 'via': 'operator'}
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+    return result
+
+
+def exchange(opener, url, token, payload):
+    request = urllib.request.Request(url, data=json.dumps(payload).encode(), method='POST',
+                                     headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
+    with opener.open(request, timeout=5) as response:
+        data = response.read(1024 * 1024 + 1)
+    if len(data) > 1024 * 1024:
+        raise ValueError('exchange response too large')
+    decoded = json.loads(data)
+    if not isinstance(decoded, dict) or not isinstance(decoded.get('commands'), list) or len(decoded['commands']) > 100:
+        raise ValueError('invalid exchange response')
+    return decoded
+
+
+def validate_server(url, allow_private_http=False, allow_insecure_public_http=False):
+    server = urllib.parse.urlsplit(url)
+    if (not server.hostname or server.username or server.password or server.query or server.fragment):
+        raise ValueError('server URL requires a host and must not contain credentials, query or fragment')
+    if server.scheme == 'https':
+        return
+    if server.scheme != 'http':
+        raise ValueError('server must use HTTPS, or explicitly authorized HTTP')
+    import ipaddress
+    try:
+        address = ipaddress.ip_address(server.hostname)
+    except ValueError as exc:
+        raise ValueError('HTTP requires a literal IP address') from exc
+    if address.is_unspecified or address.is_multicast:
+        raise ValueError('HTTP server address cannot be unspecified or multicast')
+    if allow_private_http and address.is_private:
+        return
+    if allow_insecure_public_http and address.is_global and not address.is_loopback:
+        return
+    raise ValueError('use HTTPS; private LAN HTTP and insecure public HTTP each require their explicit flag')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--server', required=True)
+    parser.add_argument('--policy', required=True)
+    parser.add_argument('--allow-http-private-lan', '--allow-http', action='store_true', help='explicitly permit trusted LAN HTTP')
+    parser.add_argument('--allow-insecure-public-http', action='store_true',
+                        help='TEST ONLY: permit plaintext HTTP to a literal public IP; token and terminal traffic are unencrypted')
+    args = parser.parse_args()
+    if os.geteuid() == 0:
+        parser.error('run as the authorized unprivileged operator user, never root')
+    try:
+        validate_server(args.server, args.allow_http_private_lan, args.allow_insecure_public_http)
+    except ValueError as exc:
+        parser.error(str(exc))
+    token = os.environ.pop(TOKEN_ENV, None) or getpass.getpass('Remote enrollment token: ')
+    if not token.startswith('rw_') or len(token) < 12 or any(c.isspace() for c in token):
+        parser.error('invalid enrollment token')
+    policy = Policy(json.loads(Path(args.policy).read_text()))
+    engine, operator = Engine(policy), identity(policy)
+    opener = urllib.request.build_opener(NoRedirect, urllib.request.ProxyHandler({}))
+    url = args.server.rstrip('/') + '/api/quality-auth/remote-diagnostics/exchange/'
+    def stop(_signum, _frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        while True:
+            engine.pump()
+            outputs, results = engine.outputs[:100], engine.results[:100]
+            try:
+                response = exchange(opener, url, token, {'identity': operator, 'outputs': outputs, 'results': results})
+                # A validated successful response acknowledges exactly this batch.
+                engine.acknowledge(len(outputs), len(results))
+                engine.last_exchange = time.monotonic()
+                for command in response['commands']:
+                    if isinstance(command, dict):
+                        engine.accept(command)
+            except (urllib.error.URLError, OSError, ValueError):
+                # Never print payloads, token, terminal bytes, or server error bodies.
+                pass
+            time.sleep(0.15)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        engine.close()
+
+
+if __name__ == '__main__':
+    main()

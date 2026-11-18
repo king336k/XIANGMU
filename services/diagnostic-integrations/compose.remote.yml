@@ -1,0 +1,21 @@
+# Additive overlay for releases with remote diagnosis enabled.
+# Use with the project's normal release Compose file. Tokens stay in deployment env.
+services:
+  diagnostic-worker:
+    image: ${REMOTE_DIAGNOSTIC_WORKER_IMAGE:-engramproject/runtime-diagnostic:remote-20261118}
+    environment:
+      HOLMES_AGENT_URL: http://diagnostic-holmes:8093
+      HOLMES_SERVICE_TOKEN: ${HOLMES_SERVICE_TOKEN:?set a private internal service token}
+  diagnostic-holmes:
+    image: ${REMOTE_HOLMES_IMAGE:-diagnostic-holmes:remote-20261118}
+    restart: unless-stopped
+    environment:
+      HOLMES_SERVICE_TOKEN: ${HOLMES_SERVICE_TOKEN:?set a private internal service token}
+    networks:
+      - default
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 1536m

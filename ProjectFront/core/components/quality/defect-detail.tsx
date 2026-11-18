@@ -20,6 +20,7 @@ import { SolutionPanel } from "./solution-panel";
 import { DefectVerificationScope } from "./defect-verification-scope";
 import { VerificationAssignee } from "./verification-assignee";
 import { DefectComments } from "./defect-comments";
+import { AgentFeedbackResults } from "./agent-feedback-results";
 import { can, severityNames } from "./types";
 import type { Context, Defect } from "./types";
 
@@ -292,6 +293,15 @@ export function DefectDetail({
                 defectId={value.id}
                 context={context}
                 onCompleted={async () => onChanged(await qualityApi.read<Defect>(`${base}defects/${value.id}/`))}
+              />
+              <AgentFeedbackResults
+                base={base}
+                defectId={value.id}
+                active={activeTab === "diagnosis"}
+                onHistory={() => setActiveTab("history")}
+                onCompleted={() => {
+                  void qualityApi.read<Defect>(`${base}defects/${value.id}/`).then(onChanged);
+                }}
               />
             </div>
             <div hidden={activeTab !== "solution"} className="platform-detail-panel space-y-5">

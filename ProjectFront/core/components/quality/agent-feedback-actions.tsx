@@ -1,0 +1,132 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { useEffect, useRef, useState } from "react";
+import useSWR from "swr";
+import { qualityApi, errorMessage } from "./api";
+import { remoteDiagnosticsBase, runningAgentStatuses } from "../remote-diagnostics/types";
+import type { AgentRun, RemoteDevice } from "../remote-diagnostics/types";
+
+export function AgentFeedbackActions({
+  defectId,
+  active,
+  onCompleted,
+  onHistory,
+}: {
+  defectId: string;
+  active: boolean;
+  onCompleted: () => void;
+  onHistory: () => void;
+}) {
+  const { data: targets, error: targetError } = useSWR(
+    active ? `${remoteDiagnosticsBase}defect-targets/?defect_id=${defectId}` : null,
+    (url: string) => qualityApi.read<{ results: RemoteDevice[] }>(url),
+    { refreshInterval: active ? 10000 : 0 }
+  );
+  const [deviceId, setDeviceId] = useState("");
+  const [runId, setRunId] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
+  const { data: run, error: runError } = useSWR(
+    runId ? `${remoteDiagnosticsBase}agent-runs/${runId}/` : null,
+    (url: string) => qualityApi.read<AgentRun>(url),
+    { refreshInterval: (value) => (value && runningAgentStatuses.has(value.status) ? 1500 : 0) }
+  );
+  const completed = useRef("");
+  useEffect(() => {
+    if (run && !runningAgentStatuses.has(run.status) && completed.current !== run.id) {
+      completed.current = run.id;
+      onCompleted();
+    }
+  }, [run, onCompleted]);
+  const choices = targets?.results || [];
+  const selected = choices.find((device) => device.id === (deviceId || (choices.length === 1 ? choices[0].id : "")));
+  const busy = starting || !!(run && runningAgentStatuses.has(run.status));
+  async function start(mode: string) {
+    if (!selected?.online || busy) return;
+    setStarting(true);
+    setError("");
+    try {
+      const result = await qualityApi.write<AgentRun>(`${remoteDiagnosticsBase}agent-runs/`, {
+        device_id: selected.id,
+        defect_id: defectId,
+        mode,
+        problem:
+          mode === "repair"
+            ? "请重新读取当前现场证据，定位本反馈问题，在授权范围内最小修复并真实复测。无法修复时给出已证实根因、缺口及具体处理步骤。"
+            : mode === "verify"
+              ? "请只读复核本反馈当前现场状态，必须执行固定验证入口。禁止修改配置、文件或服务，如实记录验证证据。"
+              : "请重新读取当前现场配置与日志，只读诊断本反馈问题，给出证据、根因、具体修复和验证建议；禁止修改配置、文件或服务。",
+      });
+      setRunId(result.id);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setStarting(false);
+    }
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {choices.length > 1 && (
+          <select
+            aria-label="现场操作电脑"
+            value={deviceId}
+            onChange={(e) => setDeviceId(e.target.value)}
+            disabled={busy}
+            className="rounded border border-subtle bg-surface-1 px-3 py-2 text-12"
+          >
+            <option value="">选择操作电脑</option>
+            {choices.map((device) => (
+              <option key={device.id} value={device.id}>
+                {device.username}@{device.hostname}
+              </option>
+            ))}
+          </select>
+        )}
+        <button
+          type="button"
+          disabled={busy || !selected?.online}
+          onClick={() => void start("diagnose")}
+          className="rounded border border-subtle px-3 py-1.5 text-12 disabled:opacity-40"
+        >
+          重新诊断
+        </button>
+        <button
+          type="button"
+          disabled={busy || !selected?.online}
+          onClick={() => void start("repair")}
+          className="rounded bg-accent-primary px-3 py-1.5 text-12 text-on-color disabled:opacity-40"
+        >
+          诊断并自动修复
+        </button>
+        <button
+          type="button"
+          disabled={busy || !selected?.online}
+          onClick={() => void start("verify")}
+          className="rounded border border-subtle px-3 py-1.5 text-12 disabled:opacity-40"
+        >
+          重新验证
+        </button>
+        <button type="button" onClick={onHistory} className="px-2 py-1.5 text-12 text-accent-primary">
+          查看处理过程
+        </button>
+        {busy && (
+          <span role="status" className="rounded bg-accent-subtle px-2 py-1 text-12 text-accent-primary">
+            正在处理…
+          </span>
+        )}
+      </div>
+      {selected && (
+        <p className="text-11 text-secondary">
+          现场：{selected.username}@{selected.hostname}
+          {selected.online ? "" : " · 当前离线"}；自动修复仅在已授权范围内执行。
+        </p>
+      )}
+      {targets && !choices.length && <p className="text-12 text-secondary">此反馈尚未关联已接入的操作电脑。</p>}
+      {(error || targetError || runError) && (
+        <p role="alert" className="text-12 text-danger-primary">
+          {error || errorMessage(targetError || runError)}
+        </p>
+      )}
+    </div>
+  );
+}

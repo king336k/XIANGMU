@@ -8,7 +8,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from rest_framework.test import APIClient
 from plane.db.models import Project, ProjectMember, WorkspaceMember
-from plane.quality.models import BusinessRole, PlatformIdentity, PlatformProject, Defect
+from plane.quality.models import BusinessRole, PlatformIdentity, PlatformProject, Defect, DiagnosticJob
 from plane.tests.contract.app.test_daq_incidents import signature
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]

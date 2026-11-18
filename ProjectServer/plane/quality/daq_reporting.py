@@ -264,7 +264,12 @@ class DaqReports(ReportingView):
             workspace__deleted_at__isnull=True,
         )
         self.bind_project(project)
-        return DaqIncidents.post(self, request)
+        response=DaqIncidents.post(self, request)
+        if response.status_code in {200,201} and response.data.get("issueId"):
+            from .remote_feedback import received
+            defect_id=response.data["issueId"]
+            transaction.on_commit(lambda:received(defect_id))
+        return response
 
 
 class DaqOwnReportDetail(ReportingView):

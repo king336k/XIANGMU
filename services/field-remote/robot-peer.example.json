@@ -1,0 +1,7 @@
+{
+  "host": "192.168.1.177",
+  "username": "engram",
+  "ssh_key": "/home/engram/.ssh/field-remote-test",
+  "known_hosts": "/home/engram/.ssh/known_hosts",
+  "remote_root": "/home/engram/Documents/tmp/artifacts/field-remote-robot-simulation-20261118"
+}

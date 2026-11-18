@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from django.urls import path
+from .remote_files import RemoteFiles
+from .remote_research import RemoteResearch
+from .remote_diagnostics import RemoteDirectory, RemoteExchange, RemoteSession, RemoteFeedback, RemoteRuns, RemoteRunDetail, RemoteTool, RemoteDefectTargets
 from .account_management import AccountDirectory, AccountProjectMembers, NativeWorkAccess
 from .data_accounts import AccountSecurity
 from .daq_reporting import (
@@ -20,6 +23,17 @@ from .member_scopes import MemberScopes
 from .daq_connect import DaqConnect
 
 urlpatterns = [
+    path("remote-diagnostics/agent-research/", RemoteResearch.as_view()),
+    path("remote-diagnostics/defect-targets/", RemoteDefectTargets.as_view()),
+    path("remote-diagnostics/files/", RemoteFiles.as_view()),
+    path("remote-diagnostics/files/<uuid:pk>/", RemoteFiles.as_view()),
+    path("remote-diagnostics/", RemoteDirectory.as_view()),
+    path("remote-diagnostics/exchange/", RemoteExchange.as_view()),
+    path("remote-diagnostics/sessions/<uuid:pk>/", RemoteSession.as_view()),
+    path("remote-diagnostics/feedback/", RemoteFeedback.as_view()),
+    path("remote-diagnostics/agent-runs/", RemoteRuns.as_view()),
+    path("remote-diagnostics/agent-runs/<uuid:pk>/", RemoteRunDetail.as_view()),
+    path("remote-diagnostics/agent-tool/", RemoteTool.as_view()),
     path("daq-connect/", DaqConnect.as_view()),
     path("daq-project-grants/", DaqProjectGrants.as_view()),
     path("my-todos/", PersonalTodos.as_view()),

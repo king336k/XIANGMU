@@ -1,0 +1,178 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import type { TerminalSnapshot, TerminalStatus } from "./types";
+
+type RemoteApi = {
+  read<T>(url: string): Promise<T>;
+  write<T>(url: string, data: object): Promise<T>;
+};
+
+export function encodeTerminalInput(data: string): string {
+  return btoa(Array.from(new TextEncoder().encode(data), (byte) => String.fromCharCode(byte)).join(""));
+}
+
+export function decodeTerminalOutput(data: string): Uint8Array {
+  return Uint8Array.from(atob(data), (character) => character.charCodeAt(0));
+}
+
+/** One owner per PTY: ordered input, bounded buffering, and cleanup even during a slow open. */
+export class TerminalConnection {
+  private sessionId = "";
+  private disposed = false;
+  private cursor = 0;
+  private pollTimer: ReturnType<typeof setTimeout> | undefined;
+  private inputTimer: ReturnType<typeof setTimeout> | undefined;
+  private inputQueue: Uint8Array[] = [];
+  private queuedBytes = 0;
+  private sending = false;
+  private resizeQueue: { cols: number; rows: number } | undefined;
+
+  constructor(
+    private api: RemoteApi,
+    private base: string,
+    private output: (bytes: Uint8Array) => void,
+    private onStatus: (status: TerminalStatus, error?: unknown) => void
+  ) {}
+
+  private get url() {
+    return `${this.base}sessions/${encodeURIComponent(this.sessionId)}/`;
+  }
+
+  async open(deviceId: string, cols: number, rows: number) {
+    this.onStatus("connecting");
+    try {
+      const session = await this.api.write<{ id: string; status: string }>(this.base, {
+        action: "open",
+        device_id: deviceId,
+        cols,
+        rows,
+      });
+      this.sessionId = session.id;
+      if (this.disposed) {
+        await this.closeSession();
+        return;
+      }
+      if (session.status !== "open") throw new Error("远程终端未能建立，请重试。");
+      this.onStatus("open");
+      void this.poll();
+    } catch (error) {
+      if (!this.disposed) this.fail(error);
+    }
+  }
+
+  input(data: string) {
+    if (this.disposed || !this.sessionId) return;
+    const bytes = new TextEncoder().encode(data);
+    if (this.queuedBytes + bytes.length > 256 * 1024) {
+      this.fail(new Error("终端输入积压过多，连接已关闭；请重新连接。"));
+      return;
+    }
+    for (let offset = 0; offset < bytes.length; offset += 4096) {
+      this.inputQueue.push(bytes.slice(offset, offset + 4096));
+    }
+    this.queuedBytes += bytes.length;
+    if (!this.sending && !this.inputTimer) {
+      this.inputTimer = setTimeout(() => {
+        this.inputTimer = undefined;
+        void this.flush();
+      }, 30);
+    }
+  }
+
+  resize(cols: number, rows: number) {
+    if (this.disposed || !this.sessionId) return;
+    this.resizeQueue = { cols, rows };
+    void this.flush();
+  }
+
+  private async flush() {
+    if (this.sending) return;
+    clearTimeout(this.inputTimer);
+    this.inputTimer = undefined;
+    this.sending = true;
+    try {
+      await this.flushNext();
+    } catch (error) {
+      if (!this.disposed) this.fail(error);
+    } finally {
+      this.sending = false;
+    }
+  }
+
+  private async flushNext(): Promise<void> {
+    if (this.disposed) return;
+    const first = this.inputQueue.shift();
+    let input = first;
+    if (first && this.inputQueue.length && first.length < 4096) {
+      const chunks = [first];
+      let size = first.length;
+      while (this.inputQueue[0] && size + this.inputQueue[0].length <= 4096) {
+        const next = this.inputQueue.shift()!;
+        chunks.push(next);
+        size += next.length;
+      }
+      input = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        input.set(chunk, offset);
+        offset += chunk.length;
+      }
+    }
+    if (input) {
+      await this.api.write(this.url, {
+        action: "input",
+        data: btoa(Array.from(input, (byte) => String.fromCharCode(byte)).join("")),
+      });
+      this.queuedBytes -= input.length;
+    } else if (this.resizeQueue) {
+      const dimensions = this.resizeQueue;
+      this.resizeQueue = undefined;
+      await this.api.write(this.url, { action: "resize", ...dimensions });
+    } else return;
+    await this.flushNext();
+  }
+
+  private async poll() {
+    try {
+      const response = await this.api.read<TerminalSnapshot>(`${this.url}?after=${this.cursor}`);
+      if (this.disposed) return;
+      for (const event of response.events) {
+        if (event.seq > this.cursor) {
+          this.output(decodeTerminalOutput(event.data));
+          this.cursor = event.seq;
+        }
+      }
+      this.cursor = Math.max(this.cursor, response.cursor);
+      if (response.status !== "open") {
+        this.onStatus(
+          response.status === "closed" && !response.error ? "closed" : "error",
+          response.error ? new Error(response.error) : undefined
+        );
+        this.dispose();
+        return;
+      }
+      this.pollTimer = setTimeout(() => void this.poll(), 400);
+    } catch (error) {
+      if (!this.disposed) this.fail(error);
+    }
+  }
+
+  private fail(error: unknown) {
+    this.onStatus("error", error);
+    this.dispose();
+  }
+
+  private async closeSession() {
+    if (!this.sessionId) return;
+    await this.api.write(this.url, { action: "close" }).catch(() => undefined);
+  }
+
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    clearTimeout(this.pollTimer);
+    clearTimeout(this.inputTimer);
+    this.inputQueue = [];
+    this.resizeQueue = undefined;
+    void this.closeSession();
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "simulation": true,
+  "robot_host": "192.168.1.177",
+  "robot_port": 18778,
+  "expected_robot_port": 18777
+}

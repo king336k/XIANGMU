@@ -1,0 +1,12 @@
+# Context includes verified ROSA Python3.10 site-packages at rosa-site-packages/.
+# Base contains official RAI 1.1.0 core in its own venv and ROS Humble runtime.
+FROM diagnostic-rai-core:1.1.0-humble
+RUN apt-get update && apt-get install -y --no-install-recommends ros-humble-rmw-cyclonedds-cpp && rm -rf /var/lib/apt/lists/*
+RUN /usr/bin/python3 -m venv --system-site-packages /opt/diagnostic-integrations/rosa
+COPY rosa-site-packages/ /opt/diagnostic-integrations/rosa/lib/python3.10/site-packages/
+COPY specialist.py /opt/diagnostic-integrations/specialist.py
+COPY requirements-rosa.txt requirements-rai-core.txt /opt/diagnostic-integrations/
+RUN /opt/diagnostic-integrations/rosa/bin/python -m pip check && /opt/diagnostic-integrations/rai/bin/python -m pip check
+ENV ROS_DOMAIN_ID=173 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENTRYPOINT ["/ros_entrypoint.sh"]
+CMD ["/opt/diagnostic-integrations/rai/bin/python", "/opt/diagnostic-integrations/specialist.py", "rai", "health"]

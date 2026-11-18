@@ -1,0 +1,3 @@
+# Additive install in the PydanticAI venv; do not install ROSA or Holmes here.
+pydantic-ai-slim[openai]==2.66.0
+langgraph==1.2.22

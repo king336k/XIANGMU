@@ -1,0 +1,10 @@
+# Isolated glibc runtime. Context includes verified Python3.10 Holmes site-packages.
+# Reuses the verified Humble Debian base; no Docker socket or device privileges.
+FROM diagnostic-rai-core:1.1.0-humble
+RUN /usr/bin/python3 -m venv /opt/diagnostic-integrations/holmes
+COPY holmes-site-packages/ /opt/diagnostic-integrations/holmes/lib/python3.10/site-packages/
+COPY holmes_runner.py holmes_service.py /opt/diagnostic-integrations/
+RUN /opt/diagnostic-integrations/holmes/bin/python -m pip check
+ENV LITELLM_LOCAL_MODEL_COST_MAP=true OTEL_SDK_DISABLED=true
+USER 65534:65534
+ENTRYPOINT ["/opt/diagnostic-integrations/holmes/bin/python", "/opt/diagnostic-integrations/holmes_service.py"]

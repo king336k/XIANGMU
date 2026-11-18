@@ -1,0 +1,6 @@
+{
+  "containers": {
+    "rosa": "diagnostic-rosa-humble",
+    "rai": "diagnostic-rai-humble"
+  }
+}

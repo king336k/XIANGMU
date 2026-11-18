@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+export type RemoteDevice = {
+  id: string;
+  username: string;
+  hostname: string;
+  name: string;
+  online: boolean;
+  last_seen_at: string | null;
+  project_id: string;
+  workspace_slug: string;
+  can_connect: boolean;
+  capabilities: Record<string, unknown>;
+};
+
+export type TerminalStatus = "connecting" | "open" | "closed" | "error";
+export type TerminalSnapshot = {
+  id: string;
+  status: string;
+  events: { seq: number; data: string }[];
+  cursor: number;
+  error?: string;
+};
+
+export type AgentRun = {
+  id: string;
+  status: string;
+  result?: {
+    summary?: unknown;
+    root_cause?: unknown;
+    actions?: unknown;
+    verification?: unknown;
+    solution?: unknown;
+    repaired?: boolean;
+    verification_passed?: boolean;
+    outcome?: "verified" | "repaired" | "unresolved";
+  } | null;
+  error?: string;
+};
+
+export const remoteDiagnosticsBase = "/api/quality-auth/remote-diagnostics/";
+export const runningAgentStatuses = new Set(["pending", "queued", "running", "starting"]);
+
+export function agentStatusLabel(status: string) {
+  return (
+    {
+      pending: "等待开始",
+      queued: "排队中",
+      starting: "正在启动",
+      running: "诊断中",
+      completed: "诊断完成",
+      succeeded: "诊断完成",
+      failed: "诊断失败",
+      cancelled: "已取消",
+      timed_out: "诊断超时",
+    }[status] || "状态待确认"
+  );
+}

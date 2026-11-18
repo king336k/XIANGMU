@@ -34,11 +34,12 @@ import interFontStyles from "@fontsource-variable/inter/index.css?url";
 import interVariableWoff2 from "@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url";
 import symbolFontStyles from "@fontsource/material-symbols-rounded/index.css?url";
 import monoFontStyles from "@fontsource/ibm-plex-mono/index.css?url";
+import terminalStyles from "@xterm/xterm/css/xterm.css?url";
 
 const APP_TITLE = "项目管理平台";
 
 export const links: LinksFunction = () => [
-  ...[interFontStyles, symbolFontStyles, monoFontStyles].map((href) => ({ rel: "stylesheet", href })),
+  ...[interFontStyles, symbolFontStyles, monoFontStyles, terminalStyles].map((href) => ({ rel: "stylesheet", href })),
   { rel: "icon", type: "image/png", sizes: "32x32", href: `${favicon32}?brand=engram-20261107` },
   { rel: "icon", type: "image/png", sizes: "16x16", href: `${favicon16}?brand=engram-20261107` },
   { rel: "shortcut icon", href: `${faviconIco}?brand=engram-20261107` },
