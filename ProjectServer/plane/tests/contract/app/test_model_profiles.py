@@ -181,3 +181,85 @@ def test_encryption_failure_keeps_original_configuration(model_client, workspace
     assert response.status_code == 400
     assert provider_config(workspace.id)["model"] == "original"
     assert len(client.get(path).data["profiles"]) == 1
+
+
+def test_edit_inactive_profile_preserves_active_model_and_both_keys(model_client, workspace):
+    client, path = model_client
+    original = client.patch(path, {"model": "original", "api_key": "synthetic-original"}, format="json").data[
+        "active_profile_id"
+    ]
+    current = client.patch(
+        path,
+        {
+            "profile_action": "create",
+            "model": "current",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "synthetic-current",
+        },
+        format="json",
+    ).data["active_profile_id"]
+    response = client.patch(
+        path,
+        {
+            "profile_id": original,
+            "model": "renamed",
+            "base_url": "http://10.10.10.193:3000/v1",
+            "api_key": "",
+        },
+        format="json",
+    )
+    assert response.status_code == 200, response.content
+    assert response.data["active_profile_id"] == current
+    assert provider_config(workspace.id)["model"] == "current"
+    assert provider_config(workspace.id)["api_key"] == "synthetic-current"
+    assert (
+        client.patch(path, {"profile_action": "activate", "profile_id": original}, format="json").status_code
+        == 200
+    )
+    assert provider_config(workspace.id)["model"] == "renamed"
+    assert provider_config(workspace.id)["base_url"] == "http://10.10.10.193:3000/v1"
+    assert provider_config(workspace.id)["api_key"] == "synthetic-original"
+    assert (
+        client.patch(
+            path, {"profile_id": current, "api_key": "synthetic-replacement"}, format="json"
+        ).status_code
+        == 200
+    )
+    assert provider_config(workspace.id)["api_key"] == "synthetic-original"
+    assert (
+        client.patch(path, {"profile_action": "activate", "profile_id": current}, format="json").status_code
+        == 200
+    )
+    assert provider_config(workspace.id)["api_key"] == "synthetic-replacement"
+    assert "synthetic-" not in json.dumps(client.get(path).data)
+
+
+def test_inactive_edit_cannot_change_shared_embedding_settings(model_client, workspace):
+    client, path = model_client
+    original = client.patch(path, {"model": "original", "api_key": "synthetic-original"}, format="json").data[
+        "active_profile_id"
+    ]
+    client.patch(
+        path,
+        {
+            "profile_action": "create",
+            "model": "current",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "synthetic-current",
+        },
+        format="json",
+    )
+    assert (
+        client.patch(path, {"profile_id": original, "embedding_mode": "builtin"}, format="json").status_code
+        == 400
+    )
+    assert (
+        client.patch(
+            path, {"profile_id": original, "base_url": "http://10.10.10.194:3000/v1"}, format="json"
+        ).status_code
+        == 400
+    )
+    assert (
+        client.patch(path, {"profile_id": str(uuid4()), "model": "foreign"}, format="json").status_code == 400
+    )
+    assert provider_config(workspace.id)["model"] == "current"

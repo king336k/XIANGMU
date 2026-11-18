@@ -181,15 +181,25 @@ class ModelConfiguration(QualityView):
                 if not assistant.valid_provider_url(selected["base_url"]):
                     raise ValidationError({"base_url": "该模型地址当前不在服务器允许列表中。"})
                 profiles["active"] = selected["id"]
-            elif selected_id != profiles["active"]:
-                raise ValidationError({"profile_id": "请先切换到要修改的模型。"})
             else:
+                if selected_id != profiles["active"] and set(request.data) - {
+                    "profile_action",
+                    "profile_id",
+                    "model",
+                    "base_url",
+                    "api_key",
+                    "clear_key",
+                }:
+                    raise ValidationError(
+                        {"profile_id": "编辑未使用的模型时，仅可修改名称、接口地址和密钥。"}
+                    )
                 selected.update({name: data[name] for name in ["model", "base_url"] if name in data})
                 if data.get("api_key") or data["clear_key"]:
                     selected["api_key"] = "" if data["clear_key"] else data["api_key"]
         # Keep the canonical active keys for all existing question/diagnostic consumers.
-        data.update({name: selected[name] for name in ["model", "base_url", "api_key"]})
-        data["clear_key"] = not bool(selected["api_key"])
+        active = next(row for row in profiles["items"] if row["id"] == profiles["active"])
+        data.update({name: active[name] for name in ["model", "base_url", "api_key"]})
+        data["clear_key"] = not bool(active["api_key"])
         updates = {}
         encrypted_profiles = encrypt_data(json.dumps(profiles))
         if not encrypted_profiles:

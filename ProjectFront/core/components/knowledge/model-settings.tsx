@@ -33,7 +33,10 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
     [message, setMessage] = useState(""),
     [advancedOpen, setAdvancedOpen] = useState(false),
     [embeddingMode, setEmbeddingMode] = useState(""),
-    [adding, setAdding] = useState(false);
+    [adding, setAdding] = useState(false),
+    [editingId, setEditingId] = useState("");
+  const editing = data?.profiles?.find((profile) => profile.id === editingId) || data;
+  const editingInactive = !!editingId && editingId !== data?.active_profile_id;
   const searchName =
     data?.semantic?.source === "external"
       ? "外部知识检索"
@@ -67,34 +70,51 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
                   <p className="text-12 break-all text-secondary">{profile.base_url}</p>
                   <p className="text-12 text-secondary">密钥：{profile.key_present ? "已设置" : "未设置"}</p>
                 </div>
-                {profile.id === data.active_profile_id ? (
-                  <span className="text-12" role="status">
-                    当前使用
-                  </span>
-                ) : (
+                <div className="flex items-center gap-2">
                   <Button
                     type="button"
                     disabled={busy}
-                    aria-label={`使用 ${profile.model} ${profile.base_url}`}
-                    onClick={async () => {
-                      setBusy(true);
+                    aria-label={`编辑 ${profile.model} ${profile.base_url}`}
+                    onClick={() => {
+                      setEditingId(profile.id);
+                      setAdding(false);
+                      setEmbeddingMode("");
+                      setAdvancedOpen(false);
                       setMessage("");
-                      try {
-                        await qualityApi.write(url, { profile_action: "activate", profile_id: profile.id }, "patch");
-                        await mutate();
-                        setAdding(false);
-                        setEmbeddingMode("");
-                        setMessage("已切换模型。");
-                      } catch (e) {
-                        setMessage(errorMessage(e));
-                      } finally {
-                        setBusy(false);
-                      }
                     }}
                   >
-                    使用此模型
+                    编辑
                   </Button>
-                )}
+                  {profile.id === data.active_profile_id ? (
+                    <span className="text-12" role="status">
+                      当前使用
+                    </span>
+                  ) : (
+                    <Button
+                      type="button"
+                      disabled={busy}
+                      aria-label={`使用 ${profile.model} ${profile.base_url}`}
+                      onClick={async () => {
+                        setBusy(true);
+                        setMessage("");
+                        try {
+                          await qualityApi.write(url, { profile_action: "activate", profile_id: profile.id }, "patch");
+                          await mutate();
+                          setAdding(false);
+                          setEditingId("");
+                          setEmbeddingMode("");
+                          setMessage("已切换模型。");
+                        } catch (e) {
+                          setMessage(errorMessage(e));
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      使用此模型
+                    </Button>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
@@ -103,6 +123,7 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
             disabled={busy}
             onClick={() => {
               setAdding(!adding);
+              setEditingId("");
               setMessage("");
             }}
           >
@@ -110,9 +131,9 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
           </Button>
         </div>
       )}
-      {data && (
+      {data && editing && (
         <form
-          key={`${adding}:${data.active_profile_id}:${data.model}:${data.base_url}:${data.key_present}:${data.semantic_enabled}:${data.embedding_model}:${data.embedding_base_url}`}
+          key={`${adding}:${editingId}:${data.active_profile_id}:${editing.model}:${editing.base_url}:${editing.key_present}:${data.semantic_enabled}:${data.embedding_model}:${data.embedding_base_url}`}
           className="space-y-4"
           onSubmit={async (event) => {
             event.preventDefault();
@@ -133,7 +154,9 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
                 url,
                 {
                   ...(adding ? { profile_action: "create" } : {}),
-                  ...(!adding && data.active_profile_id ? { profile_id: data.active_profile_id } : {}),
+                  ...(!adding && (editingId || data.active_profile_id)
+                    ? { profile_id: editingId || data.active_profile_id }
+                    : {}),
                   model: form.get("model"),
                   base_url: form.get("base_url"),
                   api_key: form.get("api_key") || "",
@@ -164,12 +187,31 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
             }
           }}
         >
+          {!adding && editingId && (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-13">
+                正在编辑：{editing.model}
+                {editingInactive ? "（保存不切换当前模型）" : "（当前使用）"}
+              </p>
+              <Button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setEditingId("");
+                  setEmbeddingMode("");
+                  setMessage("");
+                }}
+              >
+                取消编辑
+              </Button>
+            </div>
+          )}
           <Field label="模型名称 *">
             <input
               required
               name="model"
               maxLength={120}
-              defaultValue={adding ? "" : data.model}
+              defaultValue={adding ? "" : editing.model}
               disabled={!data.can_configure}
               className={fieldClass}
             />
@@ -180,7 +222,7 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
               name="base_url"
               type="url"
               maxLength={500}
-              defaultValue={adding ? "" : data.base_url}
+              defaultValue={adding ? "" : editing.base_url}
               disabled={!data.can_configure}
               className={fieldClass}
             />
@@ -197,76 +239,78 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
                   className={fieldClass}
                 />
               </Field>
-              {!adding && data.key_present && (
+              {!adding && editing.key_present && (
                 <label className="flex items-center gap-2 text-12">
                   <input type="checkbox" name="clear_key" />
                   清除已保存的密钥，停用模型问答
                 </label>
               )}
               <p className="text-12 text-secondary">接口主机须在服务器允许列表中。</p>
-              <details
-                className="space-y-3 border-t border-subtle pt-4"
-                onToggle={(event) => {
-                  setAdvancedOpen(event.currentTarget.open);
-                  if (!event.currentTarget.open) setEmbeddingMode("");
-                }}
-              >
-                <summary className="cursor-pointer text-13">高级设置：外部向量服务</summary>
-                <Field label="检索服务设置">
-                  <select
-                    name="embedding_mode"
-                    value={embeddingMode}
-                    onChange={(event) => setEmbeddingMode(event.target.value)}
-                    className={fieldClass}
-                  >
-                    <option value="">保留当前检索服务</option>
-                    <option value="builtin">恢复平台内置服务</option>
-                    <option value="external">使用外部向量服务</option>
-                  </select>
-                </Field>
-                {advancedOpen && embeddingMode === "external" && (
-                  <fieldset className="space-y-3">
-                    <legend className="text-14 font-medium">外部向量连接</legend>
-                    <Field label="向量模型名称 *">
-                      <input
-                        required
-                        name="embedding_model"
-                        maxLength={120}
-                        defaultValue={data.semantic?.source === "external" ? data.embedding_model || "" : ""}
-                        className={fieldClass}
-                        placeholder="填写当前接口支持的向量模型名称"
-                      />
-                    </Field>
-                    <p className="text-12 text-secondary">密钥留空保留原值。</p>
-                    <Field label="向量接口地址 *">
-                      <input
-                        required
-                        name="embedding_base_url"
-                        type="url"
-                        maxLength={500}
-                        defaultValue={data.semantic?.source === "external" ? data.embedding_base_url || "" : ""}
-                        className={fieldClass}
-                        placeholder="https://embedding.example.com/v1"
-                      />
-                    </Field>
-                    <Field label="向量服务密钥（留空保留）">
-                      <input
-                        type="password"
-                        name="embedding_api_key"
-                        maxLength={4000}
-                        autoComplete="new-password"
-                        className={fieldClass}
-                      />
-                    </Field>
-                    {data.embedding_key_present && (
-                      <label className="flex items-center gap-2 text-12">
-                        <input type="checkbox" name="clear_embedding_key" />
-                        清除向量服务密钥
-                      </label>
-                    )}
-                  </fieldset>
-                )}
-              </details>
+              {!editingInactive && (
+                <details
+                  className="space-y-3 border-t border-subtle pt-4"
+                  onToggle={(event) => {
+                    setAdvancedOpen(event.currentTarget.open);
+                    if (!event.currentTarget.open) setEmbeddingMode("");
+                  }}
+                >
+                  <summary className="cursor-pointer text-13">高级设置：外部向量服务</summary>
+                  <Field label="检索服务设置">
+                    <select
+                      name="embedding_mode"
+                      value={embeddingMode}
+                      onChange={(event) => setEmbeddingMode(event.target.value)}
+                      className={fieldClass}
+                    >
+                      <option value="">保留当前检索服务</option>
+                      <option value="builtin">恢复平台内置服务</option>
+                      <option value="external">使用外部向量服务</option>
+                    </select>
+                  </Field>
+                  {advancedOpen && embeddingMode === "external" && (
+                    <fieldset className="space-y-3">
+                      <legend className="text-14 font-medium">外部向量连接</legend>
+                      <Field label="向量模型名称 *">
+                        <input
+                          required
+                          name="embedding_model"
+                          maxLength={120}
+                          defaultValue={data.semantic?.source === "external" ? data.embedding_model || "" : ""}
+                          className={fieldClass}
+                          placeholder="填写当前接口支持的向量模型名称"
+                        />
+                      </Field>
+                      <p className="text-12 text-secondary">密钥留空保留原值。</p>
+                      <Field label="向量接口地址 *">
+                        <input
+                          required
+                          name="embedding_base_url"
+                          type="url"
+                          maxLength={500}
+                          defaultValue={data.semantic?.source === "external" ? data.embedding_base_url || "" : ""}
+                          className={fieldClass}
+                          placeholder="https://embedding.example.com/v1"
+                        />
+                      </Field>
+                      <Field label="向量服务密钥（留空保留）">
+                        <input
+                          type="password"
+                          name="embedding_api_key"
+                          maxLength={4000}
+                          autoComplete="new-password"
+                          className={fieldClass}
+                        />
+                      </Field>
+                      {data.embedding_key_present && (
+                        <label className="flex items-center gap-2 text-12">
+                          <input type="checkbox" name="clear_embedding_key" />
+                          清除向量服务密钥
+                        </label>
+                      )}
+                    </fieldset>
+                  )}
+                </details>
+              )}
               <Button type="submit" disabled={busy}>
                 {busy ? "正在保存…" : adding ? "添加并使用模型" : "保存模型配置"}
               </Button>

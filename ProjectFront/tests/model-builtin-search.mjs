@@ -253,3 +253,37 @@ test("新增模型使用独立密钥，切换只提交配置ID", async () => {
   await use.props.onClick();
   assert.deepEqual(h.writes[1][1], { profile_action: "activate", profile_id: "local" });
 });
+
+test("编辑列表中的未启用模型预填独立配置且不触发切换", async () => {
+  const h = harness({
+    ...configured,
+    active_profile_id: "active",
+    profiles: [
+      { id: "active", model: "active-model", base_url: configured.base_url, key_present: true },
+      { id: "other", model: "other-model", base_url: "http://10.10.10.193:3000/v1", key_present: true },
+    ],
+  });
+  const edit = nodes(h.render()).find(
+    (node) => node.props?.["aria-label"] === "编辑 other-model http://10.10.10.193:3000/v1"
+  );
+  assert.ok(edit, "each saved model exposes an edit action");
+  edit.props.onClick();
+  const tree = h.render();
+  assert.equal(
+    nodes(tree).find((node) => node.type === "input" && node.props.name === "model").props.defaultValue,
+    "other-model"
+  );
+  assert.equal(
+    nodes(tree).find((node) => node.type === "input" && node.props.name === "base_url").props.defaultValue,
+    "http://10.10.10.193:3000/v1"
+  );
+  assert.ok(
+    !nodes(tree).some((node) => node.type === "details"),
+    "inactive model editing does not edit shared retrieval"
+  );
+  await submit(tree, { model: "edited-model", api_key: "" });
+  assert.equal(h.writes[0][1].profile_id, "other");
+  assert.equal(h.writes[0][1].api_key, "");
+  assert.equal(h.writes[0][1].profile_action, undefined);
+  assert.match(words(h.render()), /已保存/);
+});
