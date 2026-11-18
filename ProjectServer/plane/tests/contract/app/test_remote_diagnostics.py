@@ -393,3 +393,23 @@ def test_verify_only_success_is_preserved_as_healthy_without_claiming_mutation(r
     listing=client.get(BASE+'feedback/',{'device_id':device,'state':'repaired'}).data
     assert listing['count']==1 and listing['results'][0]['latest_status']=='verified'
     assert client.get(BASE+'feedback/',{'device_id':device,'state':'needs_attention'}).data['count']==0
+
+
+def test_original_diagnostic_can_reference_same_defect_field_repair_evidence(remote):
+    from uuid import uuid4
+    from plane.quality.models import Defect,DiagnosticJob
+    from plane.quality.remote_models import RemoteAgentRun
+    from plane.quality.remote_diagnostics import identity_key
+    from plane.quality.remote_tasks import finish
+    from plane.quality.diagnostic_context import diagnostic_context
+    client,edge,device,project=remote;heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device)
+    defect=Defect.objects.create(project=project,title='report alignment',description='report alignment')
+    run=RemoteAgentRun.objects.create(workstation=station,defect=defect,owner=station.agent.owner,identity_key=identity_key(station),status='running',expires_at=timezone.now()+timedelta(minutes=1))
+    finish(run.id,{'summary':'repaired exact target','root_cause':'confirmed config','repaired':True,'repair_locations':[{'path':'/robot/config.json','line':4,'key':'enabled','before':False,'after':True}]})
+    job=DiagnosticJob.objects.create(project=project,defect=defect,created_by=station.agent.owner,mode='llm',request_id=uuid4())
+    ref=next(r for r in diagnostic_context(job) if r['reference']=='PLATFORM-FIELD-CHECK')
+    assert 'repaired exact target' in ref['content'] and '/robot/config.json' in ref['content']
+    foreign=Defect.objects.create(project=project,title='foreign',description='foreign')
+    job.defect=foreign
+    assert not any(r['reference']=='PLATFORM-FIELD-CHECK' for r in diagnostic_context(job))

@@ -345,6 +345,41 @@ class ConnectorTests(unittest.TestCase):
             server.server_close()
             thread.join()
 
+    def test_remote_repair_reports_actual_host_file_lines_values_and_diff(self):
+        configs = [
+            ('{"telemetry_enabled":false,"accept_commands":false,"hardware_required":false}',
+             {'telemetry_enabled':1,'accept_commands':1,'hardware_required':1}),
+            ('{\n  "telemetry_enabled": false,\n\n  "accept_commands": false,\n\n  "hardware_required": false\n}\n',
+             {'telemetry_enabled':2,'accept_commands':4,'hardware_required':6}),
+        ]
+        for raw, lines in configs:
+            with self.subTest(lines=lines):
+                target=self.root/'robot-config.json';target.write_text(raw)
+                before=remote_operation(self.root,'inspect')
+                for key,line in lines.items():
+                    location=before['config_locations'][key]
+                    self.assertEqual(location['line'],line)
+                    self.assertEqual(location['value'],False)
+                    self.assertEqual(location['path'],str(target))
+                    self.assertEqual(location['hostname'],before['robot_hostname'])
+                result=remote_operation(self.root,'repair',{'expected_sha256':before['config_sha256']})
+                after=target.read_text()
+                self.assertEqual(len(result['changes']),2)
+                for change in result['changes']:
+                    self.assertEqual(change['before'],False)
+                    self.assertEqual(change['after'],True)
+                    self.assertEqual(change['before_line'],lines[change['key']])
+                    actual_line=next(n for n,text in enumerate(after.splitlines(),1) if '"'+change['key']+'"' in text)
+                    self.assertEqual(change['after_line'],actual_line)
+                    self.assertEqual(change['line'],actual_line)
+                    self.assertEqual(change['path'],str(target))
+                    self.assertEqual(change['target_hostname'],before['robot_hostname'])
+                    self.assertEqual(Path(change['backup']).read_text(),raw)
+                    self.assertEqual(change['before_sha256'],hashlib.sha256(raw.encode()).hexdigest())
+                    self.assertEqual(change['after_sha256'],hashlib.sha256(after.encode()).hexdigest())
+                self.assertTrue(any(line.startswith('-') and 'false' in line for line in result['config_diff'].splitlines()))
+                self.assertIn('+  "telemetry_enabled": true',result['config_diff'])
+
     def test_fixed_ssh_argv_and_no_remote_command_input(self):
         key = self.root / 'dedicated-test-key'
         known = self.root / 'known-hosts'

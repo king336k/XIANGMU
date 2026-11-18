@@ -289,3 +289,15 @@ class GatewayTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class LocationReceiptTest(unittest.TestCase):
+    def test_repair_location_is_extracted_only_from_successful_execution_receipt(self):
+        gateway=runner.Gateway('http://unused','synthetic',inspect_argv=['inspect'],verify_argv=['verify'],repair_argv=['repair','--sha'])
+        gateway.inspected=True
+        receipt={'changes':[{'target_hostname':'robot177','path':'/robot/config.json','key':'telemetry_enabled','before_line':1,'after_line':4,'before':False,'after':True,'backup':'/robot/config.json.backup-1'}]}
+        with patch.object(gateway,'rpc',return_value={'ok':True,'exit_code':0,'stdout':json.dumps(receipt)}):
+            gateway.run_command(['repair','--sha','a'*64],purpose='repair')
+        self.assertEqual(gateway.repair_locations[0]['path'],'/robot/config.json')
+        self.assertEqual(gateway.repair_locations[0]['line'],4)
+        self.assertEqual(gateway.repair_locations[0]['before_line'],1)
+        self.assertFalse(gateway.repair_verified)

@@ -2,6 +2,7 @@
 """Fixed 195 -> SSH 177 simulation inspection/repair; no arbitrary remote command."""
 
 import argparse
+import difflib
 import hashlib
 import ipaddress
 import json
@@ -18,6 +19,35 @@ import collector_sim
 FLAGS = ('telemetry_enabled', 'accept_commands', 'hardware_required')
 
 
+def config_locations(raw, path, hostname):
+    """Locate parsed top-level keys in the exact bytes read, including escaped keys."""
+    text = raw.decode('utf-8')
+    decoder = json.JSONDecoder()
+    index = len(text) - len(text.lstrip())
+    if text[index:index+1] != '{':
+        raise ValueError('robot config must be a JSON object')
+    index += 1
+    locations = {}
+    while True:
+        while index < len(text) and text[index].isspace(): index += 1
+        if text[index:index+1] == '}': break
+        start = index
+        key, index = decoder.raw_decode(text, index)
+        while index < len(text) and text[index].isspace(): index += 1
+        if text[index:index+1] != ':': raise ValueError('invalid robot config key')
+        index += 1
+        while index < len(text) and text[index].isspace(): index += 1
+        value, index = decoder.raw_decode(text, index)
+        if key in locations: raise ValueError('duplicate robot config key has ambiguous line evidence')
+        locations[key] = {'hostname': hostname, 'path': str(path),
+                          'line': text.count('\n', 0, start) + 1, 'value': value}
+        while index < len(text) and text[index].isspace(): index += 1
+        if text[index:index+1] == '}': break
+        if text[index:index+1] != ',': raise ValueError('invalid robot config separator')
+        index += 1
+    return locations
+
+
 def robot_config(root):
     policy = Policy({'approved_root': str(root), 'editable_files': ['robot-config.json']})
     raw = policy.read('robot-config.json')
@@ -31,20 +61,42 @@ def robot_config(root):
 
 def remote_operation(root, operation, payload=None):
     policy, raw, config = robot_config(root)
+    hostname = __import__('socket').gethostname()
+    path = policy.root / 'robot-config.json'
+    before_locations = config_locations(raw, path, hostname)
     evidence = {'simulation': True, 'config': config, 'config_sha256': hashlib.sha256(raw).hexdigest(),
                 'requires_onsite': config['hardware_required'],
-                'robot_hostname': __import__('socket').gethostname(),
-                'robot_config_path': str(policy.root / 'robot-config.json')}
+                'robot_hostname': hostname, 'config_locations': before_locations,
+                'robot_config_path': str(path)}
     if operation == 'inspect':
         return evidence
     if operation != 'repair' or not isinstance(payload, dict) or set(payload) != {'expected_sha256'}:
         raise ValueError('unsupported fixed remote operation')
     if config['hardware_required']:
-        return {**evidence, 'repaired': False, 'reason': 'hardware_requires_onsite_intervention'}
-    config.update(telemetry_enabled=True, accept_commands=True)
+        return {**evidence, 'changes': [], 'repaired': False, 'reason': 'hardware_requires_onsite_intervention'}
+    before = dict(config)
+    config = {**config, 'telemetry_enabled': True, 'accept_commands': True}
     result = policy.patch('robot-config.json', payload['expected_sha256'],
                           json.dumps(config, sort_keys=True, indent=2) + '\n')
-    return {**evidence, 'config': config, 'config_sha256': result['sha256'],
+    after_raw = policy.read('robot-config.json')
+    if hashlib.sha256(after_raw).hexdigest() != result['sha256']:
+        raise ValueError('robot config changed after patch; inspect actual state before reporting')
+    after_locations = config_locations(after_raw, path, hostname)
+    backup = policy.root / result['backup']
+    changes = [
+        {'target_hostname': hostname, 'path': str(path), 'key': key,
+         'line': after_locations[key]['line'], 'before_line': before_locations[key]['line'],
+         'after_line': after_locations[key]['line'], 'before': before[key], 'after': config[key],
+         'backup': str(backup), 'before_sha256': evidence['config_sha256'],
+         'after_sha256': result['sha256']}
+        for key in FLAGS if before[key] != config[key]
+    ]
+    diff = ''.join(difflib.unified_diff(raw.decode().splitlines(keepends=True),
+                                      after_raw.decode().splitlines(keepends=True),
+                                      fromfile=str(backup), tofile=str(path)))
+    return {**evidence, 'config': config, 'config_before': before, 'config_locations': after_locations,
+            'config_locations_before': before_locations, 'changes': changes, 'config_diff': diff,
+            'config_sha256_before': evidence['config_sha256'], 'config_sha256': result['sha256'],
             'backup': result['backup'], 'repaired': True}
 
 

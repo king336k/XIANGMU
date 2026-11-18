@@ -149,6 +149,16 @@ def diagnostic_context(job, report_only=False, sources=None):
         + receipt["boundary"]
     )
     references = [{"reference": "PLATFORM-RECEIPT", "title": "本项目平台接收回执", "content": receipt_text}]
+    from .remote_models import RemoteAgentRun
+    from .remote_diagnostics import identity_key
+    field_run = RemoteAgentRun.objects.filter(defect=defect,status="completed",comment__visibility="public").select_related("workstation").order_by("-created_at").first()
+    if field_run:
+        from django.utils import timezone
+        from datetime import timedelta
+        same_identity=field_run.identity_key==identity_key(field_run.workstation)
+        recent=field_run.created_at>=timezone.now()-timedelta(minutes=30)
+        evidence={"run_id":str(field_run.id),"mode":field_run.mode,"recorded_at":field_run.created_at.isoformat(),"same_workstation_identity":same_identity,"recent_within_30_minutes":recent,"result":field_run.result}
+        references.append({"reference":"PLATFORM-FIELD-CHECK","title":"本缺陷现场执行与复测记录","content":redact(json.dumps(evidence,ensure_ascii=False))[:16000]+"\n仅支持此任务记录的时间和对象范围。区分上报时历史故障与较晚现场状态；当前仍正常需重新验证，不把旧复测当永久正常。"})
     if not report_only:
         from .models import DefectVerification
 

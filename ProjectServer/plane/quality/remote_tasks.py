@@ -46,6 +46,13 @@ def finish(run_id, result, status="completed", error=""):
             value = "；".join(map(str, value)) if isinstance(value, list) else str(value)
             if value:
                 lines.append(label + "：" + redact(value)[:4000])
+        for location in result.get("repair_locations", [])[:10]:
+            if not isinstance(location,dict) or not location.get("path"):continue
+            address=str(location.get("target") or "现场")+" · "+str(location["path"])
+            if type(location.get("line")) is int and location["line"]>0:address+=":"+str(location["line"])
+            change=str(location.get("key") or location.get("symbol") or "")
+            if "before" in location and "after" in location:change+=" "+str(location["before"])+" → "+str(location["after"])
+            lines.append("修改位置："+redact(address+" · "+change)[:2000])
         # Public replies are already displayed by the reporting DAQ client.
         comment = DefectComment.objects.create(
             project_id=run.defect.project_id,
