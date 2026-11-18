@@ -28,6 +28,92 @@ test("terminal preserves Unicode, escape sequences and Ctrl+C as bytes", () => {
   assert.deepEqual(decodeTerminalOutput(encodeTerminalInput(input)), new TextEncoder().encode(input));
 });
 
+test("robot terminal open binds only target and expected revision and reports actual session identity", async () => {
+  const calls = [];
+  let accepted;
+  const session = {
+    id: "robot-session",
+    status: "open",
+    target: "robot",
+    identity: { username: "actual-robot", host: "10.0.0.177" },
+    target_revision: "peer-revision",
+  };
+  const connection = new TerminalConnection(
+    {
+      read: () => new Promise(() => {}),
+      async write(url, body) {
+        calls.push(body);
+        return session;
+      },
+    },
+    "/remote/",
+    () => {},
+    () => {},
+    (value) => {
+      accepted = value;
+    }
+  );
+  await connection.open("computer", 80, 24, "robot", "peer-revision");
+  assert.deepEqual(calls[0], {
+    action: "open",
+    device_id: "computer",
+    cols: 80,
+    rows: 24,
+    target: "robot",
+    expected_target_revision: "peer-revision",
+  });
+  assert.equal(accepted.identity.username, "actual-robot");
+  assert.equal(accepted.identity.host, "10.0.0.177");
+  assert.equal("host" in calls[0] || "username" in calls[0] || "password" in calls[0], false);
+  connection.dispose();
+});
+
+test("robot terminal rejects a mismatched response target and closes rather than sending robot input to collector", async () => {
+  const calls = [];
+  const statuses = [];
+  const connection = new TerminalConnection(
+    {
+      read: () => {
+        throw new Error("must not poll");
+      },
+      async write(url, body) {
+        calls.push(body.action);
+        return {
+          id: "wrong",
+          status: "open",
+          target: "operator",
+          identity: { username: "collector", host: "10.0.0.195" },
+        };
+      },
+    },
+    "/remote/",
+    () => {},
+    (value) => statuses.push(value)
+  );
+  await connection.open("computer", 80, 24, "robot", "peer-revision");
+  connection.input("pwd\r");
+  assert.deepEqual(statuses, ["connecting", "error"]);
+  assert.deepEqual(calls, ["open", "close"]);
+});
+
+test("robot terminal without revision never sends an open request", async () => {
+  const calls = [];
+  const connection = new TerminalConnection(
+    {
+      read: () => new Promise(() => {}),
+      async write(url, body) {
+        calls.push(body);
+        return {};
+      },
+    },
+    "/remote/",
+    () => {},
+    () => {}
+  );
+  await connection.open("computer", 80, 24, "robot");
+  assert.deepEqual(calls, []);
+});
+
 test("terminal serializes rapid input, preserves Ctrl+C and resizes the owned session", async () => {
   const calls = [];
   let release;
@@ -258,6 +344,7 @@ const device = {
   ip_address: "10.0.0.195",
   online: true,
   can_connect: true,
+  capabilities: {},
 };
 
 test("device card displays identity and selecting it does not open a shell implicitly", () => {
@@ -292,6 +379,17 @@ test("cached device refresh error keeps selected file and terminal sessions moun
     (node) => node.type === "button" && JSON.stringify(node.props.children).includes("刷新设备")
   );
   assert.equal(refresh.props.disabled, undefined);
+});
+
+test("collector DHCP refresh preserves station selection and terminal React key", () => {
+  const before = renderRoot([device], device.id, device.id);
+  const after = renderRoot([{ ...device, ip_address: "10.0.0.196" }], device.id, device.id);
+  const original = nodes(before.tree).find((node) => node.type === TerminalView);
+  const updated = nodes(after.tree).find((node) => node.type === TerminalView);
+  assert.equal(original.key, updated.key);
+  assert.equal(updated.props.device.id, device.id);
+  assert.equal(updated.props.device.ip_address, "10.0.0.196");
+  assert.deepEqual(after.mutations, []);
 });
 
 test("no cached directory does not grant access and explicit removal or revoked connection closes terminal", () => {

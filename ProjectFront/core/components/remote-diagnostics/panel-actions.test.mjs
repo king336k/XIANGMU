@@ -104,7 +104,8 @@ async function cancelledUploadAtResponse(file, unmountAt) {
       },
       useRef: () => ({ current: refIndex++ === 0 ? null : 0 }),
       useEffect: (effect) => {
-        cleanup = effect();
+        const result = effect();
+        if (typeof result === "function") cleanup = result;
       },
     },
     "@noble/hashes/sha256": { sha256: () => new Uint8Array(32).fill(1) },
@@ -173,7 +174,8 @@ test("unmount while hashing prevents even the initial upload-start mutation", as
   const baseReact = {
     ...React,
     useEffect: (effect) => {
-      cleanup = effect();
+      const result = effect();
+      if (typeof result === "function") cleanup = result;
     },
     useRef: () => ({ current: refIndex++ === 0 ? null : 0 }),
   };
@@ -377,6 +379,76 @@ test("文件位置用采集电脑称谓并保留实际用户名", () => {
   const robot = nodes(target).find((node) => node.type === "option" && node.props.value === "robot");
   assert.equal(robot.props.children.join(""), "机器人：robot-user@10.0.0.177");
   assert.doesNotMatch(JSON.stringify(tree), /操作电脑/);
+});
+
+test("file transfer defaults to robot only when server explicitly marks it connected", () => {
+  for (const [robot, expected] of [
+    [{ username: "robot", host: "10.0.0.177" }, "operator"],
+    [{ connected: false, username: "robot", host: "10.0.0.177" }, "operator"],
+    [{ connected: true, username: "robot", host: "10.0.0.177", target_revision: "peer-one" }, "robot"],
+  ]) {
+    const { exports, changes } = load("./file-panel.tsx", []);
+    nodes(exports.FilePanel({ device: { ...device, capabilities: { robot } } }))
+      .find((node) => node.props?.["aria-label"] === "打开文件传输")
+      .props.onClick();
+    assert.ok(changes.some(([index, value]) => index === 0 && value === expected));
+  }
+});
+
+test("a changed robot peer clears remote state and keeps local source without dispatching a transfer", () => {
+  let stateCursor = 0;
+  let refCursor = 0;
+  const effects = [],
+    changes = [];
+  const file = new File(["data"], "patch.zip");
+  const oldPeer = JSON.stringify([true, "peer-one", "robot", "10.0.0.177"]);
+  const states = [
+    "robot",
+    "robot",
+    "incoming",
+    { root: "/home/robot", entries: [], total: 0 },
+    { name: "old.zip" },
+    true,
+    "正在上传",
+    "",
+    file,
+    undefined,
+    "patch.zip",
+    true,
+    "upload",
+  ];
+  const { exports } = load("./file-panel.tsx", [], {
+    react: {
+      ...React,
+      useState: (initial) => {
+        const index = stateCursor++;
+        return [index < states.length ? states[index] : initial, (value) => changes.push([index, value])];
+      },
+      useRef: () => ({ current: [null, 0, oldPeer][refCursor++] }),
+      useEffect: (effect) => effects.push(effect),
+    },
+  });
+  exports.FilePanel({
+    device: {
+      ...device,
+      capabilities: {
+        robot: { connected: true, username: "next-robot", host: "10.0.0.178", target_revision: "peer-two" },
+      },
+    },
+  });
+  effects[1]();
+  for (const [index, expected] of [
+    [3, undefined],
+    [4, undefined],
+    [2, ""],
+    [5, false],
+  ])
+    assert.ok(changes.some(([key, value]) => key === index && value === expected));
+  assert.equal(
+    changes.some(([index]) => [8, 9, 10].includes(index)),
+    false
+  );
+  assert.ok(changes.some(([index, value]) => index === 7 && value.includes("机器人连接已变化")));
 });
 
 test("upload rejects a target filename containing a path before any network mutation", async () => {

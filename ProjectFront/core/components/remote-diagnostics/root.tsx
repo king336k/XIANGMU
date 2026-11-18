@@ -8,7 +8,7 @@ import { AgentPanel } from "./agent-panel";
 import { TerminalPanel } from "./terminal-panel";
 import { FilePanel } from "./file-panel";
 import { remoteDiagnosticsBase } from "./types";
-import type { RemoteDevice } from "./types";
+import type { RemoteDevice, RobotTarget } from "./types";
 
 export function RemoteDiagnostics() {
   const { workspaceSlug } = useParams();
@@ -25,6 +25,7 @@ export function RemoteDiagnostics() {
   const [terminalId, setTerminalId] = useState("");
   const selected = data?.results.find((device) => device.id === selectedId);
   const terminalDevice = data?.results.find((device) => device.id === terminalId && device.can_connect);
+  const terminalRobot = terminalDevice?.capabilities.robot as RobotTarget | undefined;
 
   return (
     <div className="h-full overflow-y-auto px-4 py-6 sm:px-6 xl:px-8">
@@ -116,7 +117,12 @@ export function RemoteDiagnostics() {
                 )}
               </div>
               {terminalDevice && (
-                <TerminalPanel key={terminalDevice.id} device={terminalDevice} onClose={() => setTerminalId("")} />
+                <TerminalPanel
+                  key={terminalDevice.id}
+                  device={terminalDevice}
+                  robot={terminalRobot}
+                  onClose={() => setTerminalId("")}
+                />
               )}
               <FilePanel device={selected} />
               <AgentPanel device={selected} />

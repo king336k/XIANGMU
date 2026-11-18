@@ -14,13 +14,23 @@ export type RemoteDevice = {
 };
 
 export type TerminalStatus = "connecting" | "open" | "closed" | "error";
+export type TerminalTarget = "operator" | "robot";
+export type RobotTarget = { connected?: boolean; username?: string; host?: string; target_revision?: string };
+export type TerminalSession = {
+  id: string;
+  status: string;
+  target?: TerminalTarget;
+  identity?: { username?: string; host?: string };
+  target_identity?: { username?: string; host?: string };
+  target_revision?: string;
+};
 export type TerminalSnapshot = {
   id: string;
   status: string;
   events: { seq: number; data: string }[];
   cursor: number;
   error?: string;
-};
+} & TerminalSession;
 
 export type AgentRun = {
   id: string;

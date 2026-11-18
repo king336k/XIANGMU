@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Folder, FileText, ArrowUp, RefreshCw } from "lucide-react";
 import { qualityApi, errorMessage } from "@/components/quality/api";
 import { remoteDiagnosticsBase } from "./types";
-import type { RemoteDevice } from "./types";
+import type { RemoteDevice, RobotTarget } from "./types";
 import { TransferModal } from "./transfer-modal";
 import type { TransferDirection } from "./transfer-modal";
 import { FeedbackPicker } from "./feedback-picker";
@@ -17,8 +17,8 @@ const sizeText = (size: number) =>
   size < 1024 ? `${size} B` : size < 1048576 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1048576).toFixed(1)} MB`;
 
 export function FilePanel({ device }: { device: RemoteDevice }) {
-  const [target, setTarget] = useState("operator");
-  const configuredRobot = device.capabilities.robot as { username?: string; host?: string } | undefined;
+  const configuredRobot = device.capabilities.robot as RobotTarget | undefined;
+  const [target, setTarget] = useState(configuredRobot?.connected === true ? "robot" : "operator");
   const [robotUsername, setRobotUsername] = useState(configuredRobot?.username || "");
   const [path, setPath] = useState("");
   const [listing, setListing] = useState<Listing>();
@@ -42,12 +42,34 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
   }>();
   const fileInput = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
+  const robotKey = JSON.stringify([
+    configuredRobot?.connected === true,
+    configuredRobot?.target_revision || "",
+    configuredRobot?.username || "",
+    configuredRobot?.host || "",
+  ]);
+  const previousRobot = useRef(robotKey);
   useEffect(
     () => () => {
       generation.current++;
     },
     []
   );
+  useEffect(() => {
+    if (previousRobot.current === robotKey) return;
+    previousRobot.current = robotKey;
+    setRobotUsername(configuredRobot?.username || "");
+    if (target === "robot") {
+      generation.current++;
+      setListing(undefined);
+      setSelected(undefined);
+      setPath("");
+      setBusy(false);
+      setMessage("");
+      setError("机器人连接已变化，请重新选择远端目录。");
+      if (configuredRobot?.connected !== true) setTarget("operator");
+    }
+  }, [robotKey, target, configuredRobot?.username, configuredRobot?.connected]);
 
   function resetTransferSelection() {
     setLocalFile(undefined);
@@ -62,6 +84,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
     if (busy) return;
     generation.current++;
     resetTransferSelection();
+    setTarget(configuredRobot?.connected === true ? "robot" : "operator");
     setDirection(nextDirection);
     setError("");
     setMessage("");

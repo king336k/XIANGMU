@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { TerminalSnapshot, TerminalStatus } from "./types";
+import type { TerminalSnapshot, TerminalStatus, TerminalTarget, TerminalSession } from "./types";
 
 type RemoteApi = {
   read<T>(url: string): Promise<T>;
@@ -30,21 +30,32 @@ export class TerminalConnection {
     private api: RemoteApi,
     private base: string,
     private output: (bytes: Uint8Array) => void,
-    private onStatus: (status: TerminalStatus, error?: unknown) => void
+    private onStatus: (status: TerminalStatus, error?: unknown) => void,
+    private onSession?: (session: TerminalSession) => void
   ) {}
 
   private get url() {
     return `${this.base}sessions/${encodeURIComponent(this.sessionId)}/`;
   }
 
-  async open(deviceId: string, cols: number, rows: number) {
+  async open(
+    deviceId: string,
+    cols: number,
+    rows: number,
+    target: TerminalTarget = "operator",
+    expectedRevision?: string
+  ) {
     this.onStatus("connecting");
     try {
-      const session = await this.api.write<{ id: string; status: string }>(this.base, {
+      if (target === "robot" && !expectedRevision?.trim())
+        throw new Error("机器人连接信息尚未确认，请先在DAQ连接机器人。");
+      const session = await this.api.write<TerminalSession>(this.base, {
         action: "open",
         device_id: deviceId,
         cols,
         rows,
+        target,
+        ...(expectedRevision ? { expected_target_revision: expectedRevision } : {}),
       });
       this.sessionId = session.id;
       if (this.disposed) {
@@ -52,6 +63,15 @@ export class TerminalConnection {
         return;
       }
       if (session.status !== "open") throw new Error("远程终端未能建立，请重试。");
+      if (
+        target === "robot" &&
+        (session.target !== "robot" ||
+          !(session.identity || session.target_identity)?.host ||
+          (expectedRevision && session.target_revision !== expectedRevision))
+      ) {
+        throw new Error("机器人目标身份未确认，请刷新设备状态后重试。");
+      }
+      this.onSession?.(session);
       this.onStatus("open");
       void this.poll();
     } catch (error) {
@@ -135,6 +155,7 @@ export class TerminalConnection {
     try {
       const response = await this.api.read<TerminalSnapshot>(`${this.url}?after=${this.cursor}`);
       if (this.disposed) return;
+      this.onSession?.(response);
       for (const event of response.events) {
         if (event.seq > this.cursor) {
           this.output(decodeTerminalOutput(event.data));
