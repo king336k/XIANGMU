@@ -69,6 +69,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
   }
 
   async function request<T>(payload: object, current: number, requestTarget = target): Promise<T> {
+    if (current !== generation.current) throw new Error("文件操作已取消。");
     const job = await qualityApi.write<{ id: string }>(`${remoteDiagnosticsBase}files/`, {
       device_id: device.id,
       target: requestTarget,
@@ -81,6 +82,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
       const status = await qualityApi.read<{ status: string; error: string; result: T }>(
         `${remoteDiagnosticsBase}files/${job.id}/`
       );
+      if (current !== generation.current) throw new Error("文件操作已取消。");
       if (status.status === "done") {
         if (status.error) throw new Error(status.error);
         return status.result;
@@ -151,6 +153,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
         b.toString(16).padStart(2, "0")
       ).join("");
       if (digest !== prepared.sha256) throw new Error("文件完整性校验失败，未保存下载。");
+      if (current !== generation.current) return;
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -222,6 +225,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
         { action: "upload_finish", ticket },
         current
       );
+      if (current !== generation.current) return;
       if (result.uploaded !== true || result.sha256 !== digest) throw new Error("远端文件完整性校验失败。");
       const deviceLabel =
         target === "robot"
@@ -240,16 +244,17 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
       setSelected(undefined);
       try {
         const updated = await request<Listing>({ action: "list", path }, current);
-        setListing(updated);
+        if (current === generation.current) setListing(updated);
       } catch (cause) {
-        setError(`文件已上传，但目录刷新失败：${errorMessage(cause)}`);
+        if (current === generation.current) setError(`文件已上传，但目录刷新失败：${errorMessage(cause)}`);
       }
     } catch (cause) {
       if (current === generation.current) {
         setError(errorMessage(cause));
         setMessage("");
       }
-      if (ticket) void request({ action: "upload_abort", ticket }, current).catch(() => {});
+      if (ticket && current === generation.current)
+        void request({ action: "upload_abort", ticket }, current).catch(() => {});
     } finally {
       if (current === generation.current) setBusy(false);
     }

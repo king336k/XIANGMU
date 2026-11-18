@@ -72,6 +72,159 @@ function load(file, states, extra = {}) {
   return { exports, changes };
 }
 
+async function cancelledUploadAtResponse(file, unmountAt) {
+  let cleanup;
+  let hookIndex = 0;
+  let refIndex = 0;
+  let finishResponse;
+  const writes = [];
+  const changes = [];
+  const states = [
+    "operator",
+    "",
+    "incoming",
+    { root: "/home/caiji1", entries: [], total: 0 },
+    undefined,
+    false,
+    "",
+    "",
+    file,
+    undefined,
+    file.name,
+    true,
+    "upload",
+  ];
+  const { exports } = load("./file-panel.tsx", [], {
+    react: {
+      ...React,
+      useState(initial) {
+        const index = hookIndex++;
+        return [index < states.length ? states[index] : initial, (value) => changes.push([index, value])];
+      },
+      useRef: () => ({ current: refIndex++ === 0 ? null : 0 }),
+      useEffect: (effect) => {
+        cleanup = effect();
+      },
+    },
+    "@noble/hashes/sha256": { sha256: () => new Uint8Array(32).fill(1) },
+    "@/components/quality/api": {
+      errorMessage: (error) => error.message,
+      qualityApi: {
+        async write(url, body) {
+          writes.push(body.action);
+          return { id: body.action };
+        },
+        async read(url) {
+          const action = url.split("/").at(-2);
+          if (action === unmountAt)
+            return new Promise((resolve) => {
+              finishResponse = resolve;
+            });
+          return {
+            status: "done",
+            error: "",
+            result: action === "upload_start" ? { ticket: "ticket" } : { next_offset: file.size },
+          };
+        },
+      },
+    },
+  });
+  nodes(exports.FilePanel({ device }))
+    .find((node) => node.props?.onStart)
+    .props.onStart();
+  await new Promise((resolve) => setImmediate(resolve));
+  const before = writes.slice();
+  const uiUpdates = changes.length;
+  cleanup();
+  finishResponse({
+    status: "done",
+    error: "",
+    result:
+      unmountAt === "upload_start"
+        ? { ticket: "ticket" }
+        : { uploaded: true, sha256: "01".repeat(32), path: `incoming/${file.name}` },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  return { writes, before, changes, uiUpdates };
+}
+
+test("unmount during upload-start ignores the late response without chunks finish abort or UI updates", async () => {
+  await Promise.all(
+    [new File(["data"], "chunk.zip"), new File([], "empty.zip")].map(async (file) => {
+      const result = await cancelledUploadAtResponse(file, "upload_start");
+      assert.deepEqual(result.before, ["upload_start"]);
+      assert.deepEqual(result.writes, result.before);
+      assert.equal(result.changes.length, result.uiUpdates);
+    })
+  );
+});
+
+test("unmount while hashing prevents even the initial upload-start mutation", async () => {
+  let cleanup;
+  let resolveHash;
+  let refIndex = 0;
+  const writes = [];
+  const file = new File(["data"], "pending.zip");
+  file.arrayBuffer = () =>
+    new Promise((resolve) => {
+      resolveHash = resolve;
+    });
+  const baseReact = {
+    ...React,
+    useEffect: (effect) => {
+      cleanup = effect();
+    },
+    useRef: () => ({ current: refIndex++ === 0 ? null : 0 }),
+  };
+  let stateIndex = 0;
+  const values = [
+    "operator",
+    "",
+    "incoming",
+    { root: "/home/caiji1", entries: [], total: 0 },
+    undefined,
+    false,
+    "",
+    "",
+    file,
+    undefined,
+    file.name,
+    true,
+    "upload",
+  ];
+  const { exports } = load("./file-panel.tsx", [], {
+    react: {
+      ...baseReact,
+      useState: (initial) => [stateIndex < values.length ? values[stateIndex++] : initial, () => {}],
+    },
+    "@noble/hashes/sha256": { sha256: () => new Uint8Array(32).fill(1) },
+    "@/components/quality/api": {
+      qualityApi: {
+        async write(url, body) {
+          writes.push(body.action);
+          return { id: "job" };
+        },
+      },
+      errorMessage: String,
+    },
+  });
+  nodes(exports.FilePanel({ device }))
+    .find((node) => node.props?.onStart)
+    .props.onStart();
+  await new Promise((resolve) => setImmediate(resolve));
+  cleanup();
+  resolveHash(new ArrayBuffer(4));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(writes, []);
+});
+
+test("unmount during upload-finish ignores late acknowledgement and does not refresh or mark success", async () => {
+  const result = await cancelledUploadAtResponse(new File([], "empty.zip"), "upload_finish");
+  assert.deepEqual(result.before, ["upload_start", "upload_finish"]);
+  assert.deepEqual(result.writes, result.before);
+  assert.equal(result.changes.length, result.uiUpdates);
+});
+
 test("Agent selected feedback history shows three rounds per page and preserves old results", () => {
   const replies = Array.from({ length: 8 }, (_, index) => ({
     id: `reply-${index}`,
