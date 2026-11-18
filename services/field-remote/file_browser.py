@@ -344,6 +344,40 @@ def file_request(root, spool_fd, request):
         os.unlink(ticket, dir_fd=spool_fd); raise
 
 
+def local_launcher_request(local,request,terminal=False):
+    if not isinstance(local,dict) or local.get('url')!='http://127.0.0.1:11452/api/launcher/remote-robot-files':
+        raise ValueError('invalid_local_launcher_endpoint')
+    fd=os.open(local['token_file'],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    with os.fdopen(fd) as stream:
+        info=os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode&0o777!=0o600 or info.st_nlink!=1 or info.st_size>256:
+            raise ValueError('invalid_local_launcher_credential')
+        token=stream.read(256).strip()
+    class NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self,*_args):return None
+    url=local['url'].replace('/remote-robot-files','/remote-robot-terminal') if terminal else local['url']
+    outgoing=Request(url,data=json.dumps(request).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+token},method='POST')
+    try:
+        with build_opener(ProxyHandler({}),NoRedirect()).open(outgoing,timeout=3 if terminal else 105) as response:
+            raw=response.read(250001)
+        if len(raw)>250000:raise ValueError('local_launcher_response_too_large')
+        result=json.loads(raw)
+        if not isinstance(result,dict) or result.get('error'):raise ValueError('invalid_local_launcher_result')
+        return result
+    except OSError:raise ValueError('DAQ当前机器人未连接或连接已切换，请在启动页确认机器人连接')
+
+
+def robot_status(local):
+    disconnected={'connected':False,'username':None,'host':None,'target_revision':None}
+    if local is None:return disconnected
+    try:
+        result=local_launcher_request(local,{'action':'status'},terminal=True)
+        if result.get('connected') is True and all(isinstance(result.get(key),str) and result[key] for key in ('username','host','target_revision')):
+            return {key:result[key] for key in disconnected}
+    except (ValueError,OSError,KeyError,TypeError):pass
+    return disconnected
+
+
 def dispatch(policy_root, request, local_api=None):
     target = request.get('target')
     if target == 'operator':
@@ -351,24 +385,7 @@ def dispatch(policy_root, request, local_api=None):
     if target != 'robot': raise ValueError('invalid_file_target')
     local=local_api
     if local is not None:
-        # The launcher alone resolves the active robot and owns its SSH credentials.
-        if local.get('url')!='http://127.0.0.1:11452/api/launcher/remote-robot-files':raise ValueError('invalid_local_launcher_endpoint')
-        fd=os.open(local['token_file'],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
-        with os.fdopen(fd) as stream:
-            info=os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode&0o777!=0o600 or info.st_nlink!=1 or info.st_size>256:raise ValueError('invalid_local_launcher_credential')
-            token=stream.read(256).strip()
-        class NoRedirect(HTTPRedirectHandler):
-            def redirect_request(self,*_args):return None
-        outgoing=Request(local['url'],data=json.dumps(request).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+token},method='POST')
-        try:
-            with build_opener(ProxyHandler({}),NoRedirect()).open(outgoing,timeout=105) as response:
-                raw=response.read(250001)
-            if len(raw)>250000:raise ValueError('local_launcher_response_too_large')
-            result=json.loads(raw)
-            if not isinstance(result,dict) or result.get('error'):raise ValueError('invalid_local_launcher_result')
-            return result
-        except OSError:raise ValueError('DAQ当前机器人未连接或文件连接失败，请在启动页确认机器人连接')
+        return local_launcher_request(local,request)
     # Existing enrolled SSH peer, not an arbitrary browser-provided host or command.
     from robot_peer import peer_config
     import shlex

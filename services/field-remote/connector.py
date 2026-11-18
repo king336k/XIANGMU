@@ -298,6 +298,43 @@ class Terminal:
         os.close(self.master)
 
 
+class RobotTerminal:
+    def __init__(self,local,sid,revision,cols,rows):
+        if not isinstance(revision,str) or not re.fullmatch(r'[a-f0-9]{64}',revision):
+            raise ValueError('robot_target_revision_required')
+        self.local=local;self.sid=sid;self.revision=revision;self.cursor=0
+        self.created=self.active=time.monotonic()
+        self.snapshot=self.call('open',cols=cols,rows=rows)
+
+    def call(self,action,**values):
+        from file_browser import local_launcher_request
+        return local_launcher_request(self.local,{'action':action,'session_id':self.sid,
+            'expected_target_revision':self.revision,**values},terminal=True)
+
+    def resize(self,cols,rows):self.call('resize',cols=cols,rows=rows)
+
+    def send(self,data):self.call('input',data=base64.b64encode(data).decode())
+
+    def read(self):
+        result=self.call('read',after=self.cursor)
+        events=result.get('events')
+        if not isinstance(events,list) or len(events)>100:raise ValueError('invalid_robot_terminal_events')
+        cursor=result.get('cursor')
+        if type(cursor) is not int or cursor<self.cursor:raise ValueError('invalid_robot_terminal_cursor')
+        for event in events:
+            if not isinstance(event,dict) or not isinstance(event.get('id'),str) or event.get('kind') not in ('data','exit'):
+                raise ValueError('invalid_robot_terminal_event')
+            if event['kind']=='data' and len(base64.b64decode(event.get('data',''),validate=True))>65536:
+                raise ValueError('robot_terminal_output_too_large')
+            if event['kind']=='exit' and type(event.get('code')) is not int:raise ValueError('invalid_robot_exit')
+        self.cursor=cursor
+        return events
+
+    def close(self):
+        try:self.call('close')
+        except (ValueError,OSError):pass
+
+
 class Engine:
     def __init__(self, policy, host_ip=None):
         self.policy, self.terminals = policy, {}
@@ -393,7 +430,14 @@ class Engine:
                     if (sid in self.closed_sessions or sid in self.terminals or len(self.terminals) >= 2
                             or len(self.closed_sessions) >= 4096):
                         raise ValueError('terminal already open or session limit reached')
-                    self.terminals[sid] = Terminal(self.policy.root, command['cols'], command['rows'], self.host_ip)
+                    target=command.get('target','operator')
+                    if target=='robot':
+                        terminal=RobotTerminal(self.policy.daq_local_api,sid,command.get('target_revision') or command.get('expected_target_revision'),command['cols'],command['rows'])
+                        self.terminals[sid]=terminal
+                        result.update(identity=terminal.snapshot.get('identity'),target_revision=terminal.revision)
+                    elif target=='operator':
+                        self.terminals[sid] = Terminal(self.policy.root, command['cols'], command['rows'], self.host_ip)
+                    else:raise ValueError('invalid_terminal_target')
                 else:
                     terminal = self.terminals[sid]
                     terminal.active = time.monotonic()
@@ -401,9 +445,11 @@ class Engine:
                         data = base64.b64decode(command['data'], validate=True)
                         if len(data) > 4096:
                             raise ValueError('terminal input exceeds 4096 bytes')
-                        written = os.write(terminal.master, data)
-                        if written != len(data):
-                            raise ValueError('terminal input backpressure; input partially written')
+                        if isinstance(terminal,RobotTerminal):terminal.send(data)
+                        else:
+                            written = os.write(terminal.master, data)
+                            if written != len(data):
+                                raise ValueError('terminal input backpressure; input partially written')
                     elif kind == 'terminal_resize':
                         terminal.resize(command['cols'], command['rows'])
                     elif kind == 'terminal_close':
@@ -468,6 +514,19 @@ class Engine:
                 self.output({'session_id': sid, 'kind': 'exit', 'code': -signal.SIGKILL})
                 continue
             if pending < MAX_PENDING:
+                if isinstance(terminal,RobotTerminal):
+                    try:
+                        events=terminal.read()
+                        for event in events:
+                            if event.get('kind') not in ('data','exit'):raise ValueError('invalid_robot_terminal_event')
+                            self.output({**event,'session_id':sid})
+                            pending+=len(event.get('data',''))
+                        if any(event['kind']=='exit' for event in events):
+                            terminal.close();del self.terminals[sid];self.closed_sessions.add(sid)
+                    except (ValueError,OSError,KeyError,TypeError):
+                        terminal.close();del self.terminals[sid];self.closed_sessions.add(sid)
+                        self.output({'session_id':sid,'kind':'exit','code':-signal.SIGKILL})
+                    continue
                 try:
                     data = os.read(terminal.master, min(8192, MAX_PENDING - pending))
                 except OSError as exc:
@@ -543,12 +602,16 @@ def identity(policy=None, server_url=None):
                       'allowed_commands': policy.allowed, 'file_patch': True,
                       'specialists_probed': False},
         }
+        from file_browser import robot_status
+        result['capabilities']['robot']=robot_status(policy.daq_local_api)
         try:
             peer = json.loads((policy.root / 'robot-peer.json').read_text())
             username = peer.get('username', '')
             host = peer.get('host', '')
             if isinstance(username, str) and isinstance(host, str):
-                result['capabilities']['robot'] = {'username': username[:120], 'host': host[:120], 'via': 'operator'}
+                result['capabilities']['simulation_robot'] = {'username': username[:120], 'host': host[:120], 'via': 'operator'}
+                if policy.daq_local_api is None:
+                    result['capabilities']['robot'].update(username=username[:120],host=host[:120],via='simulation')
         except (OSError, ValueError, TypeError, AttributeError):
             pass
     return result
@@ -614,8 +677,13 @@ def main():
     def stop(_signum, _frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
+    next_robot_refresh=0.0
     try:
         while True:
+            if time.monotonic()>=next_robot_refresh:
+                from file_browser import robot_status
+                if policy.daq_local_api is not None:operator['capabilities']['robot']=robot_status(policy.daq_local_api)
+                next_robot_refresh=time.monotonic()+3
             engine.pump()
             outputs, results = engine.outputs[:100], engine.results[:100]
             try:

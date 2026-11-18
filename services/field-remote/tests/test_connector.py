@@ -184,6 +184,31 @@ class ConnectorTests(unittest.TestCase):
         for connection in ('','bad 22 host-name 22','10.10.10.195 44000 0.0.0.0 22'):
             with patch.dict(os.environ,{'SSH_CONNECTION':connection}):self.assertIsNone(ssh_server_ip())
 
+    def test_robot_target_forwards_local_capability_bytes_without_local_shell(self):
+        revision='a'*64
+        responses=[{'identity':{'username':'engram','host':'10.10.10.177'}}, {'ok':True},
+                   {'events':[{'seq':1,'id':'remote-event','kind':'data','data':'eA=='}],'cursor':1},
+                   {'closed':True}]
+        with patch('file_browser.local_launcher_request',side_effect=responses) as call:
+            self.engine.accept(self.command('terminal_open',target='robot',session_id='robot-test',target_revision=revision,cols=80,rows=24))
+            self.assertTrue(self.engine.results[-1]['ok'])
+            self.assertEqual(self.engine.results[-1]['identity']['host'],'10.10.10.177')
+            self.engine.accept(self.command('terminal_input',session_id='robot-test',data='eA=='))
+            self.engine.pump()
+            self.assertEqual(self.engine.outputs[-1]['id'],'remote-event')
+            self.assertEqual(self.engine.outputs[-1]['session_id'],'robot-test')
+            self.engine.accept(self.command('terminal_close',session_id='robot-test'))
+            self.assertEqual([row.args[1]['action'] for row in call.call_args_list],['open','input','read','close'])
+            self.assertTrue(all(row.args[1]['expected_target_revision']==revision for row in call.call_args_list))
+
+    def test_robot_status_does_not_promote_fixed_sim_peer_when_local_api_fails(self):
+        self.policy.daq_local_api={'url':'http://127.0.0.1:11452/api/launcher/remote-robot-files','token_file':'/missing'}
+        (self.root/'robot-peer.json').write_text(json.dumps({'username':'engram','host':'10.10.10.177'}))
+        value=identity(self.policy)['capabilities']
+        self.assertFalse(value['robot']['connected'])
+        self.assertIsNone(value['robot']['host'])
+        self.assertEqual(value['simulation_robot']['host'],'10.10.10.177')
+
     def test_patch_duplicate_cached_and_restart_not_reexecuted(self):
         target = self.root / 'config.json'
         target.write_text('before')
