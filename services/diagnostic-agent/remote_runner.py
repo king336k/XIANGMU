@@ -210,6 +210,7 @@ context 由服务端设备配置提供时，其中 inspect_argv、verify_argv �
 context.repair_allowed=false 时只读诊断。repair_scope 限定修复对象；只能更改该范围，跨主机入口中的本地路径不代表允许修改本机。
 context.operation_mode=diagnose 时只重新取证并诊断；=verify 时必须执行固定 verify_argv 重新验证，两种模式禁止修改配置或服务；=repair 时才允许在授权范围内修复。
 context.feedback 是关联原缺陷的标题/描述/编号，应结合它定位具体问题；本轮按钮problem可能只是泛化操作说明，不能取代原问题。
+正文设备称呼统一采用context.collector_identity/robot_identity的“采集电脑（用户名@IP）”“机器人（用户名@IP）”，有端口时写“机器人（用户名@IP:端口）”；不使用195/177简称或主机名当用户名，缺失身份先取证，不编造。
 报告区分已证实根因、假设、修复操作和待验证。只记录真实操作；只有真实修改且对应回归通过才 repaired=true。
 诊断项、修复项和验证项必须对应同一个对象与原失败操作；多问题按编号逐项对应。当前已恢复时明确本轮仅复核，不能继续按旧报告修改。
 结果使用中文，包含 summary/root_cause/actions/verification/solution/repaired。无法连接或证据不足时明确未修复及缺口。

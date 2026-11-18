@@ -113,6 +113,8 @@ def remote_repair(run_id):
     context["operation_mode"] = run.mode
     context["require_knowledge_search"] = True
     context["collector_identity"]={"username":run.workstation.username,"hostname":run.workstation.hostname,"label":"采集电脑"}
+    context["collector_identity"]["ip_address"]=run.workstation.capabilities.get("network",{}).get("ip_address","")
+    context["robot_identity"]={"username":run.workstation.capabilities.get("robot",{}).get("username",""),"ip_address":run.workstation.capabilities.get("robot",{}).get("host",""),"label":"机器人"}
     context["feedback"] = {"id":str(run.defect_id),"code":run.defect.code,"title":run.defect.title,"description":run.defect.description}
     context["repair_allowed"] = context.get("repair_allowed") is True and run.mode == "repair"
     from .remote_models import RemoteUploadedFile
