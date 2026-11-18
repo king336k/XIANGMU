@@ -16,16 +16,18 @@ class RemoteFiles(BaseAPIView):
     def post(self, request):
         browser_boundary(request)
         station=station_for(request.user,request.data.get('device_id'))
-        station=RemoteWorkstation.objects.select_for_update().select_related('agent__project__workspace').get(pk=station.pk)
+        station=RemoteWorkstation.objects.select_for_update(of=("self",)).select_related('agent__project__workspace').get(pk=station.pk)
         if not permitted(request.user,station):raise PermissionDenied()
         if not online(station):raise Conflict('采集电脑离线。')
         if not station.capabilities.get('file_browser',{}).get('ready'):raise Conflict('现场文件浏览尚未启用。')
         if RemoteFileRequest.objects.filter(owner=request.user,command__workstation=station,command__expires_at__gt=timezone.now(),command__status__in=['pending','delivered']).count()>=2:raise Conflict('请等待当前文件操作完成。')
+        if RemoteAgentRun.objects.filter(workstation=station,status="running",expires_at__gt=timezone.now()).exists():
+            raise Conflict("这台采集电脑正在现场处理，请处理完成后再操作文件。")
         action=serializers.ChoiceField(choices=['list','prepare','chunk','upload_start','upload_chunk','upload_finish','upload_abort']).run_validation(request.data.get('action'))
         target=serializers.ChoiceField(choices=['operator','robot']).run_validation(request.data.get('target'))
         payload={'action':action,'target':target}
         if action.startswith('upload_'):
-            if RemoteAgentRun.objects.filter(workstation=station,status__in=['queued','running'],expires_at__gt=timezone.now()).exists():raise Conflict('该电脑正在执行 Agent 任务，请结束后再上传。')
+            if RemoteAgentRun.objects.filter(workstation=station,status__in=(["queued", "running"] if action=="upload_start" else ["running"]),expires_at__gt=timezone.now()).exists():raise Conflict('该电脑正在执行 Agent 任务，请结束后再上传。')
             if RemoteTerminal.objects.filter(workstation=station,status='open',expires_at__gt=timezone.now(),last_read_at__gt=timezone.now()-timedelta(seconds=60)).exists():raise Conflict('该电脑有人工终端正在使用，请关闭终端后上传。')
         if action in {'chunk','upload_chunk','upload_finish','upload_abort'}:
             payload['ticket']=serializers.RegexField(r'^(?:[a-f0-9]{32}|r1\.[a-f0-9]{64}\.[a-f0-9]{32})$').run_validation(request.data.get('ticket'))

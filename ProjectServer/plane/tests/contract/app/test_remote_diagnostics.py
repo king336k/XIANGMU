@@ -363,7 +363,8 @@ def test_upload_association_owner_and_terminal_agent_exclusion(remote):
     upload=RemoteUploadedFile.objects.get(defect=defect)
     assert upload.ticket_hash and upload.status=='uploading'
     assert client.post(BASE,{'action':'open','device_id':device},format='json').status_code==409
-    assert client.post(BASE+'agent-runs/',{'device_id':device,'defect_id':str(defect.id),'problem':'repair'},format='json').status_code==409
+    queued_run=client.post(BASE+'agent-runs/',{'device_id':device,'defect_id':str(defect.id),'problem':'repair'},format='json')
+    assert queued_run.status_code==201 and queued_run.data['queue']['reason']=='transfer_active'
     finished=client.post(BASE+'files/',{'device_id':device,'action':'upload_finish','target':'robot','ticket':'b'*32},format='json')
     assert finished.status_code==201,finished.content
     command=heartbeat(edge).data['commands'][0]

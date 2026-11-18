@@ -223,7 +223,7 @@ class RemoteDirectory(BaseAPIView):
         if action != "open":
             raise ValidationError("未知操作。")
         station = station_for(request.user, request.data.get("device_id"))
-        station = RemoteWorkstation.objects.select_for_update().select_related("agent__project__workspace").get(pk=station.pk)
+        station = RemoteWorkstation.objects.select_for_update(of=("self",)).select_related("agent__project__workspace").get(pk=station.pk)
         if not permitted(request.user, station):
             raise PermissionDenied()
         if not online(station):
@@ -265,6 +265,12 @@ class RemoteSession(BaseAPIView):
             pk=pk,
             owner=request.user,
         )
+        RemoteWorkstation.objects.select_for_update(of=("self",)).get(pk=session.workstation_id)
+        session.refresh_from_db()
+        if session.workstation.remoteagentrun_set.filter(status="running",expires_at__gt=timezone.now()).exists():
+            close_session(session)
+        if session.status == "open" and session.last_read_at <= timezone.now()-timedelta(seconds=60):
+            close_session(session)
         if not permitted(request.user, session.workstation):
             close_session(session)
             raise PermissionDenied()
@@ -272,8 +278,13 @@ class RemoteSession(BaseAPIView):
             close_session(session)
         return session
 
+    @transaction.atomic
     def get(self, request, pk):
-        session = self.session(request, pk)
+        try:
+            session = self.session(request, pk)
+        except PermissionDenied:
+            # Keep the invalidation committed when authorization changed.
+            return Response({"error": "终端权限已失效。"}, status=403)
         if session.status != "closed" and not online(session.workstation):
             close_session(session)
         session.last_read_at = timezone.now()
@@ -363,7 +374,7 @@ class RemoteExchange(BaseAPIView):
 
     @transaction.atomic
     def post(self, request):
-        station = RemoteWorkstation.objects.select_for_update().select_related("agent__owner", "agent__project__workspace").get(pk=request.auth.pk)
+        station = RemoteWorkstation.objects.select_for_update(of=("self",)).select_related("agent__owner", "agent__project__workspace").get(pk=request.auth.pk)
         now = timezone.now()
         if not permitted(station.agent.owner, station) or station.credential_expires_at <= now:
             raise AuthenticationFailed("现场连接凭据已失效。")
@@ -400,7 +411,7 @@ class RemoteExchange(BaseAPIView):
             }
         station.save()
         for run in station.remoteagentrun_set.filter(status__in=["queued", "running"]).select_related("owner"):
-            if run.identity_key != identity_key(station) or not permitted(run.owner, station):
+            if run.expires_at <= now or run.identity_key != identity_key(station) or not permitted(run.owner, station):
                 run.status = "failed"
                 run.error = "任务现场身份或操作权限已变化。"
                 run.tool_credential_hash = ""
@@ -524,7 +535,8 @@ class RemoteExchange(BaseAPIView):
                     row.save(update_fields=["status", "payload"])
                     continue
             allowed_pending.append(row)
-        pending = allowed_pending
+        task = next((row for row in allowed_pending if row.payload.get("kind") in {"run", "read_file", "patch_file", "file_browser"}), None)
+        pending = [row for row in allowed_pending if row.payload.get("kind") not in {"run", "read_file", "patch_file", "file_browser"} or row is task]
         payload = [{"id": str(c.id), "expires_at": c.expires_at.timestamp(), **c.payload} for c in pending]
         for row in pending:
             row.status = "delivered"
@@ -572,12 +584,46 @@ class RemoteFeedback(BaseAPIView):
         return Response({"count":count,"page":page,"per_page":size,"results": [{"id": str(d.id), "title": d.title, "code": d.code, "latest_status": d.latest_status, "latest_run_id":str(d.latest_run_id) if d.latest_run_id else None, "run_count":d.run_count, "created_at":d.created_at} for d in rows]})
 
 
+def run_queue(run):
+    """Database wait state, never an estimate of model completion time."""
+    if run.status not in {"queued", "running"}:
+        return None
+    station = run.workstation
+    now = timezone.now()
+    if run.status == "running":
+        latest = run.remotecommand_set.order_by("-created_at", "-id").first()
+        stage = "inspect"
+        if latest:
+            context = station.capabilities.get("agent_context", {})
+            argv = latest.payload.get("argv")
+            if argv and argv == context.get("verify_argv"):
+                stage = "verify"
+            elif latest.payload.get("kind") == "patch_file" or (
+                context.get("repair_argv") and isinstance(argv, list)
+                and argv[:len(context["repair_argv"])] == context["repair_argv"]
+            ):
+                stage = "repair"
+        return {"position": None, "reason": "", "stage": stage}
+    from .remote_models import RemoteUploadedFile
+    earlier = Q(created_at__lt=run.created_at) | Q(created_at=run.created_at, id__lt=run.id)
+    # Position is limited to this device; other workers can serve other devices.
+    waiting = station.remoteagentrun_set.filter(status="queued", expires_at__gt=now).filter(earlier).count()
+    reason = "worker_busy"
+    if station.remoteterminal_set.filter(status="open", expires_at__gt=now, last_read_at__gt=now-timedelta(seconds=60)).exists():
+        reason = "terminal_open"
+    elif RemoteUploadedFile.objects.filter(workstation=station,status="uploading",expires_at__gt=now).exists():
+        reason = "transfer_active"
+    elif waiting or station.remoteagentrun_set.filter(status="running",expires_at__gt=now).exists():
+        reason = "device_busy"
+    return {"position": waiting, "reason": reason, "stage": "queued"}
+
+
 class RemoteRuns(BaseAPIView):
     @transaction.atomic
     def post(self, request):
         browser_boundary(request)
         station = station_for(request.user, request.data.get("device_id"))
-        station = RemoteWorkstation.objects.select_for_update().select_related("agent__project__workspace").get(pk=station.pk)
+        station = RemoteWorkstation.objects.select_for_update(of=("self",)).select_related("agent__project__workspace").get(pk=station.pk)
         if not permitted(request.user, station):
             raise PermissionDenied()
         if not online(station):
@@ -587,29 +633,27 @@ class RemoteRuns(BaseAPIView):
         )
         problem = serializers.CharField(max_length=8000).run_validation(request.data.get("problem"))
         mode = serializers.ChoiceField(choices=["diagnose", "repair", "verify"], default="repair").run_validation(request.data.get("mode", "repair"))
-        if station.remoteterminal_set.filter(status="open",expires_at__gt=timezone.now(),last_read_at__gt=timezone.now()-timedelta(seconds=60)).exists():
-            raise Conflict("请先关闭这台电脑的人工终端，再开始 Agent 排查。")
-        from .remote_models import RemoteUploadedFile
-        if RemoteUploadedFile.objects.filter(workstation=station,status="uploading",expires_at__gt=timezone.now()).exists():
-            raise Conflict("该电脑正在上传文件，请完成或取消后开始 Agent 排查。")
-        if RemoteAgentRun.objects.filter(
-            workstation=station, status__in=["queued", "running"], expires_at__gt=timezone.now()
-        ).exists():
-            raise Conflict("该电脑已有Agent任务执行中。")
+        active = RemoteAgentRun.objects.filter(workstation=station, status__in=["queued", "running"], expires_at__gt=timezone.now())
+        if active.filter(defect=defect).exists():
+            raise Conflict("这条反馈已有处理任务，请查看当前进度。")
+        if active.count() >= 20:
+            raise Conflict("这台采集电脑待处理任务已达上限，请稍后提交。")
+        for session in station.remoteterminal_set.filter(status="open", last_read_at__lte=timezone.now()-timedelta(seconds=60)):
+            close_session(session)
         run = RemoteAgentRun.objects.create(
             workstation=station,
             defect=defect,
             owner=request.user,
             problem=problem,
             mode=mode,
-            expires_at=timezone.now() + timedelta(minutes=8),
+            expires_at=timezone.now() + timedelta(minutes=30),
             identity_key=identity_key(station),
         )
         DefectEvent.objects.create(project_id=defect.project_id,defect=defect,created_by=request.user,previous_status=defect.status,status=defect.status,note=f"Agent {'重新诊断' if mode == 'diagnose' else '重新验证' if mode == 'verify' else '诊断与自动修复'}：已进入队列；任务 {run.id}。")
         from .remote_tasks import remote_repair
 
         transaction.on_commit(lambda: remote_repair.apply_async(args=[str(run.id)], queue="diagnostics"))
-        return Response({"id": str(run.id), "status": run.status}, status=201)
+        return Response({"id": str(run.id), "status": run.status, "queue": run_queue(run)}, status=201)
 
 
 class RemoteDefectTargets(BaseAPIView):
@@ -633,7 +677,7 @@ class RemoteRunDetail(BaseAPIView):
             run.error = "远程任务已超时，现场恢复未确认。"
             run.tool_credential_hash = ""
             run.save(update_fields=["status", "error", "tool_credential_hash"])
-        return Response({"id": str(run.id), "status": run.status, "result": run.result, "error": run.error})
+        return Response({"id": str(run.id), "status": run.status, "result": run.result, "error": run.error, "queue": run_queue(run)})
 
 
 class ToolAuthentication(BaseAuthentication):
@@ -686,13 +730,17 @@ class RemoteTool(BaseAPIView):
                 )
         from .remote_tools_policy import check_tool
         with transaction.atomic():
-            station = RemoteWorkstation.objects.select_for_update().select_related("agent__project__workspace").get(pk=run.workstation_id)
+            station = RemoteWorkstation.objects.select_for_update(of=("self",)).select_related("agent__project__workspace").get(pk=run.workstation_id)
             run.refresh_from_db()
             if run.status != "running" or run.expires_at <= timezone.now() or run.identity_key != identity_key(station) or not permitted(run.owner, station):
                 raise PermissionDenied("远程任务身份或权限已失效。")
             tool_context = dict(station.capabilities.get("agent_context", {}))
             tool_context["repair_allowed"] = tool_context.get("repair_allowed") is True and run.mode == "repair"
             check_tool(tool_context, op, payload)
+            if run.remotecommand_set.filter(status__in=["pending", "delivered"],expires_at__gt=timezone.now()).exists():
+                raise Conflict("上一个现场操作尚未完成，请等待结果。")
+            if run.remotecommand_set.count() >= 20:
+                raise Conflict("已达本轮工具次数上限。")
             row = command(station, payload, run=run, lifetime=40)
         deadline = time.monotonic() + 38
         while time.monotonic() < deadline:
