@@ -1,3 +1,4 @@
+import { reportSummary } from "./report-summary-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -12,7 +13,9 @@ function load(file, mocks = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   new Function("require", "exports", code)(
-    (id) => mocks[id] ?? (id === "react/jsx-runtime" ? require(id) : new Proxy({}, { get: () => () => null })),
+    (id) =>
+      (id === "./report-summary" ? reportSummary : mocks[id]) ??
+      (id === "react/jsx-runtime" ? require(id) : new Proxy({}, { get: () => () => null })),
     exports
   );
   return exports;

@@ -1,3 +1,4 @@
+import { reportSummary } from "./report-summary-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -31,6 +32,7 @@ function render(rows) {
     if (id === "./shared")
       return { Paging: () => null, Badge: ({ label }) => React.createElement("span", null, label) };
     if (id === "./deployment-snapshots") return { DeploymentSnapshots: () => null };
+    if (id === "./report-summary") return reportSummary;
     if (id === "./api") return { qualityApi: {}, errorMessage: String };
     if (id === "lucide-react") return new Proxy({}, { get: () => () => null });
     return require(id);
@@ -71,7 +73,7 @@ test("材料引用同时显示原始上传包名和包内日志路径", () => {
   assert.ok(html.includes("引用：采集原始.log。"), html);
   assert.ok(!html.includes("FILE-file"), html);
 });
-test("最新报告直接展开，超时保留规则与读取范围，不把诊断完成写成故障解决", () => {
+test("最新报告默认折叠，超时保留规则与读取范围，不把诊断完成写成故障解决", () => {
   const html = render([
     {
       id: "new",
@@ -98,7 +100,7 @@ test("最新报告直接展开，超时保留规则与读取范围，不把诊�
     },
     { id: "old", status: "queued", mode: "auto", created_at: "now", result: { version: 1 } },
   ]);
-  assert.match(html, /<details[^>]*open=""/);
+  assert.doesNotMatch(html, /<details[^>]*open=""/);
   assert.ok(html.includes("v2") && html.includes("模型分析超时 · 已保留规则结果"), html);
   assert.ok(html.includes("logs/recording.log") && html.includes("部分读取"));
   assert.ok(html.includes("执行 35.0 秒") && html.includes("自动初诊"));
@@ -162,7 +164,7 @@ test("模型自评明确不是正确概率，旧报告不伪造分数", () => {
   assert.ok(!old.includes("模型自评"));
 });
 
-test("已读取材料独立折叠默认展开，评价显示选择及改进说明", () => {
+test("已读取材料与详细证据默认折叠，评价显示选择及改进说明", () => {
   const html = render([
     {
       id: "review",
@@ -173,7 +175,8 @@ test("已读取材料独立折叠默认展开，评价显示选择及改进说�
       result: { version: 1, method: "hybrid", sources: [{ file_id: "f", name: "scene.json", read_bytes: 80 }] },
     },
   ]);
-  assert.match(html, /<details[^>]*open=""[^>]*>\s*<summary[^>]*>已读取材料/);
+  assert.doesNotMatch(html, /<details[^>]*open=""[^>]*>\s*<summary[^>]*>已读取材料/);
+  assert.match(html, /详细证据与处理过程/);
   assert.match(html, /aria-pressed="true"/);
   assert.match(html, /已反馈：需改进/);
   assert.match(html, /这是验收/);

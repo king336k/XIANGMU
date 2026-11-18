@@ -12,6 +12,7 @@ import { AssistantMarkdown } from "@/components/knowledge/assistant-markdown";
 import { DeploymentSnapshots } from "./deployment-snapshots";
 import { FileText, ChevronRight, RotateCw, CircleCheck, Download } from "lucide-react";
 import type { Context } from "./types";
+import { compactReportText } from "./report-summary";
 type FailureMetadata = {
   source?: string;
   transport_phase?: string;
@@ -263,345 +264,370 @@ export function DiagnosticsPanel({
         <span className="ml-auto text-11 text-secondary">{renderNumericDateTime(job.created_at)}</span>
       </summary>
       <div className="space-y-4 border-t border-subtle p-3">
-        {job.result.assignment && (
-          <div className="rounded-md border border-subtle bg-layer-1 px-3 py-2 text-12">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded bg-accent-subtle px-2 py-1 text-accent-primary">
-                {job.result.assignment.module?.name || "模块待确认"}
-              </span>
-              <span className="font-medium">{job.result.assignment.assignee || "待指派"}</span>
-              <span className="text-secondary">
-                {(
-                  { diagnostic: "诊断指派", manual: "保留人工指派", initial: "初分", triage: "待分诊" } as Record<
-                    string,
-                    string
-                  >
-                )[job.result.assignment.origin] || "待确认"}
-              </span>
-            </div>
-            {job.result.assignment.reason && (
-              <details className="mt-2">
-                <summary className="cursor-pointer text-accent-primary">指派依据</summary>
-                <p className="mt-2 break-words text-secondary">{job.result.assignment.reason}</p>
-              </details>
-            )}
-          </div>
-        )}
-        {job.result.severity_assessment && (
-          <details className="rounded-md border border-subtle bg-layer-1 px-3 py-2 text-12">
-            <summary className="flex cursor-pointer items-center gap-2">
-              <span>本次判级建议</span>
-              <Badge
-                value={job.result.severity_assessment.severity}
-                label={severityNames[job.result.severity_assessment.severity] || "待评估"}
-              />
-              {job.result.severity_assessment.method && (
-                <span className="rounded bg-surface-1 px-1.5 py-0.5 text-11 text-secondary">
-                  {
-                    { model_verified: "模型判级", evidence_rules: "材料规则判级", pending: "待评估" }[
-                      job.result.severity_assessment.method
-                    ]
-                  }
-                </span>
-              )}
-              <span className="text-11 text-secondary">判级依据</span>
-            </summary>
-            <p className="mt-2 break-words text-secondary">{job.result.severity_assessment.basis}</p>
-            {job.result.severity_assessment.evidence?.map((item) => (
-              <blockquote
-                key={`${item.reference}:${item.quote}`}
-                className="mt-2 border-l border-subtle pl-2 text-11 text-secondary"
-              >
-                <span className="break-all">{item.reference}</span>
-                <p className="mt-1 break-words whitespace-pre-wrap">{item.quote}</p>
-              </blockquote>
-            ))}
-          </details>
-        )}
-        {["queued", "running"].includes(job.status) && can(context, "manage_defect") && (
-          <Button
-            type="button"
-            variant="neutral-primary"
-            onClick={async () => {
-              try {
-                await qualityApi.write(`${base}diagnostics/${job.id}/`, { action: "cancel" });
-                await mutate();
-              } catch (e) {
-                setMessage(errorMessage(e));
-              }
-            }}
-          >
-            取消任务
-          </Button>
-        )}
-        {job.status === "unconfigured" && <p className="text-secondary">模型未配置。</p>}
-        {["queued", "running"].includes(job.status) && (
-          <p role="status" className="flex items-center gap-2 text-secondary">
-            <RotateCw className="size-3.5 animate-spin motion-reduce:animate-none" />
-            {job.status === "queued" && job.result.retry
-              ? `等待重试 · ${job.result.retry.count}/${job.result.retry.limit}`
-              : job.status === "queued"
-                ? data?.project_queue_position
-                  ? `排队中 · 本项目第 ${data.project_queue_position} 条`
-                  : "排队中，尚未开始分析"
-                : "正在读取材料并分析"}
-          </p>
-        )}
-        {job.result.fallback === "rules_after_retries" && (
-          <p className="rounded-md bg-warning-subtle px-3 py-2 text-warning-primary">
-            重试已结束，按规则处理 · 可手动重新诊断
-          </p>
-        )}
-        {job.result.model_status && !["not_requested", "completed"].includes(job.result.model_status) && (
-          <p className="rounded-md bg-layer-1 px-3 py-2 text-secondary">
-            {(
-              {
-                unconfigured: "模型未配置 · 已保留规则结果",
-                timeout: "模型分析超时 · 已保留规则结果",
-                failed:
-                  job.result.model_error_code === "AGENT_PROVIDER_AUTH"
-                    ? "模型认证失败 · 已保留规则结果"
-                    : job.result.model_error_code === "AGENT_PROVIDER_UNAVAILABLE"
-                      ? "模型接口暂不可用 · 可重新分析"
-                      : job.result.model_error_code === "AGENT_INVALID_OUTPUT"
-                        ? "模型返回格式异常 · 可重新分析"
-                        : "模型分析失败 · 已保留规则结果",
-                materials_unsupported: "附件已保存；暂无可用于诊断的文字，请补充文字或日志。",
-                awaiting_materials: "等待日志上传完成，随后自动诊断",
-                reference_unavailable: "知识引用已失效 · 显示规则结果",
-              } as Record<string, string>
-            )[job.result.model_status] || "显示规则结果"}
-          </p>
-        )}
-        {job.result.materials_status === "awaiting_materials" && (
-          <p className="text-secondary">尚未读取到日志；当前仅分析上报描述。</p>
-        )}
-        {job.error_code && (
-          <p className="text-secondary">
-            {job.error_code === "QUEUE_WAIT_TIMEOUT"
-              ? "排队等待过久，请稍后重试。"
-              : job.error_code === "DIAGNOSTIC_TIMEOUT"
-                ? "诊断执行超时，可重新发起。"
-                : job.error_code === "NO_PUBLISHED_KNOWLEDGE"
-                  ? "没有可引用的已发布知识，请先补充知识库。"
-                  : job.error_code === "QUEUE_UNAVAILABLE"
-                    ? "后台队列暂不可用，请稍后重新发起。"
-                    : "任务未完成或引用已失效，请核对来源后重新发起。"}
-          </p>
-        )}
-        {job.status === "completed" && (
-          <div className="flex flex-wrap items-center gap-3 text-11 text-secondary">
-            <span className="flex items-center gap-1">
-              <CircleCheck className="size-3.5" />
-              {job.result.method === "hybrid" ? "规则与模型" : "规则检查"}
-            </span>
-            <span>
-              {job.result.material_coverage?.length
-                ? `附件 ${job.result.material_coverage.length} · 已读取 ${job.result.material_coverage.filter((file) => file.status === "analyzed").length}`
-                : `${job.result.sources?.length || 0} 份材料`}
-            </span>
-            {job.result.duration_ms !== undefined && <span>执行 {(job.result.duration_ms / 1000).toFixed(1)} 秒</span>}
-            {job.result.trigger && <span>{job.result.trigger === "manual" ? "手动发起" : "自动初诊"}</span>}
-          </div>
-        )}
         {job.result.answer && (
-          <div className="max-h-80 overflow-y-auto rounded-md bg-layer-1 p-3 text-13 leading-6">
-            <AssistantMarkdown content={job.result.answer} />
+          <div className="space-y-2 text-13">
+            <h4 className="font-medium">结论</h4>
+            <p className="leading-6 whitespace-pre-wrap">{compactReportText(job.result.answer)}</p>
+            {job.result.evidence_assessment === "partial" && (
+              <p className="text-12 text-warning-primary">材料仅部分支持，现场原因仍需核实。</p>
+            )}
+            {job.result.evidence_assessment === "insufficient" && (
+              <p className="text-12 text-warning-primary">证据不足，尚不能确认原因。</p>
+            )}
           </div>
         )}
-        {job.result.model_status === "completed" &&
-          typeof job.result.model_confidence === "number" &&
-          Number.isFinite(job.result.model_confidence) &&
-          job.result.model_confidence >= 0 &&
-          job.result.model_confidence <= 1 && (
-            <div className="space-y-1 rounded-md border border-subtle px-3 py-2 text-12">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-accent-subtle px-2 py-0.5 text-11 text-accent-primary">
-                  模型自评 {Math.round(job.result.model_confidence * 100)}%
-                </span>
-                <span className="text-secondary">
-                  {job.result.evidence_assessment === "supported"
-                    ? "材料支持当前判断"
-                    : job.result.evidence_assessment === "partial"
-                      ? "材料部分支持"
-                      : "材料不足"}{" "}
-                  · 非正确概率
-                </span>
-              </div>
-              {job.result.confidence_basis && <p className="leading-6 text-secondary">{job.result.confidence_basis}</p>}
-            </div>
-          )}
-        {job.result.model_info?.model && (
-          <details className="text-11 text-secondary">
-            <summary className="cursor-pointer">分析来源</summary>
-            <p className="mt-1 break-all">
-              {job.result.model_info.engine || "模型"} · {job.result.model_info.model}
-            </p>
-            {job.result.model_info.instruction_version && (
-              <p className="mt-1">报告格式 {job.result.model_info.instruction_version}</p>
-            )}
-          </details>
-        )}
-        {!!job.result.findings?.length && (
-          <details className="rounded-md border border-subtle p-3">
-            <summary className="cursor-pointer font-medium">规则发现（{job.result.findings.length}）</summary>
-            <div className="mt-3 space-y-3">
-              {job.result.findings.map((row) => (
-                <div key={row.kind}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h4 className="font-medium">{row.title}</h4>
-                    {row.confidence_source === "rule" &&
-                      typeof row.confidence === "number" &&
-                      Number.isFinite(row.confidence) &&
-                      row.confidence >= 0 &&
-                      row.confidence <= 1 && (
-                        <span
-                          className="rounded-full bg-accent-subtle px-2 py-0.5 text-11 text-accent-primary"
-                          title="来源：诊断规则参数，需结合现场证据核实"
-                        >
-                          规则分值{Math.round(row.confidence * 100)}%
-                        </span>
-                      )}
-                  </div>
-                  {row.basis && <p className="mt-1 text-11 text-secondary">{row.basis}</p>}
-                  <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-layer-1 p-3 text-11 leading-5">
-                    <code>{row.samples.join("\n")}</code>
-                  </pre>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-        {job.result.method === "rules" && !job.result.findings?.length && (
-          <p className="text-secondary">已读取范围内未发现匹配项。</p>
-        )}
-        {job.result.suggested_actions?.length ? (
-          <details className="space-y-2 rounded-md border border-subtle p-3">
-            <summary className="cursor-pointer font-medium">建议排查</summary>
-            <ol className="list-decimal space-y-1 pl-5 text-secondary">
-              {job.result.suggested_actions.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ol>
-          </details>
-        ) : null}
-        {job.result.verification_steps?.length ? (
-          <details className="space-y-2 rounded-md border border-subtle p-3">
-            <summary className="cursor-pointer font-medium">验证方法</summary>
-            <ol className="list-decimal space-y-1 pl-5 text-secondary">
-              {job.result.verification_steps.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ol>
-          </details>
-        ) : null}
-        {(!!job.result.material_coverage?.length || !!job.result.sources?.length) && (
-          <details open className="space-y-2 rounded-md border border-subtle p-3">
-            <summary className="cursor-pointer font-medium">
-              {job.result.material_coverage?.length
-                ? `诊断材料（${job.result.material_coverage.length}）`
-                : `已读取材料（${job.result.sources?.length}）`}
-            </summary>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Button
-                type="button"
-                variant="neutral-primary"
-                size="sm"
-                aria-label="一键打包下载"
-                title="下载此缺陷全部原附件"
-                disabled={busy}
-                onClick={() => void downloadAttachments()}
-              >
-                <Download className="mr-1 size-3.5" />
-                一键打包下载
-              </Button>
-            </div>
-            {job.result.material_coverage?.map((file) => (
-              <div
-                key={file.file_id}
-                className="flex min-w-0 flex-wrap items-center gap-2 rounded-md bg-layer-1 px-3 py-2 text-11"
-              >
-                <span className="min-w-0 flex-1 break-all">{file.name}</span>
-                <span
-                  className={`rounded-full px-2 py-0.5 ${file.verified ? "bg-success-subtle text-success-primary" : "bg-layer-1 text-secondary"}`}
-                >
-                  {file.verified ? "已校验" : "未校验"}
-                </span>
-                <span
-                  className={`rounded-full px-2 py-0.5 ${file.status === "analyzed" ? "bg-accent-subtle text-accent-primary" : file.status === "unsupported" ? "bg-warning-subtle text-warning-primary" : "bg-layer-1 text-secondary"}`}
-                >
-                  {file.status === "analyzed" ? "已读取" : file.status === "unsupported" ? "未分析" : "未读取"}
-                </span>
-                <a className="shrink-0 text-accent-primary" href={`${base}files/${file.file_id}/download/`} download>
-                  下载
-                </a>
-                {file.reason && <p className="w-full break-words text-secondary">{file.reason}</p>}
-              </div>
-            ))}
-            {job.result.sources?.map((source) => (
-              <div
-                key={`${source.file_id}:${source.archive_entry || source.name}`}
-                className="flex min-w-0 flex-wrap items-center gap-2 rounded-md bg-layer-1 px-3 py-2"
-              >
-                <FileText className="size-3.5 shrink-0 text-secondary" />
-                <span className="min-w-0 flex-1 text-11 break-all">
-                  {[source.name, source.archive_entry].filter(Boolean).join(" / ")}
-                </span>
-                {source.origin === "image_ocr" && (
-                  <span className="rounded-full bg-warning-subtle px-2 py-0.5 text-11 text-warning-primary">
-                    图片文字·需核对原图
+        <details className="space-y-3">
+          <summary className="cursor-pointer text-12 text-secondary">详细证据与处理过程</summary>
+          <div className="mt-3 space-y-4">
+            {job.result.assignment && (
+              <div className="rounded-md border border-subtle bg-layer-1 px-3 py-2 text-12">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded bg-accent-subtle px-2 py-1 text-accent-primary">
+                    {job.result.assignment.module?.name || "模块待确认"}
                   </span>
-                )}
-                <span className="text-11 text-secondary">
-                  {source.origin === "image_ocr"
-                    ? `识别文字 ${source.text_bytes ?? source.read_bytes} 字节${source.file_bytes !== undefined ? ` · 原图 ${source.file_bytes} 字节` : ""}`
-                    : `已读取 ${source.read_bytes} 字节${source.file_bytes !== undefined ? ` / 文件 ${source.file_bytes} 字节` : ""}`}
-                  {source.truncated ? " · 部分读取" : ""}
-                </span>
-                <a
-                  className="shrink-0 text-11 text-accent-primary"
-                  href={`${base}files/${source.file_id}/download/`}
-                  download
-                >
-                  下载{source.archive_entry ? "原包" : ""}
-                </a>
-                {source.excerpt && (
-                  <details className="w-full text-11">
-                    <summary className="cursor-pointer text-accent-primary">
-                      查看读取内容{source.preview_truncated ? "（预览摘录）" : ""}
-                    </summary>
-                    <pre className="mt-2 max-h-56 overflow-auto rounded border border-subtle bg-surface-1 p-3 leading-5">
-                      <code>{source.excerpt}</code>
-                    </pre>
+                  <span className="font-medium">{job.result.assignment.assignee || "待指派"}</span>
+                  <span className="text-secondary">
+                    {(
+                      { diagnostic: "诊断指派", manual: "保留人工指派", initial: "初分", triage: "待分诊" } as Record<
+                        string,
+                        string
+                      >
+                    )[job.result.assignment.origin] || "待确认"}
+                  </span>
+                </div>
+                {job.result.assignment.reason && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-accent-primary">指派依据</summary>
+                    <p className="mt-2 break-words text-secondary">{job.result.assignment.reason}</p>
                   </details>
                 )}
               </div>
-            ))}
-          </details>
-        )}
-        {job.result.input_scope?.model_text_truncated && (
-          <p className="text-11 text-secondary">模型分析使用了材料摘要，未覆盖全部正文。</p>
-        )}
-        {job.result.citations?.map((row) => (
-          <p key={row.reference} className="text-secondary">
-            参考：
-            {row.title}
-          </p>
-        ))}
-        {!!job.result.context_references?.length && (
-          <details className="space-y-2 text-12">
-            <summary className="cursor-pointer text-secondary">
-              平台记录与历史评价（{job.result.context_references.length}）
-            </summary>
-            <p className="text-11 text-secondary">平台记录显示接收和验收情况；历史评价需结合本次证据复核。</p>
-            {job.result.context_references.map((row) => (
-              <div key={row.reference} className="rounded-md bg-layer-1 p-3">
-                <p className="font-medium">{row.title}</p>
-                <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>
+            )}
+            {job.result.severity_assessment && (
+              <details className="rounded-md border border-subtle bg-layer-1 px-3 py-2 text-12">
+                <summary className="flex cursor-pointer items-center gap-2">
+                  <span>本次判级建议</span>
+                  <Badge
+                    value={job.result.severity_assessment.severity}
+                    label={severityNames[job.result.severity_assessment.severity] || "待评估"}
+                  />
+                  {job.result.severity_assessment.method && (
+                    <span className="rounded bg-surface-1 px-1.5 py-0.5 text-11 text-secondary">
+                      {
+                        { model_verified: "模型判级", evidence_rules: "材料规则判级", pending: "待评估" }[
+                          job.result.severity_assessment.method
+                        ]
+                      }
+                    </span>
+                  )}
+                  <span className="text-11 text-secondary">判级依据</span>
+                </summary>
+                <p className="mt-2 break-words text-secondary">{job.result.severity_assessment.basis}</p>
+                {job.result.severity_assessment.evidence?.map((item) => (
+                  <blockquote
+                    key={`${item.reference}:${item.quote}`}
+                    className="mt-2 border-l border-subtle pl-2 text-11 text-secondary"
+                  >
+                    <span className="break-all">{item.reference}</span>
+                    <p className="mt-1 break-words whitespace-pre-wrap">{item.quote}</p>
+                  </blockquote>
+                ))}
+              </details>
+            )}
+            {["queued", "running"].includes(job.status) && can(context, "manage_defect") && (
+              <Button
+                type="button"
+                variant="neutral-primary"
+                onClick={async () => {
+                  try {
+                    await qualityApi.write(`${base}diagnostics/${job.id}/`, { action: "cancel" });
+                    await mutate();
+                  } catch (e) {
+                    setMessage(errorMessage(e));
+                  }
+                }}
+              >
+                取消任务
+              </Button>
+            )}
+            {job.status === "unconfigured" && <p className="text-secondary">模型未配置。</p>}
+            {["queued", "running"].includes(job.status) && (
+              <p role="status" className="flex items-center gap-2 text-secondary">
+                <RotateCw className="size-3.5 animate-spin motion-reduce:animate-none" />
+                {job.status === "queued" && job.result.retry
+                  ? `等待重试 · ${job.result.retry.count}/${job.result.retry.limit}`
+                  : job.status === "queued"
+                    ? data?.project_queue_position
+                      ? `排队中 · 本项目第 ${data.project_queue_position} 条`
+                      : "排队中，尚未开始分析"
+                    : "正在读取材料并分析"}
+              </p>
+            )}
+            {job.result.fallback === "rules_after_retries" && (
+              <p className="rounded-md bg-warning-subtle px-3 py-2 text-warning-primary">
+                重试已结束，按规则处理 · 可手动重新诊断
+              </p>
+            )}
+            {job.result.model_status && !["not_requested", "completed"].includes(job.result.model_status) && (
+              <p className="rounded-md bg-layer-1 px-3 py-2 text-secondary">
+                {(
+                  {
+                    unconfigured: "模型未配置 · 已保留规则结果",
+                    timeout: "模型分析超时 · 已保留规则结果",
+                    failed:
+                      job.result.model_error_code === "AGENT_PROVIDER_AUTH"
+                        ? "模型认证失败 · 已保留规则结果"
+                        : job.result.model_error_code === "AGENT_PROVIDER_UNAVAILABLE"
+                          ? "模型接口暂不可用 · 可重新分析"
+                          : job.result.model_error_code === "AGENT_INVALID_OUTPUT"
+                            ? "模型返回格式异常 · 可重新分析"
+                            : "模型分析失败 · 已保留规则结果",
+                    materials_unsupported: "附件已保存；暂无可用于诊断的文字，请补充文字或日志。",
+                    awaiting_materials: "等待日志上传完成，随后自动诊断",
+                    reference_unavailable: "知识引用已失效 · 显示规则结果",
+                  } as Record<string, string>
+                )[job.result.model_status] || "显示规则结果"}
+              </p>
+            )}
+            {job.result.materials_status === "awaiting_materials" && (
+              <p className="text-secondary">尚未读取到日志；当前仅分析上报描述。</p>
+            )}
+            {job.error_code && (
+              <p className="text-secondary">
+                {job.error_code === "QUEUE_WAIT_TIMEOUT"
+                  ? "排队等待过久，请稍后重试。"
+                  : job.error_code === "DIAGNOSTIC_TIMEOUT"
+                    ? "诊断执行超时，可重新发起。"
+                    : job.error_code === "NO_PUBLISHED_KNOWLEDGE"
+                      ? "没有可引用的已发布知识，请先补充知识库。"
+                      : job.error_code === "QUEUE_UNAVAILABLE"
+                        ? "后台队列暂不可用，请稍后重新发起。"
+                        : "任务未完成或引用已失效，请核对来源后重新发起。"}
+              </p>
+            )}
+            {job.status === "completed" && (
+              <div className="flex flex-wrap items-center gap-3 text-11 text-secondary">
+                <span className="flex items-center gap-1">
+                  <CircleCheck className="size-3.5" />
+                  {job.result.method === "hybrid" ? "规则与模型" : "规则检查"}
+                </span>
+                <span>
+                  {job.result.material_coverage?.length
+                    ? `附件 ${job.result.material_coverage.length} · 已读取 ${job.result.material_coverage.filter((file) => file.status === "analyzed").length}`
+                    : `${job.result.sources?.length || 0} 份材料`}
+                </span>
+                {job.result.duration_ms !== undefined && (
+                  <span>执行 {(job.result.duration_ms / 1000).toFixed(1)} 秒</span>
+                )}
+                {job.result.trigger && <span>{job.result.trigger === "manual" ? "手动发起" : "自动初诊"}</span>}
               </div>
+            )}
+            {job.result.answer && (
+              <div className="max-h-80 overflow-y-auto rounded-md bg-layer-1 p-3 text-13 leading-6">
+                <AssistantMarkdown content={job.result.answer} />
+              </div>
+            )}
+            {job.result.model_status === "completed" &&
+              typeof job.result.model_confidence === "number" &&
+              Number.isFinite(job.result.model_confidence) &&
+              job.result.model_confidence >= 0 &&
+              job.result.model_confidence <= 1 && (
+                <div className="space-y-1 rounded-md border border-subtle px-3 py-2 text-12">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-accent-subtle px-2 py-0.5 text-11 text-accent-primary">
+                      模型自评 {Math.round(job.result.model_confidence * 100)}%
+                    </span>
+                    <span className="text-secondary">
+                      {job.result.evidence_assessment === "supported"
+                        ? "材料支持当前判断"
+                        : job.result.evidence_assessment === "partial"
+                          ? "材料部分支持"
+                          : "材料不足"}{" "}
+                      · 非正确概率
+                    </span>
+                  </div>
+                  {job.result.confidence_basis && (
+                    <p className="leading-6 text-secondary">{job.result.confidence_basis}</p>
+                  )}
+                </div>
+              )}
+            {job.result.model_info?.model && (
+              <details className="text-11 text-secondary">
+                <summary className="cursor-pointer">分析来源</summary>
+                <p className="mt-1 break-all">
+                  {job.result.model_info.engine || "模型"} · {job.result.model_info.model}
+                </p>
+                {job.result.model_info.instruction_version && (
+                  <p className="mt-1">报告格式 {job.result.model_info.instruction_version}</p>
+                )}
+              </details>
+            )}
+            {!!job.result.findings?.length && (
+              <details className="rounded-md border border-subtle p-3">
+                <summary className="cursor-pointer font-medium">规则发现（{job.result.findings.length}）</summary>
+                <div className="mt-3 space-y-3">
+                  {job.result.findings.map((row) => (
+                    <div key={row.kind}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="font-medium">{row.title}</h4>
+                        {row.confidence_source === "rule" &&
+                          typeof row.confidence === "number" &&
+                          Number.isFinite(row.confidence) &&
+                          row.confidence >= 0 &&
+                          row.confidence <= 1 && (
+                            <span
+                              className="rounded-full bg-accent-subtle px-2 py-0.5 text-11 text-accent-primary"
+                              title="来源：诊断规则参数，需结合现场证据核实"
+                            >
+                              规则分值{Math.round(row.confidence * 100)}%
+                            </span>
+                          )}
+                      </div>
+                      {row.basis && <p className="mt-1 text-11 text-secondary">{row.basis}</p>}
+                      <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-layer-1 p-3 text-11 leading-5">
+                        <code>{row.samples.join("\n")}</code>
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+            {job.result.method === "rules" && !job.result.findings?.length && (
+              <p className="text-secondary">已读取范围内未发现匹配项。</p>
+            )}
+            {job.result.suggested_actions?.length ? (
+              <details className="space-y-2 rounded-md border border-subtle p-3">
+                <summary className="cursor-pointer font-medium">建议排查</summary>
+                <ol className="list-decimal space-y-1 pl-5 text-secondary">
+                  {job.result.suggested_actions.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ol>
+              </details>
+            ) : null}
+            {job.result.verification_steps?.length ? (
+              <details className="space-y-2 rounded-md border border-subtle p-3">
+                <summary className="cursor-pointer font-medium">验证方法</summary>
+                <ol className="list-decimal space-y-1 pl-5 text-secondary">
+                  {job.result.verification_steps.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ol>
+              </details>
+            ) : null}
+            {(!!job.result.material_coverage?.length || !!job.result.sources?.length) && (
+              <details className="space-y-2 rounded-md border border-subtle p-3">
+                <summary className="cursor-pointer font-medium">
+                  {job.result.material_coverage?.length
+                    ? `诊断材料（${job.result.material_coverage.length}）`
+                    : `已读取材料（${job.result.sources?.length}）`}
+                </summary>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Button
+                    type="button"
+                    variant="neutral-primary"
+                    size="sm"
+                    aria-label="一键打包下载"
+                    title="下载此缺陷全部原附件"
+                    disabled={busy}
+                    onClick={() => void downloadAttachments()}
+                  >
+                    <Download className="mr-1 size-3.5" />
+                    一键打包下载
+                  </Button>
+                </div>
+                {job.result.material_coverage?.map((file) => (
+                  <div
+                    key={file.file_id}
+                    className="flex min-w-0 flex-wrap items-center gap-2 rounded-md bg-layer-1 px-3 py-2 text-11"
+                  >
+                    <span className="min-w-0 flex-1 break-all">{file.name}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 ${file.verified ? "bg-success-subtle text-success-primary" : "bg-layer-1 text-secondary"}`}
+                    >
+                      {file.verified ? "已校验" : "未校验"}
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 ${file.status === "analyzed" ? "bg-accent-subtle text-accent-primary" : file.status === "unsupported" ? "bg-warning-subtle text-warning-primary" : "bg-layer-1 text-secondary"}`}
+                    >
+                      {file.status === "analyzed" ? "已读取" : file.status === "unsupported" ? "未分析" : "未读取"}
+                    </span>
+                    <a
+                      className="shrink-0 text-accent-primary"
+                      href={`${base}files/${file.file_id}/download/`}
+                      download
+                    >
+                      下载
+                    </a>
+                    {file.reason && <p className="w-full break-words text-secondary">{file.reason}</p>}
+                  </div>
+                ))}
+                {job.result.sources?.map((source) => (
+                  <div
+                    key={`${source.file_id}:${source.archive_entry || source.name}`}
+                    className="flex min-w-0 flex-wrap items-center gap-2 rounded-md bg-layer-1 px-3 py-2"
+                  >
+                    <FileText className="size-3.5 shrink-0 text-secondary" />
+                    <span className="min-w-0 flex-1 text-11 break-all">
+                      {[source.name, source.archive_entry].filter(Boolean).join(" / ")}
+                    </span>
+                    {source.origin === "image_ocr" && (
+                      <span className="rounded-full bg-warning-subtle px-2 py-0.5 text-11 text-warning-primary">
+                        图片文字·需核对原图
+                      </span>
+                    )}
+                    <span className="text-11 text-secondary">
+                      {source.origin === "image_ocr"
+                        ? `识别文字 ${source.text_bytes ?? source.read_bytes} 字节${source.file_bytes !== undefined ? ` · 原图 ${source.file_bytes} 字节` : ""}`
+                        : `已读取 ${source.read_bytes} 字节${source.file_bytes !== undefined ? ` / 文件 ${source.file_bytes} 字节` : ""}`}
+                      {source.truncated ? " · 部分读取" : ""}
+                    </span>
+                    <a
+                      className="shrink-0 text-11 text-accent-primary"
+                      href={`${base}files/${source.file_id}/download/`}
+                      download
+                    >
+                      下载{source.archive_entry ? "原包" : ""}
+                    </a>
+                    {source.excerpt && (
+                      <details className="w-full text-11">
+                        <summary className="cursor-pointer text-accent-primary">
+                          查看读取内容{source.preview_truncated ? "（预览摘录）" : ""}
+                        </summary>
+                        <pre className="mt-2 max-h-56 overflow-auto rounded border border-subtle bg-surface-1 p-3 leading-5">
+                          <code>{source.excerpt}</code>
+                        </pre>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </details>
+            )}
+            {job.result.input_scope?.model_text_truncated && (
+              <p className="text-11 text-secondary">模型分析使用了材料摘要，未覆盖全部正文。</p>
+            )}
+            {job.result.citations?.map((row) => (
+              <p key={row.reference} className="text-secondary">
+                参考：
+                {row.title}
+              </p>
             ))}
-          </details>
-        )}
+            {!!job.result.context_references?.length && (
+              <details className="space-y-2 text-12">
+                <summary className="cursor-pointer text-secondary">
+                  平台记录与历史评价（{job.result.context_references.length}）
+                </summary>
+                <p className="text-11 text-secondary">平台记录显示接收和验收情况；历史评价需结合本次证据复核。</p>
+                {job.result.context_references.map((row) => (
+                  <div key={row.reference} className="rounded-md bg-layer-1 p-3">
+                    <p className="font-medium">{row.title}</p>
+                    <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>
+                  </div>
+                ))}
+              </details>
+            )}
+          </div>
+        </details>
         {job.status === "completed" && (
           <div className="space-y-2 border-t border-subtle pt-3">
             <p className="text-12 text-secondary">评价这次诊断。补充误判位置和实际结果，可供后续相关诊断参考。</p>

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useRef, useState } from "react";
-import useSWR from "swr";
-import { Download, Folder, FileText, ArrowUp, RefreshCw } from "lucide-react";
+import { Download, Upload, Folder, FileText, ArrowUp, RefreshCw } from "lucide-react";
 import { qualityApi, errorMessage } from "@/components/quality/api";
 import { remoteDiagnosticsBase } from "./types";
 import type { RemoteDevice } from "./types";
+import { Modal } from "@/components/quality/shared";
+import { FeedbackPicker } from "./feedback-picker";
+import type { FeedbackChoice } from "./feedback-picker";
 
 type Entry = { name: string; kind: "file" | "directory"; size: number; modified: number };
 type Listing = { username?: string; root: string; path: string; entries: Entry[]; offset: number; total: number };
@@ -24,29 +26,11 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [localFile, setLocalFile] = useState<File>();
-  const [uploadDefectId, setUploadDefectId] = useState("");
+  const [uploadFeedback, setUploadFeedback] = useState<FeedbackChoice>();
+  const uploadDefectId = uploadFeedback?.id || "";
   const [uploadName, setUploadName] = useState("");
-  const [feedbackSearch, setFeedbackSearch] = useState("");
-  const [feedbackQuery, setFeedbackQuery] = useState("");
-  const [feedbackPage, setFeedbackPage] = useState(1);
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setFeedbackQuery(feedbackSearch);
-      setFeedbackPage(1);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [feedbackSearch]);
-  const feedbackParams = new URLSearchParams({
-    device_id: device.id,
-    state: "all",
-    per_page: "10",
-    page: String(feedbackPage),
-    q: feedbackQuery,
-  });
-  const { data: uploadFeedback, error: uploadFeedbackError } = useSWR(
-    localFile ? `${remoteDiagnosticsBase}feedback/?${feedbackParams}` : null,
-    (url: string) => qualityApi.read<{ count: number; results: { id: string; code: string; title: string }[] }>(url)
-  );
+  const [uploadDialog, setUploadDialog] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
   useEffect(
     () => () => {
@@ -208,6 +192,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
       if (result.uploaded !== true || result.sha256 !== digest) throw new Error("远端文件完整性校验失败。");
       setMessage(`已上传并校验：${result.path}`);
       setLocalFile(undefined);
+      setUploadDialog(false);
       try {
         const updated = await request<Listing>({ action: "list", path }, current);
         setListing(updated);
@@ -254,17 +239,39 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
           <option value="robot">机器人：{robotUsername || "用户名待确认"}</option>
         </select>
       </header>
-      <div className="flex flex-wrap items-center gap-2">
+      <input
+        ref={fileInput}
+        type="file"
+        className="hidden"
+        aria-label="选择本机文件或压缩包"
+        disabled={busy}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          setLocalFile(file);
+          event.currentTarget.value = "";
+          setUploadName(file?.name || "");
+          if (file && listing) setUploadDialog(true);
+        }}
+      />
+      <div className="flex flex-wrap items-center gap-2" aria-label="文件操作">
         <button
           type="button"
-          disabled={busy || !enabled || !path}
-          onClick={() => void browse(path.split("/").slice(0, -1).join("/"))}
-          className="rounded border border-subtle p-2 disabled:opacity-40"
-          aria-label="上一级目录"
+          disabled={busy || !enabled}
+          onClick={() => fileInput.current?.click()}
+          className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
         >
-          <ArrowUp className="size-4" />
+          <Upload className="size-3.5" />
+          上传
         </button>
-        <p className="font-mono min-w-0 flex-1 text-12 break-all">{listing ? `${listing.root}/${path}` : "用户目录"}</p>
+        <button
+          type="button"
+          disabled={busy || !enabled || !listing}
+          onClick={() => void download()}
+          className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
+        >
+          <Download className="size-3.5" />
+          {selected ? "下载所选" : "下载当前目录"}
+        </button>
         <button
           type="button"
           disabled={busy || !enabled}
@@ -274,33 +281,49 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
           <RefreshCw className="size-3.5" />
           {listing ? "刷新" : "浏览文件"}
         </button>
+      </div>
+      <div className="flex min-w-0 items-center gap-2 border-y border-subtle py-2">
         <button
           type="button"
-          disabled={busy || !enabled || !listing}
-          onClick={() => void download()}
-          className="inline-flex items-center gap-1.5 rounded bg-accent-primary px-3 py-2 text-13 text-on-color disabled:opacity-40"
+          disabled={busy || !enabled || !path}
+          onClick={() => void browse(path.split("/").slice(0, -1).join("/"))}
+          className="rounded p-1.5 disabled:opacity-40"
+          aria-label="上一级目录"
         >
-          <Download className="size-3.5" />
-          {selected ? "下载所选到本机" : "下载当前文件夹"}
+          <ArrowUp className="size-4" />
         </button>
+        <p className="font-mono min-w-0 flex-1 text-12 break-all text-secondary">
+          {listing ? `${listing.root}/${path}` : "请选择目标并浏览目录"}
+        </p>
       </div>
-      <div className="space-y-2 rounded border border-subtle bg-surface-2 p-3">
-        <label className="block text-12 font-medium">
-          选择本机文件或压缩包
-          <input
-            type="file"
-            disabled={busy}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              setLocalFile(file);
-              event.currentTarget.value = "";
-              setUploadName(file?.name || "");
-            }}
-            className="mt-2 block w-full text-12"
-          />
-        </label>
-        {localFile && (
-          <div className="space-y-2">
+      {localFile && !uploadDialog && (
+        <div className="flex flex-wrap items-center gap-2 text-12">
+          <span className="min-w-0 flex-1 truncate">已选本机文件：{localFile.name}</span>
+          <button
+            type="button"
+            disabled={!listing || busy}
+            onClick={() => setUploadDialog(true)}
+            className="text-accent-primary"
+          >
+            {listing ? "确认上传位置" : "请先浏览目标目录"}
+          </button>
+          <button type="button" disabled={busy} onClick={() => setLocalFile(undefined)} className="text-secondary">
+            取消
+          </button>
+        </div>
+      )}
+      {uploadDialog && localFile && (
+        <Modal
+          title="确认上传"
+          width="compact"
+          onClose={() => {
+            if (!busy) setUploadDialog(false);
+          }}
+        >
+          <div className="space-y-4">
+            <p className="text-13">
+              {localFile.name} · {sizeText(localFile.size)}
+            </p>
             <label className="block text-12">
               目标文件名
               <input
@@ -312,80 +335,22 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
                 className="mt-1 block w-full rounded border border-subtle bg-surface-1 px-3 py-2"
               />
             </label>
-            <label className="block text-12">
-              关联原始反馈（用于补丁与后续修复）
-              <input
-                aria-label="搜索上传关联反馈"
-                placeholder="搜索反馈编号或关键词"
-                value={feedbackSearch}
-                onChange={(event) => {
-                  setFeedbackSearch(event.target.value);
-                  setUploadDefectId("");
-                }}
-                disabled={busy}
-                className="mt-2 block w-full rounded border border-subtle bg-surface-1 px-3 py-2"
-              />
-              <select
-                value={uploadDefectId}
-                onChange={(event) => setUploadDefectId(event.target.value)}
-                disabled={busy}
-                className="mt-2 block w-full rounded border border-subtle bg-surface-1 px-3 py-2"
-              >
-                <option value="">普通文件传输，不关联反馈</option>
-                {uploadFeedback?.results.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.code} · {item.title.slice(0, 60)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {uploadFeedbackError && (
-              <p role="alert" className="text-12 text-danger-primary">
-                关联反馈读取失败：{errorMessage(uploadFeedbackError)}
-              </p>
-            )}
-            {uploadFeedback && uploadFeedback.count > 10 && (
-              <div className="flex items-center gap-3 text-12 text-secondary">
-                <button
-                  type="button"
-                  disabled={busy || feedbackPage === 1}
-                  onClick={() => {
-                    setFeedbackPage(feedbackPage - 1);
-                    setUploadDefectId("");
-                  }}
-                >
-                  上一页
-                </button>
-                <span>
-                  {feedbackPage} / {Math.ceil(uploadFeedback.count / 10)} · 共 {uploadFeedback.count} 条
-                </span>
-                <button
-                  type="button"
-                  disabled={busy || feedbackPage * 10 >= uploadFeedback.count}
-                  onClick={() => {
-                    setFeedbackPage(feedbackPage + 1);
-                    setUploadDefectId("");
-                  }}
-                >
-                  下一页
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-        {localFile && (
-          <div className="flex flex-wrap items-center justify-between gap-3 text-12">
-            <p className="min-w-0 break-all">
-              {localFile.name} · {sizeText(localFile.size)}
+            <p className="text-12 break-all text-secondary">
+              目标：{target === "robot" ? `机器人：${robotUsername || "用户名待确认"}` : `操作电脑：${device.username}`}
               <br />
-              目标：{target === "robot"
-                ? `机器人：${robotUsername || "用户名待确认"}`
-                : `操作电脑：${device.username}`}{" "}
-              ·{" "}
-              {listing
-                ? `${listing.root}/${path}/${uploadName.trim()}`.replace(/\/{2,}/g, "/")
-                : "请先浏览并选择目标文件夹"}
+              {listing ? `${listing.root}/${path}/${uploadName.trim()}`.replace(/\/{2,}/g, "/") : "请先选择目标目录"}
             </p>
+            <div>
+              <p className="mb-2 text-12">关联反馈（可选）</p>
+              <FeedbackPicker
+                device={device}
+                value={uploadFeedback}
+                onChange={setUploadFeedback}
+                optional
+                disabled={busy}
+              />
+            </div>
+            <p className="text-11 text-secondary">最多 256 MB · 不覆盖同名文件 · 不自动解压或执行</p>
             <button
               type="button"
               disabled={busy || !enabled || !listing || !uploadName.trim()}
@@ -394,9 +359,19 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
             >
               确认上传到当前目录
             </button>
+            {busy && (
+              <p role="status" className="text-12 text-secondary">
+                {message}
+              </p>
+            )}
+            {error && (
+              <p role="alert" className="text-12 text-danger-primary">
+                {error}
+              </p>
+            )}
           </div>
-        )}
-      </div>
+        </Modal>
+      )}
       {listing && (
         <div className="max-h-80 overflow-auto rounded border border-subtle">
           <table className="w-full text-left text-13">

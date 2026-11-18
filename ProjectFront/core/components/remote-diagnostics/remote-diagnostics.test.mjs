@@ -240,6 +240,7 @@ function renderRoot(devices, selected = "", terminal = "") {
     "./file-panel": { FilePanel: () => null },
     "./terminal-panel": { TerminalPanel: () => null },
     "./types": types,
+    "./feedback-picker": { FeedbackPicker: () => null },
   });
   return { tree: RemoteDiagnostics(), mutations };
 }
@@ -295,7 +296,7 @@ test("offline and unauthorized devices cannot open a terminal", () => {
 
 test("Agent diagnosis starts only after explicit action and includes the selected original feedback", async () => {
   let cursor = 0;
-  const states = ["", "", 1, "needs_attention", "feedback-1", "采集无画面", false, null, "", 1];
+  const states = [{ id: "feedback-1", code: "FB-1", title: "现场原始反馈" }, "采集无画面", false, null, "", 1];
   const calls = [];
   const { AgentPanel } = load("./agent-panel.tsx", {
     react: {
@@ -323,6 +324,7 @@ test("Agent diagnosis starts only after explicit action and includes the selecte
     },
     "@/components/quality/shared": { fieldClass: "field" },
     "./types": types,
+    "./feedback-picker": { FeedbackPicker: () => null },
   });
   const tree = AgentPanel({ device });
   assert.equal(calls.length, 0);
@@ -340,7 +342,7 @@ test("Agent diagnosis starts only after explicit action and includes the selecte
 
 test("Agent diagnosis requires original feedback and does not submit without one", async () => {
   let cursor = 0;
-  const states = ["", "", 1, "needs_attention", "", "采集无画面", false, null, "", 1];
+  const states = [undefined, "采集无画面", false, null, "", 1];
   let submissions = 0;
   const { AgentPanel } = load("./agent-panel.tsx", {
     react: {
@@ -360,15 +362,19 @@ test("Agent diagnosis requires original feedback and does not submit without one
     },
     "@/components/quality/shared": { fieldClass: "field" },
     "./types": types,
+    "./feedback-picker": { FeedbackPicker: () => null },
   });
   const tree = AgentPanel({ device });
   const button = nodes(tree).find((node) => node.type === "button" && node.props.children === "开始诊断");
   assert.equal(button.props.disabled, true);
-  assert.equal(nodes(tree).find((node) => node.type === "select" && node.props.required).props.required, true);
+  assert.equal(
+    nodes(tree).some((node) => node.type === "select"),
+    false
+  );
   button.props.onClick();
   await flush();
   assert.equal(submissions, 0);
-  assert.match(JSON.stringify(tree), /当前筛选没有匹配反馈/);
+  assert.match(JSON.stringify(tree), /原始反馈/);
 });
 
 test("terminal bundles official CSS so measurement helpers and hidden input stay invisible", () => {

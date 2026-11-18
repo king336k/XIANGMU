@@ -50,6 +50,7 @@ function load(file, states, extra = {}) {
       RefreshCw: () => null,
     },
     "./types": api,
+    "./feedback-picker": { FeedbackPicker: () => null },
     "@/components/quality/shared": { fieldClass: "field" },
     "@/components/quality/api": { qualityApi: {}, errorMessage: (error) => error.message },
     ...extra,
@@ -73,7 +74,7 @@ test("Agent selected feedback history shows three rounds per page and preserves 
   }));
   const { exports, changes } = load(
     "./agent-panel.tsx",
-    ["", "", 1, "needs_attention", "fb", "problem", false, null, "", 2],
+    [{ id: "fb", code: "D-51", title: "反馈" }, "problem", false, null, "", 2],
     {
       swr: {
         default: (url) => ({
@@ -93,7 +94,7 @@ test("Agent selected feedback history shows three rounds per page and preserves 
   nodes(history)
     .find((node) => node.type === "button" && node.props.children === "上一页")
     .props.onClick();
-  assert.deepEqual(changes.at(-1), [9, 1]);
+  assert.deepEqual(changes.at(-1), [5, 1]);
 });
 
 test("upload sends edited filename and exact selected defect, then checks remote digest", async () => {
@@ -114,17 +115,13 @@ test("upload sends edited filename and exact selected defect, then checks remote
       "",
       "",
       file,
-      "fb-51",
+      { id: "fb-51", code: "D-51", title: "反馈" },
       "retry-name.zip",
-      "D-51",
-      "D-51",
-      6,
+      true,
     ],
     {
       swr: {
-        default: (url) => {
-          assert.match(url, /page=6/);
-          assert.match(url, /q=D-51/);
+        default: () => {
           return { data: { count: 101, results: [{ id: "fb-51", code: "D-51", title: "反馈" }] } };
         },
       },
@@ -187,11 +184,9 @@ test("upload rejects a target filename containing a path before any network muta
       "",
       "",
       new File(["data"], "patch.zip"),
-      "",
+      undefined,
       "../escape.zip",
-      "",
-      "",
-      1,
+      true,
     ],
     {
       swr: { default: () => ({ data: { count: 0, results: [] } }) },
@@ -220,7 +215,7 @@ test("verify-only result is green only with explicit verification evidence and v
   ]) {
     const { exports } = load(
       "./agent-panel.tsx",
-      ["", "", 1, "needs_attention", "fb", "problem", false, { id: "run", status: "completed", result }, "", 1],
+      [{ id: "fb", code: "D-51", title: "反馈" }, "problem", false, { id: "run", status: "completed", result }, "", 1],
       {
         swr: {
           default: (url) => ({
@@ -240,29 +235,108 @@ test("verify-only result is green only with explicit verification evidence and v
 });
 
 test("explicit verification report appears in selected feedback history as green verification", () => {
-  const { exports } = load("./agent-panel.tsx", ["", "", 1, "needs_attention", "fb", "problem", false, null, "", 1], {
-    swr: {
-      default: (url) => ({
-        data: url?.includes("collaboration")
-          ? [
-              {
-                id: "verified",
-                visibility: "public",
-                created_at: "2026-11-18T00:00:00Z",
-                content: "Agent 远程处理：验证通过\n结论：固定检查通过",
-              },
-            ]
-          : { count: 1, results: [{ id: "fb", code: "D-51", title: "反馈", latest_status: "verified" }] },
-        mutate() {},
-      }),
-    },
-  });
+  const { exports } = load(
+    "./agent-panel.tsx",
+    [{ id: "fb", code: "D-51", title: "反馈" }, "problem", false, null, "", 1],
+    {
+      swr: {
+        default: (url) => ({
+          data: url?.includes("collaboration")
+            ? [
+                {
+                  id: "verified",
+                  visibility: "public",
+                  created_at: "2026-11-18T00:00:00Z",
+                  content: "Agent 远程处理：验证通过\n结论：固定检查通过",
+                },
+              ]
+            : { count: 1, results: [{ id: "fb", code: "D-51", title: "反馈", latest_status: "verified" }] },
+          mutate() {},
+        }),
+      },
+    }
+  );
   const history = nodes(exports.AgentPanel({ device })).find(
     (node) => node.props?.["aria-label"] === "所选反馈处理历史"
   );
   assert.match(JSON.stringify(history), /验证正常/);
   assert.match(JSON.stringify(history), /text-success-primary/);
   assert.doesNotMatch(JSON.stringify(history), /需跟进/);
+});
+
+test("feedback dialog searches only the current computer and commits a candidate only on confirm", async () => {
+  const candidate = { id: "fb-next", code: "D-474", title: "采集503", latest_status: "unresolved" };
+  const selected = { id: "fb-old", code: "D-1", title: "之前选择" };
+  const confirmations = [];
+  let closed = 0;
+  const extra = {
+    swr: {
+      default: (url) => {
+        assert.match(url, /device_id=computer/);
+        assert.match(url, /q=503/);
+        assert.match(url, /page=2/);
+        return { data: { count: 31, results: [candidate] } };
+      },
+    },
+  };
+  const first = load("./feedback-picker.tsx", ["503", "503", 2, "all", selected], extra);
+  const props = {
+    device,
+    value: selected,
+    onClose: () => {
+      closed++;
+    },
+    onConfirm: (value) => confirmations.push(value),
+  };
+  const tree = first.exports.FeedbackPickerDialog(props);
+  nodes(tree)
+    .find((node) => node.type === "input" && node.props.type === "radio")
+    .props.onChange();
+  assert.deepEqual(first.changes.at(-1), [4, candidate]);
+  assert.equal(confirmations.length, 0);
+  tree.props.onClose();
+  assert.equal(closed, 1);
+  assert.equal(confirmations.length, 0);
+  const next = load("./feedback-picker.tsx", ["503", "503", 2, "all", candidate], extra).exports.FeedbackPickerDialog(
+    props
+  );
+  await next.props.onSubmit();
+  assert.deepEqual(confirmations, [candidate]);
+});
+
+test("file manager keeps upload and download in the left toolbar and waits for explicit confirmation", () => {
+  const { exports, changes } = load("./file-panel.tsx", [
+    "operator",
+    "",
+    "",
+    undefined,
+    undefined,
+    false,
+    "",
+    "",
+    undefined,
+    undefined,
+    "",
+    false,
+  ]);
+  const tree = exports.FilePanel({ device });
+  const toolbar = nodes(tree).find((node) => node.props?.["aria-label"] === "文件操作");
+  const buttons = nodes(toolbar).filter((node) => node.type === "button");
+  assert.equal(buttons.length, 3);
+  assert.match(JSON.stringify(buttons[0]), /上传/);
+  assert.match(JSON.stringify(buttons[1]), /下载/);
+  const input = nodes(tree).find((node) => node.type === "input" && node.props.type === "file");
+  assert.equal(input.props.className, "hidden");
+  const file = new File(["data"], "archive.zip");
+  input.props.onChange({ target: { files: [file] }, currentTarget: { value: "file" } });
+  assert.deepEqual(changes, [
+    [8, file],
+    [10, "archive.zip"],
+  ]);
+  assert.equal(
+    nodes(tree).some((node) => node.props?.title === "确认上传"),
+    false
+  );
 });
 
 test("selecting a file resets native input so the same package can target a second machine", () => {

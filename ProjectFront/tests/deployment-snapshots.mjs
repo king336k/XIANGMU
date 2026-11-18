@@ -1,3 +1,4 @@
+import { reportSummary } from "./report-summary-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -43,7 +44,10 @@ function load(result, onRetry = () => {}) {
       attachmentDisplayName: (name) => name,
     },
   };
-  new Function("require", "exports", code)((id) => mocks[id] ?? require(id), exports);
+  new Function("require", "exports", code)(
+    (id) => (id === "./report-summary" ? reportSummary : mocks[id]) ?? require(id),
+    exports
+  );
   const render = (compact, reportFileIds) =>
     exports.DeploymentSnapshots({ base: "/quality/", defectId: "defect-1", compact, reportFileIds });
   return { render, calls };
@@ -197,7 +201,10 @@ function currentReportSummaryFileIds(sources, input) {
     "./deployment-snapshots": { DeploymentSnapshots: SnapshotSummary },
     "@/components/knowledge/assistant-markdown": { AssistantMarkdown: () => null },
   };
-  new Function("require", "exports", diagnosticsCode)((id) => mocks[id] ?? require(id), exports);
+  new Function("require", "exports", diagnosticsCode)(
+    (id) => (id === "./report-summary" ? reportSummary : mocks[id]) ?? require(id),
+    exports
+  );
   const tree = exports.DiagnosticsPanel({ base: "/quality/", defectId: "defect-1", context: {} });
   const summary = [tree.props.children].flat(Infinity).find((node) => node?.type === SnapshotSummary);
   return summary?.props.reportFileIds;

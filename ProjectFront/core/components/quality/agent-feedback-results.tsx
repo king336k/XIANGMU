@@ -1,9 +1,11 @@
 import { sortBy } from "lodash-es";
 // SPDX-License-Identifier: AGPL-3.0-only
 import useSWR from "swr";
+import { useState } from "react";
 import { renderNumericDateTime } from "@plane/utils";
 import { qualityApi, errorMessage } from "./api";
 import { AgentFeedbackActions } from "./agent-feedback-actions";
+import { reportSections } from "./report-summary";
 
 type Reply = { id: string; visibility: string; content: string; created_at: string };
 const prefix = "Agent 远程处理：";
@@ -29,6 +31,9 @@ export function AgentFeedbackResults({
     (data || []).filter((reply) => reply.visibility === "public" && reply.content.startsWith(prefix)),
     (reply) => -Date.parse(reply.created_at)
   );
+  const [expanded, setExpanded] = useState<{ key: string; id: string | null } | null>(null);
+  const latestKey = `${defectId}:${results[0]?.id || ""}`;
+  const expandedId = expanded?.key === latestKey ? expanded.id : results[0]?.id;
   return (
     <section aria-label="Agent 现场处理" className="mt-5 space-y-3 rounded-md border border-subtle p-4">
       <header className="flex items-center justify-between gap-3">
@@ -58,13 +63,18 @@ export function AgentFeedbackResults({
       ) : !results.length ? (
         <p className="text-13 text-secondary">暂无 Agent 现场处理结果。</p>
       ) : (
-        results.map((reply, index) => {
-          const [status, ...lines] = reply.content.slice(prefix.length).split("\n");
+        results.map((reply) => {
+          const [status] = reply.content.slice(prefix.length).split("\n");
           const repaired = status.trim() === "已修复";
           const verified = status.trim() === "验证通过";
           return (
-            <details key={reply.id} open={index === 0} className="rounded border border-subtle px-3 py-2">
-              <summary className="cursor-pointer text-13">
+            <div key={reply.id} className="rounded border border-subtle px-3 py-2">
+              <button
+                type="button"
+                aria-expanded={expandedId === reply.id}
+                onClick={() => setExpanded({ key: latestKey, id: expandedId === reply.id ? null : reply.id })}
+                className="w-full cursor-pointer text-left text-13"
+              >
                 <span
                   className={
                     repaired || verified ? "font-medium text-success-primary" : "font-medium text-warning-primary"
@@ -75,21 +85,26 @@ export function AgentFeedbackResults({
                 <time dateTime={reply.created_at} className="ml-3 text-12 text-secondary">
                   {renderNumericDateTime(reply.created_at)}
                 </time>
-              </summary>
-              <dl className="mt-3 space-y-3 text-13">
-                {Array.from(new Set(lines.filter(Boolean))).map((line) => {
-                  const separator = line.indexOf("：");
-                  return (
-                    <div key={line}>
-                      {separator > 0 && <dt className="mb-1 text-12 text-secondary">{line.slice(0, separator)}</dt>}
-                      <dd className="leading-6 break-words whitespace-pre-wrap">
-                        {separator > 0 ? line.slice(separator + 1) : line}
-                      </dd>
-                    </div>
-                  );
-                })}
-              </dl>
-            </details>
+              </button>
+              {expandedId === reply.id && (
+                <div className="mt-3 space-y-3">
+                  <dl className="space-y-2 text-13">
+                    {reportSections(reply.content).map((section) => (
+                      <div key={section.label} className="grid gap-1 sm:grid-cols-[3rem_minmax(0,1fr)] sm:gap-3">
+                        <dt className="text-12 text-secondary">{section.label}</dt>
+                        <dd className="leading-6 break-words whitespace-pre-wrap">{section.text}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <details className="border-t border-subtle pt-2">
+                    <summary className="cursor-pointer text-12 text-secondary">详细证据与处理过程</summary>
+                    <pre className="font-sans mt-2 max-h-96 overflow-auto text-12 leading-6 break-words whitespace-pre-wrap">
+                      {reply.content}
+                    </pre>
+                  </details>
+                </div>
+              )}
+            </div>
           );
         })
       )}

@@ -6,6 +6,8 @@ import { qualityApi, errorMessage } from "@/components/quality/api";
 import { fieldClass } from "@/components/quality/shared";
 import { agentStatusLabel, remoteDiagnosticsBase, runningAgentStatuses } from "./types";
 import type { AgentRun, RemoteDevice } from "./types";
+import { FeedbackPicker } from "./feedback-picker";
+import type { FeedbackChoice } from "./feedback-picker";
 
 function resultText(value: unknown): string {
   if (value === null || value === undefined || value === "") return "暂无结果";
@@ -14,27 +16,8 @@ function resultText(value: unknown): string {
 }
 
 export function AgentPanel({ device }: { device: RemoteDevice }) {
-  const [search, setSearch] = useState("");
-  const [query, setQuery] = useState("");
-  const [page, setPage] = useState(1);
-  const [state, setState] = useState("needs_attention");
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setQuery(search);
-      setPage(1);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [search]);
-  const params = new URLSearchParams({ device_id: device.id, q: query, page: String(page), per_page: "20", state });
-  const { data: feedback, error: feedbackError } = useSWR(
-    `${remoteDiagnosticsBase}feedback/?${params}`,
-    (url: string) =>
-      qualityApi.read<{
-        count: number;
-        results: { id: string; title: string; code: string; latest_status?: string; run_count?: number }[];
-      }>(url)
-  );
-  const [defectId, setDefectId] = useState("");
+  const [selectedFeedback, setSelectedFeedback] = useState<FeedbackChoice>();
+  const defectId = selectedFeedback?.id || "";
   const [problem, setProblem] = useState("");
   const [starting, setStarting] = useState(false);
   const [run, setRun] = useState<AgentRun | null>(null);
@@ -54,7 +37,6 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
     ),
     (reply) => -Date.parse(reply.created_at)
   );
-  const selectedFeedback = feedback?.results.find((item) => item.id === defectId);
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
@@ -119,90 +101,17 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
         <h2 className="text-14 font-medium">Agent 诊断</h2>
         <p className="mt-1 text-13 text-secondary">关联原始反馈后开始排查，处理结果会回写到这条反馈。</p>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <input
-          aria-label="搜索当前电脑的反馈"
-          placeholder="反馈编号或关键词"
-          value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
-            setDefectId("");
-          }}
-          disabled={busy}
-          className={`${fieldClass} min-w-48 flex-1`}
-        />
-        <select
-          aria-label="反馈处理状态"
-          value={state}
-          disabled={busy}
-          onChange={(event) => {
-            setState(event.target.value);
-            setPage(1);
-            setDefectId("");
-          }}
-          className={`${fieldClass} w-auto`}
-        >
-          <option value="needs_attention">待处理与未解决</option>
-          <option value="running">处理中</option>
-          <option value="repaired">已修复并验证</option>
-          <option value="all">全部反馈</option>
-        </select>
-      </div>
-      <label className="flex flex-col gap-2 text-13">
-        关联原始反馈 *
-        <select
-          className={`${fieldClass} w-full min-w-0 truncate`}
-          title={feedback?.results.find((item) => item.id === defectId)?.title}
-          value={defectId}
-          required
-          disabled={busy || !feedback}
-          onChange={(event) => {
-            setDefectId(event.target.value);
-            setHistoryPage(1);
-            setRun(null);
-            setError("");
-          }}
-        >
-          <option value="">请选择原始反馈</option>
-          {feedback?.results.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.code}
-              {item.latest_status
-                ? ` · ${{ pending: "待处理", running: "处理中", repaired: "已修复", verified: "验证正常", unresolved: "需跟进" }[item.latest_status] || "待确认"}`
-                : ""}
-              {item.run_count ? ` · ${item.run_count} 轮` : ""} ·{" "}
-              {item.title.length > 64 ? `${item.title.slice(0, 64)}…` : item.title}
-            </option>
-          ))}
-        </select>
-      </label>
-      {feedback && (feedback.count || 0) > 20 && (
-        <div className="flex items-center gap-3 text-12 text-secondary">
-          <button
-            type="button"
-            disabled={busy || page === 1}
-            onClick={() => {
-              setPage(page - 1);
-              setDefectId("");
-            }}
-          >
-            上一页
-          </button>
-          <span>
-            第 {page} 页 · 共 {feedback.count} 条
-          </span>
-          <button
-            type="button"
-            disabled={busy || page * 20 >= feedback.count}
-            onClick={() => {
-              setPage(page + 1);
-              setDefectId("");
-            }}
-          >
-            下一页
-          </button>
-        </div>
-      )}
+      <FeedbackPicker
+        device={device}
+        value={selectedFeedback}
+        disabled={busy}
+        onChange={(value) => {
+          setSelectedFeedback(value);
+          setHistoryPage(1);
+          setRun(null);
+          setError("");
+        }}
+      />
       {defectId && (
         <section aria-label="所选反馈处理历史" className="space-y-3 rounded border border-subtle bg-surface-2 p-3">
           <div className="flex items-center justify-between gap-3">
@@ -270,16 +179,6 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
             </div>
           )}
         </section>
-      )}
-      {feedback && !feedback.results.length && (
-        <p role="status" className="text-13 text-secondary">
-          当前筛选没有匹配反馈；可搜索编号或切换“全部反馈”。
-        </p>
-      )}
-      {feedbackError && (
-        <p role="alert" className="text-13 text-danger-primary">
-          无法读取原始反馈：{errorMessage(feedbackError)}
-        </p>
       )}
       <label className="flex flex-col gap-2 text-13">
         问题描述

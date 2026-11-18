@@ -1,3 +1,4 @@
+import { reportSummary } from "./report-summary-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -13,7 +14,10 @@ function load(name, mocks) {
   const code = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
-  new Function("require", "exports", code)((id) => mocks[id] ?? require(id), exports);
+  new Function("require", "exports", code)(
+    (id) => (id === "./report-summary" ? reportSummary : mocks[id]) ?? require(id),
+    exports
+  );
   return exports;
 }
 function elements(tree, predicate, result = []) {

@@ -1,3 +1,4 @@
+import { reportSummary } from "./report-summary-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -35,6 +36,7 @@ function render(result, expanded = true) {
       return { useCollectionPagination: () => ({ query: "page=1", paging: {} }) };
     if (id === "./shared") return { Paging: () => null, Badge: () => null };
     if (id === "./deployment-snapshots") return { DeploymentSnapshots: () => null };
+    if (id === "./report-summary") return reportSummary;
     if (id === "./api") return { qualityApi: {}, errorMessage: String };
     if (id === "lucide-react") return new Proxy({}, { get: () => () => null });
     return require(id);
