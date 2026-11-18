@@ -164,7 +164,15 @@ def remote_repair(self, run_id):
             if isinstance(value,dict):return {key:sanitize(item) for key,item in value.items()}
             return value
         clean = sanitize(result)
-        finish(run_id, clean)
+        if clean.get("agent_error_code"):
+            # Model/report failure is distinct from the observed field verification.
+            # Preserve actual receipts while keeping this Agent run failed.
+            error_code = str(clean["agent_error_code"])
+            safe_code = error_code if error_code.isascii() and error_code.isidentifier() and len(error_code) <= 64 else "AgentReportFailed"
+            clean["agent_error_code"] = safe_code
+            finish(run_id, clean, "failed", safe_code)
+        else:
+            finish(run_id, clean)
     except Exception as error:
         finish(
             run_id,

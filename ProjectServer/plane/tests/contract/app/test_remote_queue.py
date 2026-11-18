@@ -161,3 +161,17 @@ def test_signed_feedback_automatically_queues_while_terminal_busy_and_replay_is_
     assert queued.count()==4 and dispatch.call_count==4
     from plane.quality.remote_diagnostics import run_queue
     assert all(run_queue(run)['reason']=='terminal_open' for run in queued)
+
+
+def test_failed_agent_report_preserves_execution_error_in_failed_run(remote):
+    import json
+    from types import SimpleNamespace
+    station, defect=bound(remote)
+    run=run_for(station,defect)
+    from plane.quality.remote_tasks import remote_repair
+    result={'summary':'现场复测完成，报告生成失败','repaired':False,'agent_error_code':'UnexpectedModelBehavior','actions':['固定检查已执行'],'verification':['固定复测exit0'],'verification_passed':True}
+    with patch('plane.quality.remote_tasks.provider_config',return_value={'configured':True}), patch('plane.quality.remote_tasks.subprocess.run',return_value=SimpleNamespace(returncode=0,stdout=json.dumps(result))):
+        remote_repair.run(str(run.id))
+    run.refresh_from_db()
+    assert run.status=='failed' and run.error=='UnexpectedModelBehavior'
+    assert run.result['verification_passed'] is True and run.result['actions']==['固定检查已执行']
