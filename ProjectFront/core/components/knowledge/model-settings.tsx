@@ -86,7 +86,7 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
                     编辑
                   </Button>
                   {profile.id === data.active_profile_id ? (
-                    <span className="text-12" role="status">
+                    <span className="rounded bg-accent-subtle px-2 py-1 text-12 text-accent-primary" role="status">
                       当前使用
                     </span>
                   ) : (
@@ -114,6 +114,31 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
                       使用此模型
                     </Button>
                   )}
+                  <Button
+                    type="button"
+                    disabled={busy || profile.id === data.active_profile_id}
+                    aria-label={`删除 ${profile.model} ${profile.base_url}`}
+                    title={
+                      profile.id === data.active_profile_id ? "请先切换到其他模型，再删除此配置" : "删除这份模型配置"
+                    }
+                    onClick={async () => {
+                      if (!window.confirm(`删除模型“${profile.model}”？这会移除该配置及其已保存的密钥。`)) return;
+                      setBusy(true);
+                      setMessage("");
+                      try {
+                        await qualityApi.write(url, { profile_action: "delete", profile_id: profile.id }, "patch");
+                        await mutate();
+                        if (editingId === profile.id) setEditingId("");
+                        setMessage("已删除模型配置。");
+                      } catch (cause) {
+                        setMessage(errorMessage(cause));
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    删除
+                  </Button>
                 </div>
               </li>
             ))}

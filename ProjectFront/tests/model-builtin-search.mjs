@@ -287,3 +287,37 @@ test("编辑列表中的未启用模型预填独立配置且不触发切换", as
   assert.equal(h.writes[0][1].profile_action, undefined);
   assert.match(words(h.render()), /已保存/);
 });
+
+test("删除未使用模型需要确认，取消不写入，当前模型提示先切换", async () => {
+  const previousWindow = globalThis.window;
+  const h = harness({
+    ...configured,
+    active_profile_id: "active",
+    profiles: [
+      { id: "active", model: "active-model", base_url: configured.base_url, key_present: true },
+      { id: "other", model: "other-model", base_url: configured.base_url, key_present: true },
+    ],
+  });
+  try {
+    globalThis.window = { confirm: () => false };
+    const remove = nodes(h.render()).find(
+      (node) => node.props?.["aria-label"] === `删除 other-model ${configured.base_url}`
+    );
+    await remove.props.onClick();
+    assert.equal(h.writes.length, 0);
+    globalThis.window.confirm = () => true;
+    await remove.props.onClick();
+    assert.deepEqual(h.writes[0], [
+      "/knowledge/configuration/",
+      { profile_action: "delete", profile_id: "other" },
+      "patch",
+    ]);
+    const active = nodes(h.render()).find(
+      (node) => node.props?.["aria-label"] === `删除 active-model ${configured.base_url}`
+    );
+    assert.equal(active.props.disabled, true);
+    assert.match(active.props.title, /先切换/);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});

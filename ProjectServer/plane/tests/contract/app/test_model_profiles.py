@@ -263,3 +263,33 @@ def test_inactive_edit_cannot_change_shared_embedding_settings(model_client, wor
         client.patch(path, {"profile_id": str(uuid4()), "model": "foreign"}, format="json").status_code == 400
     )
     assert provider_config(workspace.id)["model"] == "current"
+
+
+def test_delete_inactive_profile_preserves_active_configuration(model_client,workspace):
+    client,path=model_client
+    first=client.patch(path,{"model":"original","base_url":"https://api.openai.com/v1","api_key":"synthetic-original"},format="json")
+    original=first.data["active_profile_id"]
+    added=client.patch(path,{"profile_action":"create","model":"second","base_url":"https://api.openai.com/v1","api_key":"synthetic-second"},format="json")
+    active=added.data["active_profile_id"]
+    assert client.patch(path,{"profile_action":"delete","profile_id":active},format="json").status_code==400
+    response=client.patch(path,{"profile_action":"delete","profile_id":original},format="json")
+    assert response.status_code==200,response.content
+    assert response.data["active_profile_id"]==active and len(response.data["profiles"])==1
+    assert provider_config(workspace.id)["api_key"]=="synthetic-second"
+    assert "synthetic-original" not in str(response.data) and "synthetic-second" not in str(response.data)
+    assert client.patch(path,{"profile_action":"delete","profile_id":original},format="json").status_code == 400
+
+
+def test_delete_requires_exact_profile_payload_and_cannot_change_active_fields(model_client,workspace):
+    client, path = model_client
+    first = client.patch(path, {"model":"original","base_url":"https://api.openai.com/v1","api_key":"synthetic-original"}, format="json")
+    original = first.data["active_profile_id"]
+    client.patch(path, {"profile_action":"create","model":"second","base_url":"https://api.openai.com/v1","api_key":"synthetic-second"}, format="json")
+    for payload in [
+        {"profile_action":"delete"},
+        {"profile_action":"delete","profile_id":original,"model":"injected"},
+        {"profile_action":"delete","profile_id":original,"clear_key":True},
+    ]:
+        assert client.patch(path, payload, format="json").status_code == 400
+    assert len(client.get(path).data["profiles"]) == 2
+    assert provider_config(workspace.id)["model"] == "second"

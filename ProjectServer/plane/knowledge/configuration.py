@@ -26,7 +26,7 @@ class ModelPermission(QualityPermission):
 
 
 class ModelInput(serializers.Serializer):
-    profile_action = serializers.ChoiceField(choices=["save", "create", "activate"], default="save")
+    profile_action = serializers.ChoiceField(choices=["save", "create", "activate", "delete"], default="save")
     profile_id = serializers.CharField(max_length=36, required=False)
     model = serializers.CharField(max_length=120, required=False)
     base_url = serializers.CharField(max_length=500, required=False)
@@ -45,10 +45,10 @@ class ModelInput(serializers.Serializer):
 
     def validate(self, data):
         action = data["profile_action"]
-        if action == "activate" and (
+        if action in {"activate", "delete"} and (
             not data.get("profile_id") or set(self.initial_data) - {"profile_action", "profile_id"}
         ):
-            raise ValidationError({"profile_id": "切换模型时请仅指定已保存的模型配置。"})
+            raise ValidationError({"profile_id": "切换或删除模型时请仅指定已保存的模型配置。"})
         if action == "create" and (
             not data.get("model") or not data.get("base_url") or not data.get("api_key") or data["clear_key"]
         ):
@@ -177,7 +177,11 @@ class ModelConfiguration(QualityView):
             selected = next((row for row in profiles["items"] if row["id"] == selected_id), None)
             if selected is None:
                 raise ValidationError({"profile_id": "模型配置不存在，请刷新后重试。"})
-            if action == "activate":
+            if action == "delete":
+                if selected_id == profiles["active"]:
+                    raise ValidationError({"profile_id": "当前使用的模型不能删除，请先切换到其他模型。"})
+                profiles["items"] = [row for row in profiles["items"] if row["id"] != selected_id]
+            elif action == "activate":
                 if not assistant.valid_provider_url(selected["base_url"]):
                     raise ValidationError({"base_url": "该模型地址当前不在服务器允许列表中。"})
                 profiles["active"] = selected["id"]
