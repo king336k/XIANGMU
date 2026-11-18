@@ -70,6 +70,7 @@ class RemoteEnrollment(BaseAPIView):
                 raise Conflict('平台自动接入负责人权限未配置。')
             agent.save()
             station.enrollment_claim_hash=digest(data['claim_secret']);station.machine_fingerprint=data['machine_fingerprint'];created=True
+            station.capabilities={'agent_context':{'profile':'daq-local-diagnostics-v1','verification_scope':'read_only_connectivity','inspect_argv':['daq-local-diagnostics-v1','inspect'],'verify_argv':['daq-local-diagnostics-v1','verify'],'repair_allowed':False,'auto_diagnose':True,'readable_files':[],'editable_files':[]}}
         if not permitted(owner,station):raise Conflict('平台自动接入负责人权限已失效。')
         # Stable idempotent issuance requires the unguessable, persisted local
         # claim. A guessed UUID/IP/username cannot recover the credential.

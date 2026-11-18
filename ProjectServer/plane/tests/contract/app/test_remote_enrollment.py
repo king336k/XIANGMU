@@ -29,6 +29,8 @@ def test_enrollment_is_durable_and_not_derived_from_ip_or_daq_version(remote):
     assert second.status_code==200 and second.data['token']==first.data['token']
     assert second.data['workstation_id']==first.data['workstation_id']==body['installation_id']
     assert RemoteWorkstation.objects.filter(pk=body['installation_id']).count()==1
+    context=RemoteWorkstation.objects.get(pk=body['installation_id']).capabilities['agent_context']
+    assert context['inspect_argv']==['daq-local-diagnostics-v1','inspect'] and context['repair_allowed'] is False
     body['claim_secret']='different-claim-'+uuid4().hex
     assert client.post(BASE+'enroll/',body,format='json').status_code==409
 

@@ -128,6 +128,8 @@ def remote_repair(self, run_id):
         # Trusted per-device context is provisioned with the connector; it contains no model credentials.
         context = dict(run.workstation.capabilities.get("agent_context", {}))
         context["operation_mode"] = run.mode
+        if context.get("verification_scope")=="read_only_connectivity":
+            context["verification_note"]="This profile only checks connectivity and service observations. It cannot prove the original defect is repaired or business collection works."
         context["require_knowledge_search"] = True
         context["collector_identity"]={"username":run.workstation.username,"hostname":run.workstation.hostname,"label":"采集电脑"}
         context["collector_identity"]["ip_address"]=run.workstation.capabilities.get("network",{}).get("ip_address","")
@@ -164,6 +166,10 @@ def remote_repair(self, run_id):
             if isinstance(value,dict):return {key:sanitize(item) for key,item in value.items()}
             return value
         clean = sanitize(result)
+        if context.get("verification_scope")=="read_only_connectivity":
+            clean["verification_scope"]="read_only_connectivity"
+            clean["repaired"]=False
+            clean["outcome"]="unresolved"
         if clean.get("agent_error_code"):
             # Model/report failure is distinct from the observed field verification.
             # Preserve actual receipts while keeping this Agent run failed.
