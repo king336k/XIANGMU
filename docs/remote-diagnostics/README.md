@@ -10,7 +10,7 @@ PydanticAI 是唯一诊断决策者；LangGraph 编排诊断与证据检查；RO
 
 ## 页面
 
-- 主导航“统计报表”下方为“远程诊断”。电脑按实际操作用户名展示。
+- 主导航“统计报表”下方为“远程诊断”。采集电脑按实际操作系统用户名和IP展示，持久UUID是设备主键。
 - 选择电脑后可打开独立 PTY、浏览现场文件或关联反馈。
 - 机器人文件通过当前 DAQ 运行连接访问，沿用 launcher 的机器人 IP 与 SSH 身份；未建立连接时拒绝访问，不使用输入框的草稿地址。
 - 文件夹下载为 tar.gz。单次文件传输上限 256 MiB；上传先选本机文件，再选电脑/机器人与目录，显示完整目标并确认。
@@ -31,7 +31,13 @@ PydanticAI 是唯一诊断决策者；LangGraph 编排诊断与证据检查；RO
 
 ## 部署
 
-数据库迁移 0057–0062。API/diagnostic-worker 使用同一版本 ProjectServer；worker 必须有固定 PydanticAI 和 LangGraph 依赖，Holmes 通过无公开端口的独立服务接入。ROSA/RAI 使用隔离的 Humble/CycloneDDS 容器，不能以标准 topic 可见替代机器人现场验证。
+数据库迁移 0057–0063。API/diagnostic-worker 使用同一版本 ProjectServer；worker 必须有固定 PydanticAI 和 LangGraph 依赖，Holmes 通过无公开端口的独立服务接入。ROSA/RAI 使用隔离的 Humble/CycloneDDS 容器，不能以标准 topic 可见替代机器人现场验证。
+
+新安装在DAQ正常启动时安装用户服务，DAQ成功登录后私有授权marker触发自动接入；用户无需手工编辑token/config。平台部署须预先配置 `QUALITY_REMOTE_AUTO_ENROLLMENT`（enabled、project_id、owner_user_id），它允许新安装独立claim自登记，反馈密钥不具备该权限；登记服务端不会把DAQ反馈票据视为登录证明。
+
+设备ID和claim位于用户配置目录；IP/用户名/DAQ版本不参与设备主键。原人工登记保持同一ID，OTA更新执行器但不改凭据。克隆若连machine-id一并复制，仅软件指纹不足以可靠区分，制镜需重置机器身份。机器人连接revision变更会关闭旧机器人会话、使Agent/文件票据失效，不新建采集电脑卡片。
+
+新设备默认固定只读连接/服务取证；不能把该验证称为原业务缺陷恢复。机器人终端必须有DAQ活动连接且真实SSH健康检查通过，用户名/IP仅从后端状态取得，浏览器不能指定任意主机。
 
 现场连接器位于 services/field-remote。DAQ 随包携带同一份执行端代码及 provenance 校验，管理入口为 scripts/remote-diagnostics/manage.sh。私有现场配置与 token 不进入 Git 或部署包。正常生产使用 HTTPS；当前指定公网 HTTP 环境仅用于用户授权模拟验收。
 
