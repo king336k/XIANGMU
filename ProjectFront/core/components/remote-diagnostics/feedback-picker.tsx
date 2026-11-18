@@ -112,6 +112,7 @@ export function FeedbackPickerDialog({
   const [page, setPage] = useState(1);
   const [state, setState] = useState("needs_attention");
   const [candidate, setCandidate] = useState(value);
+  const [perPage, setPerPage] = useState(5);
   useEffect(() => {
     const timer = setTimeout(() => {
       setQuery(search);
@@ -119,7 +120,13 @@ export function FeedbackPickerDialog({
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
-  const params = new URLSearchParams({ device_id: device.id, q: query, state, page: String(page), per_page: "10" });
+  const params = new URLSearchParams({
+    device_id: device.id,
+    q: query,
+    state,
+    page: String(page),
+    per_page: String(perPage),
+  });
   const { data, error } = useSWR(`${remoteDiagnosticsBase}feedback/?${params}`, (url: string) =>
     qualityApi.read<{ count: number; results: FeedbackChoice[] }>(url)
   );
@@ -221,15 +228,29 @@ export function FeedbackPickerDialog({
             </table>
           </div>
           <div className="flex items-center justify-between text-12 text-secondary">
-            <span>共 {data.count} 条</span>
+            <div className="flex items-center gap-3">
+              <span>共 {data.count} 条</span>
+              <select
+                aria-label="每页反馈数量"
+                value={perPage}
+                onChange={(event) => {
+                  setPerPage(Number(event.target.value));
+                  setPage(1);
+                }}
+                className="rounded border border-subtle bg-surface-1 px-2 py-1"
+              >
+                <option value={5}>5 条 / 页</option>
+                <option value={10}>10 条 / 页</option>
+              </select>
+            </div>
             <div className="flex items-center gap-3">
               <button type="button" disabled={page === 1} onClick={() => setPage(page - 1)}>
                 上一页
               </button>
               <span>
-                {page} / {Math.max(1, Math.ceil(data.count / 10))}
+                {page} / {Math.max(1, Math.ceil(data.count / perPage))}
               </span>
-              <button type="button" disabled={page * 10 >= data.count} onClick={() => setPage(page + 1)}>
+              <button type="button" disabled={page * perPage >= data.count} onClick={() => setPage(page + 1)}>
                 下一页
               </button>
             </div>

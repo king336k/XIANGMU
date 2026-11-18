@@ -4,7 +4,8 @@ import { Download, Upload, Folder, FileText, ArrowUp, RefreshCw } from "lucide-r
 import { qualityApi, errorMessage } from "@/components/quality/api";
 import { remoteDiagnosticsBase } from "./types";
 import type { RemoteDevice } from "./types";
-import { Modal } from "@/components/quality/shared";
+import { TransferModal } from "./transfer-modal";
+import type { TransferDirection } from "./transfer-modal";
 import { FeedbackPicker } from "./feedback-picker";
 import type { FeedbackChoice } from "./feedback-picker";
 
@@ -30,6 +31,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
   const uploadDefectId = uploadFeedback?.id || "";
   const [uploadName, setUploadName] = useState("");
   const [uploadDialog, setUploadDialog] = useState(false);
+  const [direction, setDirection] = useState<TransferDirection>("upload");
   const fileInput = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
   useEffect(
@@ -211,81 +213,32 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
     }
   }
   const enabled = device.online && device.can_connect;
-  return (
-    <section aria-label="现场文件" className="space-y-3 rounded border border-subtle p-4">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-14 font-medium">现场文件</h2>
-          <p className="mt-1 text-12 text-secondary">
-            浏览采集电脑或经由它连接的机器人；文件夹打包为 tar.gz 下载到本机。
-          </p>
-        </div>
-        <select
-          aria-label="文件位置"
-          value={target}
-          disabled={busy}
-          onChange={(e) => {
-            generation.current++;
-            setTarget(e.target.value);
-            setListing(undefined);
-            setSelected(undefined);
-            setPath("");
-            setError("");
-            setMessage("");
-          }}
-          className="rounded border border-subtle bg-surface-1 px-3 py-2 text-13"
-        >
-          <option value="operator">
-            采集电脑：{device.username}@{device.ip_address || "IP待确认"}
-          </option>
-          <option value="robot">
-            机器人：{robotUsername || "用户名待确认"}@{configuredRobot?.host || "IP待确认"}
-          </option>
-        </select>
-      </header>
-      <input
-        ref={fileInput}
-        type="file"
-        className="hidden"
-        aria-label="选择本机文件或压缩包"
-        disabled={busy}
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          setLocalFile(file);
-          event.currentTarget.value = "";
-          setUploadName(file?.name || "");
-          if (file && listing) setUploadDialog(true);
-        }}
-      />
-      <div className="flex flex-wrap items-center gap-2" aria-label="文件操作">
-        <button
-          type="button"
-          disabled={busy || !enabled}
-          onClick={() => fileInput.current?.click()}
-          className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
-        >
-          <Upload className="size-3.5" />
-          上传
-        </button>
-        <button
-          type="button"
-          disabled={busy || !enabled || !listing}
-          onClick={() => void download()}
-          className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
-        >
-          <Download className="size-3.5" />
-          {selected ? "下载所选" : "下载当前目录"}
-        </button>
-        <button
-          type="button"
-          disabled={busy || !enabled}
-          onClick={() => void browse(path)}
-          className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
-        >
-          <RefreshCw className="size-3.5" />
-          {listing ? "刷新" : "浏览文件"}
-        </button>
-      </div>
+  const targetControl = (
+    <select
+      aria-label="文件位置"
+      value={target}
+      disabled={busy}
+      onChange={(e) => {
+        generation.current++;
+        setTarget(e.target.value);
+        setListing(undefined);
+        setSelected(undefined);
+        setPath("");
+        setError("");
+        setMessage("");
+      }}
+      className="rounded border border-subtle bg-surface-1 px-3 py-2 text-13"
+    >
+      <option value="operator">
+        采集电脑：{device.username}@{device.ip_address || "IP待确认"}
+      </option>
+      <option value="robot">
+        机器人：{robotUsername || "用户名待确认"}@{configuredRobot?.host || "IP待确认"}
+      </option>
+    </select>
+  );
+  const remoteBrowser = (
+    <div className="space-y-2">
       <div className="flex min-w-0 items-center gap-2 border-y border-subtle py-2">
         <button
           type="button"
@@ -299,86 +252,16 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
         <p className="font-mono min-w-0 flex-1 text-12 break-all text-secondary">
           {listing ? `${listing.root}/${path}` : "请选择目标并浏览目录"}
         </p>
-      </div>
-      {localFile && !uploadDialog && (
-        <div className="flex flex-wrap items-center gap-2 text-12">
-          <span className="min-w-0 flex-1 truncate">已选本机文件：{localFile.name}</span>
-          <button
-            type="button"
-            disabled={!listing || busy}
-            onClick={() => setUploadDialog(true)}
-            className="text-accent-primary"
-          >
-            {listing ? "确认上传位置" : "请先浏览目标目录"}
-          </button>
-          <button type="button" disabled={busy} onClick={() => setLocalFile(undefined)} className="text-secondary">
-            取消
-          </button>
-        </div>
-      )}
-      {uploadDialog && localFile && (
-        <Modal
-          title="确认上传"
-          width="compact"
-          onClose={() => {
-            if (!busy) setUploadDialog(false);
-          }}
+        <button
+          type="button"
+          disabled={busy || !enabled}
+          onClick={() => void browse(path)}
+          aria-label="刷新远端目录"
+          className="rounded p-1.5 text-secondary disabled:opacity-40"
         >
-          <div className="space-y-4">
-            <p className="text-13">
-              {localFile.name} · {sizeText(localFile.size)}
-            </p>
-            <label className="block text-12">
-              目标文件名
-              <input
-                aria-label="目标文件名"
-                value={uploadName}
-                onChange={(event) => setUploadName(event.target.value)}
-                maxLength={255}
-                disabled={busy}
-                className="mt-1 block w-full rounded border border-subtle bg-surface-1 px-3 py-2"
-              />
-            </label>
-            <p className="text-12 break-all text-secondary">
-              目标：
-              {target === "robot"
-                ? `机器人：${robotUsername || "用户名待确认"}@${configuredRobot?.host || "IP待确认"}`
-                : `采集电脑：${device.username}@${device.ip_address || "IP待确认"}`}
-              <br />
-              {listing ? `${listing.root}/${path}/${uploadName.trim()}`.replace(/\/{2,}/g, "/") : "请先选择目标目录"}
-            </p>
-            <div>
-              <p className="mb-2 text-12">关联反馈（可选）</p>
-              <FeedbackPicker
-                device={device}
-                value={uploadFeedback}
-                onChange={setUploadFeedback}
-                optional
-                disabled={busy}
-              />
-            </div>
-            <p className="text-11 text-secondary">最多 256 MB · 不覆盖同名文件 · 不自动解压或执行</p>
-            <button
-              type="button"
-              disabled={busy || !enabled || !listing || !uploadName.trim()}
-              onClick={() => void upload()}
-              className="rounded bg-accent-primary px-3 py-2 text-13 text-on-color disabled:opacity-40"
-            >
-              确认上传到当前目录
-            </button>
-            {busy && (
-              <p role="status" className="text-12 text-secondary">
-                {message}
-              </p>
-            )}
-            {error && (
-              <p role="alert" className="text-12 text-danger-primary">
-                {error}
-              </p>
-            )}
-          </div>
-        </Modal>
-      )}
+          <RefreshCw className="size-4" />
+        </button>
+      </div>
       {listing && (
         <div className="max-h-80 overflow-auto rounded border border-subtle">
           <table className="w-full text-left text-13">
@@ -470,6 +353,121 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
           </button>
         </div>
       )}
+
+      {!listing && (
+        <p role="status" className="py-8 text-center text-12 text-secondary">
+          {!enabled
+            ? "现场离线或无访问权限。"
+            : busy
+              ? "正在读取远端目录…"
+              : error
+                ? "目录读取失败，请刷新重试。"
+                : "请浏览远端目录。"}
+        </p>
+      )}
+    </div>
+  );
+
+  return (
+    <section aria-label="现场文件" className="space-y-3 rounded border border-subtle p-4">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-14 font-medium">现场文件</h2>
+          <p className="mt-1 text-12 text-secondary">
+            浏览采集电脑或经由它连接的机器人；文件夹打包为 tar.gz 下载到本机。
+          </p>
+        </div>
+        {targetControl}
+      </header>
+      <input
+        ref={fileInput}
+        type="file"
+        className="hidden"
+        aria-label="选择本机文件或压缩包"
+        disabled={busy}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          setLocalFile(file);
+          event.currentTarget.value = "";
+          setUploadName(file?.name || "");
+        }}
+      />
+      <div className="flex flex-wrap items-center gap-2" aria-label="文件操作">
+        <button
+          type="button"
+          disabled={busy || !enabled}
+          onClick={() => {
+            setDirection("upload");
+            setUploadDialog(true);
+            if (!listing) void browse(path);
+          }}
+          className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
+        >
+          <Upload className="size-3.5" />
+          上传
+        </button>
+        <button
+          type="button"
+          disabled={busy || !enabled}
+          onClick={() => {
+            setDirection("download");
+            setUploadDialog(true);
+            if (!listing) void browse(path);
+          }}
+          className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
+        >
+          <Download className="size-3.5" />
+          {selected ? "下载所选" : "下载当前目录"}
+        </button>
+        <button
+          type="button"
+          disabled={busy || !enabled}
+          onClick={() => void browse(path)}
+          className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
+        >
+          <RefreshCw className="size-3.5" />
+          {listing ? "刷新" : "浏览文件"}
+        </button>
+      </div>
+      {uploadDialog && (
+        <TransferModal
+          direction={direction}
+          onDirection={setDirection}
+          targetControl={targetControl}
+          remoteBrowser={remoteBrowser}
+          localFile={localFile}
+          remoteName={selected?.name || (listing ? path.split("/").at(-1) || "当前目录" : "")}
+          remotePath={`${target === "robot" ? `${robotUsername || "用户名待确认"}@${configuredRobot?.host || "IP待确认"}` : `${device.username}@${device.ip_address || "IP待确认"}`}:${listing ? `${listing.root}/${path}/${direction === "upload" ? uploadName.trim() : selected?.name || ""}`.replace(/\/{2,}/g, "/") : "请选择远端目录"}`}
+          uploadName={uploadName}
+          onUploadName={setUploadName}
+          onPickLocal={() => fileInput.current?.click()}
+          advanced={
+            <FeedbackPicker
+              device={device}
+              value={uploadFeedback}
+              onChange={setUploadFeedback}
+              optional
+              disabled={busy}
+            />
+          }
+          busy={busy}
+          enabled={enabled && !!listing && (direction === "download" || (!!localFile && !!uploadName.trim()))}
+          message={message}
+          error={error}
+          onStart={() => {
+            if (direction === "upload") void upload();
+            else void download();
+          }}
+          onClose={() => {
+            if (!busy || !message) {
+              generation.current++;
+              setBusy(false);
+              setUploadDialog(false);
+            }
+          }}
+        />
+      )}
+      {remoteBrowser}
       {busy && (
         <p role="status" className="text-12 text-secondary">
           {message || "正在读取现场文件…"}

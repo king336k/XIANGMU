@@ -49,9 +49,14 @@ function load(file, states, extra = {}) {
       FileText: () => null,
       ArrowUp: () => null,
       RefreshCw: () => null,
+      ArrowLeft: () => null,
+      ArrowRight: () => null,
+      FolderOpen: () => null,
+      Upload: () => null,
     },
     "./types": api,
     "./feedback-picker": { FeedbackPicker: () => null },
+    "./transfer-modal": { TransferModal: () => null },
     "@/components/quality/shared": { fieldClass: "field" },
     "@/components/quality/api": { qualityApi: {}, errorMessage: (error) => error.message },
     ...extra,
@@ -119,6 +124,7 @@ test("upload sends edited filename and exact selected defect, then checks remote
       { id: "fb-51", code: "D-51", title: "反馈" },
       "retry-name.zip",
       true,
+      "upload",
     ],
     {
       swr: {
@@ -156,8 +162,8 @@ test("upload sends edited filename and exact selected defect, then checks remote
     }
   );
   const tree = exports.FilePanel({ device });
-  const button = nodes(tree).find((node) => node.type === "button" && node.props.children === "确认上传到当前目录");
-  button.props.onClick();
+  const modal = nodes(tree).find((node) => node.props?.onStart);
+  modal.props.onStart();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(writes[0].action, "upload_start");
   assert.equal(writes[0].defect_id, "fb-51");
@@ -198,6 +204,7 @@ test("upload rejects a target filename containing a path before any network muta
       undefined,
       "../escape.zip",
       true,
+      "upload",
     ],
     {
       swr: { default: () => ({ data: { count: 0, results: [] } }) },
@@ -212,8 +219,8 @@ test("upload rejects a target filename containing a path before any network muta
     }
   );
   nodes(exports.FilePanel({ device }))
-    .find((node) => node.type === "button" && node.props.children === "确认上传到当前目录")
-    .props.onClick();
+    .find((node) => node.props?.onStart)
+    .props.onStart();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(count, 0);
 });
@@ -348,6 +355,111 @@ test("file manager keeps upload and download in the left toolbar and waits for e
     nodes(tree).some((node) => node.props?.title === "确认上传"),
     false
   );
+});
+
+test("feedback picker defaults to five rows and switching to ten resets only page", () => {
+  const candidate = { id: "fb", code: "D-474", title: "反馈" };
+  const { exports, changes } = load("./feedback-picker.tsx", ["503", "503", 3, "all", candidate], {
+    swr: {
+      default: (url) => {
+        assert.match(url, /per_page=5/);
+        assert.match(url, /q=503/);
+        assert.match(url, /state=all/);
+        return { data: { count: 21, results: [candidate] } };
+      },
+    },
+  });
+  const tree = exports.FeedbackPickerDialog({ device, value: candidate, onClose() {}, onConfirm() {} });
+  nodes(tree)
+    .find((node) => node.props?.["aria-label"] === "每页反馈数量")
+    .props.onChange({ target: { value: "10" } });
+  assert.deepEqual(changes, [
+    [5, 10],
+    [2, 1],
+  ]);
+});
+
+test("transfer dialog is two panes, shows browser destination honestly and starts only on explicit action", () => {
+  let transfers = 0;
+  const directions = [];
+  const { exports } = load("./transfer-modal.tsx", []);
+  const tree = exports.TransferModal({
+    direction: "download",
+    onDirection: (value) => directions.push(value),
+    targetControl: "采集电脑：caiji1@10.0.0.195",
+    remoteBrowser: "远端列表",
+    localFile: undefined,
+    remoteName: "logs.tar.gz",
+    remotePath: "caiji1@10.0.0.195:/home/caiji1/logs",
+    uploadName: "",
+    onUploadName() {},
+    onPickLocal() {},
+    advanced: null,
+    busy: false,
+    enabled: true,
+    message: "",
+    error: "",
+    onStart: () => {
+      transfers++;
+    },
+    onClose() {},
+  });
+  assert.equal(nodes(tree).filter((node) => node.type === "section").length, 2);
+  assert.match(JSON.stringify(tree), /浏览器下载目录/);
+  assert.doesNotMatch(JSON.stringify(tree), /C:\\|\/home\/local/);
+  nodes(tree)
+    .find((node) => node.props?.["aria-label"] === "上传到远端")
+    .props.onClick();
+  assert.deepEqual(directions, ["upload"]);
+  assert.equal(transfers, 0);
+  nodes(tree)
+    .find((node) => node.type === "button" && node.props.children === "开始传输")
+    .props.onClick();
+  assert.equal(transfers, 1);
+});
+
+test("changing transfer target resets remote directory and selection without launching a transfer", () => {
+  let mutations = 0;
+  const { exports, changes } = load(
+    "./file-panel.tsx",
+    [
+      "operator",
+      "robot-user",
+      "logs",
+      { root: "/home/caiji1", entries: [], total: 0 },
+      { name: "old.log" },
+      false,
+      "",
+      "",
+      undefined,
+      undefined,
+      "",
+      true,
+      "download",
+    ],
+    {
+      "@/components/quality/api": {
+        qualityApi: {
+          async write() {
+            mutations++;
+          },
+        },
+        errorMessage: String,
+      },
+    }
+  );
+  const tree = exports.FilePanel({ device });
+  const modal = nodes(tree).find((node) => node.props?.onStart);
+  modal.props.targetControl.props.onChange({ target: { value: "robot" } });
+  assert.deepEqual(changes.slice(0, 4), [
+    [0, "robot"],
+    [3, undefined],
+    [4, undefined],
+    [2, ""],
+  ]);
+  assert.equal(mutations, 0);
+  modal.props.onClose();
+  assert.equal(mutations, 0);
 });
 
 test("selecting a file resets native input so the same package can target a second machine", () => {
