@@ -8,6 +8,8 @@ from django.db import models
 class RemoteWorkstation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.OneToOneField("quality.FieldAgent", on_delete=models.PROTECT, related_name="remote")
+    enrollment_claim_hash = models.CharField(max_length=64, blank=True)
+    machine_fingerprint = models.CharField(max_length=64, blank=True)
     credential_hash = models.CharField(max_length=64)
     credential_expires_at = models.DateTimeField()
     username = models.CharField(max_length=120, blank=True)
@@ -22,6 +24,9 @@ class RemoteTerminal(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     workstation = models.ForeignKey(RemoteWorkstation, on_delete=models.CASCADE)
     owner = models.ForeignKey("db.User", on_delete=models.PROTECT)
+    target = models.CharField(max_length=16, default="operator")
+    target_identity = models.JSONField(default=dict)
+    target_revision = models.CharField(max_length=64, blank=True)
     status = models.CharField(max_length=16, default="open")
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()

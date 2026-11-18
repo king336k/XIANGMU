@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from django.urls import path
 from .remote_files import RemoteFiles
+from .remote_enrollment import RemoteEnrollment
 from .remote_research import RemoteResearch
 from .remote_diagnostics import RemoteDirectory, RemoteExchange, RemoteSession, RemoteFeedback, RemoteRuns, RemoteRunDetail, RemoteTool, RemoteDefectTargets
 from .account_management import AccountDirectory, AccountProjectMembers, NativeWorkAccess
@@ -23,6 +24,7 @@ from .member_scopes import MemberScopes
 from .daq_connect import DaqConnect
 
 urlpatterns = [
+    path("remote-diagnostics/enroll/", RemoteEnrollment.as_view()),
     path("remote-diagnostics/agent-research/", RemoteResearch.as_view()),
     path("remote-diagnostics/defect-targets/", RemoteDefectTargets.as_view()),
     path("remote-diagnostics/files/", RemoteFiles.as_view()),

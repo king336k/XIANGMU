@@ -56,7 +56,38 @@ def online(station):
 
 
 def identity_key(station):
-    return digest(json.dumps([str(station.pk), station.boot_id, station.hostname, station.username], ensure_ascii=False))
+    robot=station.capabilities.get('robot',{})
+    peer=[robot.get('username'),robot.get('host'),robot.get('target_revision')] if isinstance(robot,dict) and robot.get('connected') is True else None
+    # DHCP/DAQ versions are metadata. A robot switch changes the execution target.
+    return digest(json.dumps([str(station.pk), station.boot_id, station.hostname, station.username,peer], ensure_ascii=False))
+
+
+def robot_target(station):
+    value=station.capabilities.get('robot',{})
+    if not isinstance(value,dict) or value.get('connected') is not True:
+        raise Conflict('请先在DAQ连接机器人。')
+    import ipaddress
+    try:
+        address=ipaddress.ip_address(value.get('host',''))
+        if not address.is_private or address.is_loopback or address.is_unspecified or address.is_multicast:
+            raise ValueError()
+    except ValueError:
+        raise Conflict('机器人连接信息尚未就绪。')
+    if not value.get('username') or not isinstance(value.get('target_revision'),str) or len(value['target_revision'])!=64:
+        raise Conflict('机器人连接信息尚未就绪。')
+    return {'username':str(value['username']),'host':str(address)},value['target_revision']
+
+
+def terminal_snapshot(session):
+    return {'id':str(session.id),'status':session.status,'target':session.target,
+        'identity':session.target_identity,'target_revision':session.target_revision}
+
+
+def terminal_target_valid(session,station):
+    if session.target!='robot':return True
+    try:target,revision=robot_target(station)
+    except Conflict:return False
+    return revision==session.target_revision and target==session.target_identity
 
 
 def feedback_for(station, defect_id=None):
@@ -222,6 +253,8 @@ class RemoteDirectory(BaseAPIView):
             return Response({"enabled": False})
         if action != "open":
             raise ValidationError("未知操作。")
+        if set(request.data)-{'action','device_id','cols','rows','target','expected_target_revision'}:
+            raise ValidationError('终端目标只能选择已登记的采集电脑或已连接机器人。')
         station = station_for(request.user, request.data.get("device_id"))
         station = RemoteWorkstation.objects.select_for_update(of=("self",)).select_related("agent__project__workspace").get(pk=station.pk)
         if not permitted(request.user, station):
@@ -240,9 +273,16 @@ class RemoteDirectory(BaseAPIView):
             >= 2
         ):
             raise Conflict("该电脑终端会话已达上限。")
+        target=serializers.ChoiceField(choices=['operator','robot']).run_validation(request.data.get('target','operator'))
+        target_identity={'username':station.username,'host':station.capabilities.get('network',{}).get('ip_address','')}
+        revision=''
+        if target=='robot':
+            target_identity,revision=robot_target(station)
+            if request.data.get('expected_target_revision')!=revision:
+                raise Conflict('机器人已切换，请刷新后重新连接。')
         now = timezone.now()
         session = RemoteTerminal.objects.create(
-            workstation=station, owner=request.user, last_read_at=now, expires_at=now + timedelta(hours=1)
+            workstation=station, owner=request.user, target=target,target_identity=target_identity,target_revision=revision,last_read_at=now, expires_at=now + timedelta(hours=1)
         )
         cols = serializers.IntegerField(min_value=20, max_value=500).run_validation(
             request.data.get("cols", 100)
@@ -252,10 +292,10 @@ class RemoteDirectory(BaseAPIView):
         )
         command(
             station,
-            {"kind": "terminal_open", "session_id": str(session.id), "cols": cols, "rows": rows},
+            {"kind": "terminal_open", "session_id": str(session.id), "cols": cols, "rows": rows,"target":target,"target_revision":revision},
             session=session,
         )
-        return Response({"id": str(session.id), "status": session.status}, status=201)
+        return Response(terminal_snapshot(session), status=201)
 
 
 class RemoteSession(BaseAPIView):
@@ -274,7 +314,7 @@ class RemoteSession(BaseAPIView):
         if not permitted(request.user, session.workstation):
             close_session(session)
             raise PermissionDenied()
-        if session.expires_at <= timezone.now():
+        if session.expires_at <= timezone.now() or not terminal_target_valid(session,session.workstation):
             close_session(session)
         return session
 
@@ -293,8 +333,7 @@ class RemoteSession(BaseAPIView):
         events = list(session.events.filter(id__gt=after).order_by("id")[:100])
         return Response(
             {
-                "id": str(session.id),
-                "status": session.status,
+                **terminal_snapshot(session),
                 "error": session.error,
                 "events": [{"seq": e.id, "data": e.data} for e in events],
                 "cursor": events[-1].id if events else after,
@@ -504,7 +543,7 @@ class RemoteExchange(BaseAPIView):
             if cutoff:
                 session.events.filter(id__lte=cutoff[0]).delete()
         for session in station.remoteterminal_set.filter(status="open").select_related("owner"):
-            if session.expires_at < now or (now - session.last_read_at).total_seconds() > 60 or not permitted(session.owner, station):
+            if session.expires_at < now or (now - session.last_read_at).total_seconds() > 60 or not permitted(session.owner, station) or not terminal_target_valid(session,station):
                 close_session(session)
         station.commands.filter(status__in=["pending", "delivered"], expires_at__lte=now).update(
             status="expired", payload={}
