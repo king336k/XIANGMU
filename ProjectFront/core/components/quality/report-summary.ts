@@ -31,19 +31,20 @@ export function reportSections(content: string): { label: string; text: string }
     结论: "结论",
     原因与证据: "原因",
     已执行操作: "处理",
+    修改位置: "位置",
     复测: "复测",
     后续方案: "下一步",
   };
   const sections: { label: string; text: string }[] = [];
   for (const line of content.split("\n").slice(1)) {
     if (line.trim() === "详细证据与处理过程：") break;
-    const match = /^(结论|原因与证据|已执行操作|复测|后续方案)：(.*)$/.exec(line);
+    const match = /^(结论|原因与证据|已执行操作|修改位置|复测|后续方案)：(.*)$/.exec(line);
     if (match) sections.push({ label: names[match[1]], text: match[2] });
     else if (sections.length) sections[sections.length - 1].text += `\n${line}`;
   }
   const hasEditorialSummary = content.includes("\n详细证据与处理过程：");
   return sections.map((section) => ({
     label: section.label,
-    text: hasEditorialSummary ? section.text.trim() : compactReportText(section.text),
+    text: hasEditorialSummary || section.label === "位置" ? section.text.trim() : compactReportText(section.text),
   }));
 }

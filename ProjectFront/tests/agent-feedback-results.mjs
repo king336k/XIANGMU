@@ -101,3 +101,28 @@ test("简短结论选完整原句并保留未知与模拟限定，原始过程�
   assert.ok(html.indexOf("ROSA 检查") > html.indexOf("详细证据与处理过程"));
   assert.equal((html.match(/aria-expanded="true"/g) || []).length, 1);
 });
+
+test("修改位置原样保留实际主机完整路径行号键和值变化", () => {
+  const location =
+    "robot177 · /home/operator/workspace/runtime/config/collector.json:42 · telemetry_enabled false→true";
+  const sections = reportSummary.reportSections(
+    `Agent 远程处理：已修复\n结论：采集恢复。\n修改位置：${location}\n复测：检查通过。`
+  );
+  assert.deepEqual(
+    sections.find((section) => section.label === "位置"),
+    { label: "位置", text: location }
+  );
+  const html = render([
+    {
+      id: "location",
+      visibility: "public",
+      content: `Agent 远程处理：已修复\n结论：采集恢复。\n修改位置：${location}`,
+      created_at: "2026-11-18",
+    },
+  ]);
+  assert.match(
+    html,
+    /robot177 · \/home\/operator\/workspace\/runtime\/config\/collector.json:42 · telemetry_enabled false→true/
+  );
+  assert.ok(html.indexOf("collector.json:42") < html.indexOf("详细证据与处理过程"));
+});
