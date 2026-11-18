@@ -29,7 +29,7 @@ function load(file, mocks) {
   )((name) => mocks[name] ?? require(name), exports);
   return exports;
 }
-function renderTerminal(robot, states = []) {
+function renderTerminal(robot, states = [], currentDevice = device) {
   let cursor = 0;
   const effects = [],
     dependencies = [],
@@ -51,7 +51,7 @@ function renderTerminal(robot, states = []) {
     "./types": { remoteDiagnosticsBase: "/remote/" },
     "./terminal-connection": { TerminalConnection: () => null },
   });
-  return { tree: TerminalPanel({ device, robot, onClose() {} }), changes, effects, dependencies };
+  return { tree: TerminalPanel({ device: currentDevice, robot, onClose() {} }), changes, effects, dependencies };
 }
 test("robot terminal requires authoritative connected true and target changes carry no host or credentials", () => {
   for (const robot of [
@@ -117,4 +117,54 @@ test("peer switch invalidates only robot effect and does not reconnect collector
     robotAfter.changes.some(([index, value]) => index === 3 && value === "connecting"),
     false
   );
+});
+
+test("different users on different stations start collector target without retaining another panels robot identity", () => {
+  const firstPeer = { connected: true, target_revision: "station-a-peer", username: "robot-a", host: "10.0.0.177" };
+  const first = renderTerminal(firstPeer);
+  nodes(first.tree)
+    .find((node) => node.type === "button" && node.props.children === "机器人")
+    .props.onClick();
+  assert.ok(first.changes.some(([index, value]) => index === 0 && value === "robot"));
+  const otherDevice = { ...device, id: "station-b", username: "caiji2", ip_address: "10.0.0.196" };
+  const second = renderTerminal(
+    { connected: true, target_revision: "station-b-peer", username: "robot-b", host: "10.0.0.178" },
+    [],
+    otherDevice
+  );
+  const collector = nodes(second.tree).find((node) => node.type === "button" && node.props.children === "采集电脑");
+  const robot = nodes(second.tree).find((node) => node.type === "button" && node.props.children === "机器人");
+  assert.equal(collector.props["aria-pressed"], true);
+  assert.equal(robot.props["aria-pressed"], false);
+  const title = nodes(second.tree).find((node) => node.type === "h2");
+  assert.match(JSON.stringify(title), /caiji2/);
+  assert.match(JSON.stringify(title), /10.0.0.196/);
+  assert.doesNotMatch(JSON.stringify(title), /caiji1|robot-a|10\.0\.0\.177/);
+  assert.equal(second.dependencies[0][0], "station-b");
+});
+
+test("a second station uses its own actual robot session title instead of the first stations configured peer", () => {
+  const secondDevice = { ...device, id: "station-b", username: "caiji2", ip_address: "10.0.0.196" };
+  const peer = { connected: true, target_revision: "station-b-peer", username: "robot-config-b", host: "10.0.0.178" };
+  const bound = JSON.stringify([peer.target_revision, peer.username, peer.host]);
+  const result = renderTerminal(
+    peer,
+    [
+      "robot",
+      bound,
+      {
+        id: "session-b",
+        target: "robot",
+        identity: { username: "actual-b", host: "10.0.0.178" },
+        target_revision: "station-b-peer",
+      },
+      "open",
+      "",
+    ],
+    secondDevice
+  );
+  const title = nodes(result.tree).find((node) => node.type === "h2");
+  assert.match(JSON.stringify(title), /actual-b/);
+  assert.match(JSON.stringify(title), /10.0.0.178/);
+  assert.doesNotMatch(JSON.stringify(title), /caiji1|10\.0\.0\.177|robot-a/);
 });
