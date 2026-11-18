@@ -131,3 +131,33 @@ def test_terminal_get_commits_permission_revocation_cleanup(remote):
     response=client.get(BASE+"sessions/"+opened.data["id"]+"/")
     assert response.status_code == 403
     assert RemoteTerminal.objects.get(pk=opened.data["id"]).status=="closed"
+
+
+def test_signed_feedback_automatically_queues_while_terminal_busy_and_replay_is_idempotent(remote, settings, django_capture_on_commit_callbacks):
+    import json
+    from uuid import uuid4
+    from plane.license.models import InstanceConfiguration
+    from plane.tests.contract.app.test_daq_incidents import signature
+    from rest_framework.test import APIClient
+    client, edge, device, project = remote
+    heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device)
+    station.agent.source_instance='daq-device';station.agent.save(update_fields=['source_instance'])
+    station.capabilities={'agent_context':{'auto_diagnose':True}};station.save(update_fields=['capabilities'])
+    settings.QUALITY_DAQ_REPORT_KEYS={'test-incidents':{'secret':'synthetic-incidents-only','audience':'plane-quality','source_instance':'daq-device'}}
+    InstanceConfiguration.objects.update_or_create(key='QUALITY_DAQ_PROJECT_GRANTS',defaults={'value':json.dumps({'projects':[str(project.id)],'revision':1})})
+    assert client.post(BASE,{'action':'open','device_id':device},format='json').status_code==201
+    path='/api/quality-auth/daq-reports/'
+    with patch('plane.quality.remote_tasks.remote_repair.apply_async') as dispatch:
+        for index in range(4):
+            body=json.dumps({'hubProjectId':str(project.id),'eventId':str(uuid4()),'kind':'startup_failure','occurredAt':timezone.now().isoformat(),'title':f'auto burst {index}','description':'isolated queue','device':device})
+            with django_capture_on_commit_callbacks(execute=True):
+                first=APIClient().post(path,body,content_type='application/json',**signature(path,body))
+            assert first.status_code==201,first.content
+        with django_capture_on_commit_callbacks(execute=True):
+            replay=APIClient().post(path,body,content_type='application/json',**signature(path,body))
+        assert replay.status_code==200 and replay.data['issueId']==first.data['issueId']
+    queued=RemoteAgentRun.objects.filter(workstation=station,status='queued')
+    assert queued.count()==4 and dispatch.call_count==4
+    from plane.quality.remote_diagnostics import run_queue
+    assert all(run_queue(run)['reason']=='terminal_open' for run in queued)
