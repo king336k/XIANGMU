@@ -77,8 +77,14 @@ def test_isolated_mixed_http(station_count, settings, isolated_server, monkeypat
             ids.append(str(defect.id))
             job=DiagnosticJob.objects.create(project=project,defect=defect,created_by=owner,request_id=uuid4(),mode='rules',status='completed',result={'answer':'受控原始诊断，不能被其他反馈或现场处理覆盖。'})
             paths.append(f'/api/workspaces/{workspace.slug}/projects/{project.id}/quality/diagnostics/{job.id}/')
+        signed_requests=[]
+        for ordinal in range(2):
+            path='/api/quality-auth/daq-reports/'
+            payload={'hubProjectId':str(project.id),'eventId':str(uuid4()),'kind':'startup_failure','occurredAt':timezone.now().isoformat(),'title':f'混合并发反馈 {index}-{ordinal}','description':'同时传输与诊断期间的签名异常反馈','device':str(station.id)}
+            headers={key[5:].replace('_','-'):value for key,value in signature(path,json.dumps(payload)).items()}
+            signed_requests.append({'path':path,'payload':payload,'headers':headers})
         stations.append({'device_id':str(station.id),'token':raw,'owner_user_id':str(owner.id),'allowed_user_ids':[u['id'] for u in users],
-            'defect_ids':ids,'diagnostic_paths':paths,'diagnostic_create_paths':[f'/api/workspaces/{workspace.slug}/projects/{project.id}/quality/defects/{ids[0]}/diagnostics/'],'initial_config':{'station':str(station.id),'fixed':False},'expected_repair_config':{'station':str(station.id),'fixed':True}})
+            'defect_ids':ids,'signed_feedback_requests':signed_requests,'diagnostic_paths':paths,'diagnostic_create_paths':[f'/api/workspaces/{workspace.slug}/projects/{project.id}/quality/defects/{ids[0]}/diagnostics/'],'initial_config':{'station':str(station.id),'fixed':False},'expected_repair_config':{'station':str(station.id),'fixed':True}})
     monkeypatch.setattr('plane.quality.remote_tasks.provider_config',lambda _: {'configured':True})
     monkeypatch.setenv('REMOTE_TOOL_ORIGIN',server_url)
     monkeypatch.setenv('REMOTE_AGENT_SCRIPT','/code/plane/tests/remote_stress/controlled_runner.py')
@@ -93,6 +99,9 @@ def test_isolated_mixed_http(station_count, settings, isolated_server, monkeypat
     report=json.loads(output.read_text())
     assert report['ok'] and report['station_count']==station_count
     assert all(row['original_diagnostics_unchanged'] for row in report['stations'])
+    assert all(row.get('signed_feedback_count')==2 for row in report['stations'])
+    assert sum(len(row.get('new_rules_diagnostics',[])) for row in report['stations'])==station_count
+    assert report['mixed_overlap']['cross_station_file_http_model_execution_overlap'] is True
     assert RemoteAgentRun.objects.filter(workstation_id__in=[row['device_id'] for row in stations],status='completed').count()==station_count*2
     assert not RemoteAgentRun.objects.filter(workstation_id__in=[row['device_id'] for row in stations],status__in=['queued','running']).exists()
     os.chown(output,1000,1000)
