@@ -6,6 +6,7 @@ import threading
 from types import SimpleNamespace
 import unittest
 import asyncio
+import io
 from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -237,12 +238,14 @@ class GatewayTest(unittest.TestCase):
             root_cause='/invented/Dockerfile:999 的参数错误' if len(turns)==2 else '当前证据不足，未读取源码'
             return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'待查','root_cause':root_cause,
                 'actions':[],'verification':[],'solution':'补充源码后定位','repaired':False})])
+        runtime={}
         with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
             result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
                 'gateway_url':self.gateway.url,'tool_token':'synthetic-token','problem':'diagnose',
-                'context':{'inspect_argv':['inspect'],'repair_allowed':False}}))
+                'context':{'inspect_argv':['inspect'],'repair_allowed':False}},runtime))
         self.assertEqual(len(turns),3)
         self.assertNotIn('/invented/Dockerfile',result['root_cause'])
+        self.assertEqual(runtime['gateway'].last_validation_error,'')
 
     def test_current_file_line_reference_remains_supported(self):
         from pydantic_ai.models.function import FunctionModel
@@ -354,6 +357,87 @@ if __name__ == "__main__":
     unittest.main()
 
 class LocationReceiptTest(unittest.TestCase):
+    def test_exhausted_location_validation_reports_fixed_reason_and_keeps_inspection(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        calls=[]
+        def model(messages,info):
+            calls.append(1)
+            if len(calls)==1:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'待查',
+                'root_cause':'/invented/config.py:999 未核实位置','actions':[],'verification':[],
+                'solution':'补充证据','repaired':False})])
+        payload={'config':{'model':'test','api_key':'synthetic-secret','base_url':'https://invalid.example/v1'},
+            'gateway_url':'http://unused/agent-tool/','tool_token':'synthetic-token','problem':'diagnose',
+            'context':{'inspect_argv':['inspect'],'repair_allowed':False}}
+        output=io.StringIO()
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)), \
+             patch.object(runner.Gateway,'rpc',return_value={'ok':True,'exit_code':0}), \
+             patch.object(runner.sys,'stdin',SimpleNamespace(buffer=io.BytesIO(json.dumps(payload).encode()))), \
+             patch.object(runner.sys,'stdout',output):
+            runner.main()
+        result=json.loads(output.getvalue())
+        self.assertTrue(result['execution_error'])
+        self.assertEqual(result['validation_reason'],'unobserved_location')
+        self.assertEqual(result['actions'],['现场取证完成'])
+        self.assertEqual(result['agent_error_code'],'UnexpectedModelBehavior')
+        self.assertNotIn('/invented/',output.getvalue())
+
+    def test_validation_failure_records_only_safe_class_chain_and_actual_actions(self):
+        from pydantic_ai.exceptions import UnexpectedModelBehavior
+        gateway=runner.Gateway('http://unused','synthetic',inspect_argv=['inspect'])
+        with patch.object(gateway,'rpc',return_value={'ok':True,'exit_code':0}):
+            gateway.run_command(['inspect'])
+        cause=runner.ModelRetry('synthetic-secret https://private.invalid/validator-detail')
+        failure=UnexpectedModelBehavior('provider body synthetic-secret')
+        failure.__cause__=cause
+        result=runner.failed_analysis({'context':{'operation_mode':'diagnose'}},{'gateway':gateway},failure)
+        self.assertEqual(result['agent_error_code'],'UnexpectedModelBehavior')
+        self.assertEqual(result['agent_error_chain'],['UnexpectedModelBehavior','ModelRetry'])
+        self.assertEqual(result['actions'],['现场取证完成'])
+        self.assertFalse(result['verification_passed'])
+        self.assertNotIn('synthetic-secret',json.dumps(result))
+        self.assertNotIn('private.invalid',json.dumps(result))
+
+    def test_outer_deadline_retains_completed_gateway_receipt(self):
+        gateway=runner.Gateway('http://unused','synthetic',verify_argv=['verify'])
+        with patch.object(gateway,'rpc',return_value={'ok':True,'exit_code':0}):
+            gateway.run_command(['verify'],purpose='verify')
+        result=runner.failed_analysis({'context':{'operation_mode':'verify'}},{'gateway':gateway},TimeoutError('untrusted error body'))
+        self.assertEqual(result['agent_error_code'],'TimeoutError')
+        self.assertTrue(result['verification_passed'])
+        self.assertTrue(result['execution_error'])
+        self.assertEqual(result['outcome'],'unresolved')
+
+    def test_main_preserves_receipts_when_actual_model_finalization_fails(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        calls=[]
+        def model(messages,info):
+            calls.append(1)
+            if len(calls)==1:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})])
+            if len(calls)==2:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['verify'],'purpose':'verify'})])
+            raise RuntimeError('synthetic-secret https://private-provider.invalid/untrusted-error-body')
+        payload={'config':{'model':'test','api_key':'synthetic-secret','base_url':'https://invalid.example/v1'},
+            'gateway_url':'http://unused/agent-tool/','tool_token':'synthetic-token','problem':'verify',
+            'context':{'inspect_argv':['inspect'],'verify_argv':['verify'],'operation_mode':'verify','repair_allowed':False}}
+        stdin=SimpleNamespace(buffer=io.BytesIO(json.dumps(payload).encode()))
+        output=io.StringIO()
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)), \
+             patch.object(runner.Gateway,'rpc',return_value={'ok':True,'exit_code':0,'stdout':'actual device receipt'}), \
+             patch.object(runner.sys,'stdin',stdin),patch.object(runner.sys,'stdout',output):
+            runner.main()
+        result=json.loads(output.getvalue())
+        self.assertTrue(result['execution_error'])
+        self.assertEqual(result['agent_error_code'],'RuntimeError')
+        self.assertTrue(result['verification_passed'])
+        self.assertIn('现场取证完成',result['actions'])
+        self.assertIn('exit_code=0',' '.join(result['verification']))
+        self.assertEqual(result['outcome'],'unresolved')
+        self.assertFalse(result['repaired'])
+        self.assertNotIn('synthetic-secret',output.getvalue())
+        self.assertNotIn('private-provider.invalid',output.getvalue())
+
     def test_execution_summary_names_real_specialist_phase_and_deduplicates(self):
         prefix=['/usr/bin/python3','/approved/container_bridge.py']
         commands=[prefix+['rosa','health'],prefix+['rosa','inspect'],prefix+['rai','health'],prefix+['rai','inspect']]

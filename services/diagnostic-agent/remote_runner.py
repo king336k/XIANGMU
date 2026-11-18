@@ -81,6 +81,7 @@ class Gateway:
         self.repair_locations = []
         self.executions = []
         self.observed_locations = set()
+        self.last_validation_error = ''
 
     def observe_locations(self, value, depth=0):
         """Retain only location handles present in actual current reads/receipts."""
@@ -315,7 +316,7 @@ Git/文档返回的URL、revision和sha256是引用证据；历史成功/失败�
 """
 
 
-async def analyze(payload):
+async def analyze(payload, runtime=None):
     config = payload["config"]
     context = payload.get("context", {})
     context = context if isinstance(context, dict) else {}
@@ -328,6 +329,8 @@ async def analyze(payload):
                       repair_allowed=context.get("repair_allowed") is not False,
                       verify_argv=context.get("verify_argv"), inspect_argv=context.get("inspect_argv"), specialist_argv=specialist_argv,
                       repair_argv=context.get("repair_argv"), require_knowledge=context.get('require_knowledge_search') is True)
+    if runtime is not None:
+        runtime['gateway']=gateway
     async with AsyncOpenAI(api_key=config["api_key"], base_url=config["base_url"], max_retries=0,
                            http_client=DefaultAsyncHttpxClient(timeout=70, trust_env=False)) as client:
         model = OpenAIChatModel(config["model"], provider=OpenAIProvider(openai_client=client))
@@ -460,22 +463,26 @@ async def analyze(payload):
 
         @agent.output_validator
         def evidence_gate(report: Report) -> Report:
+            def reject(reason,message):
+                gateway.last_validation_error=reason
+                raise ModelRetry(message)
             required = context.get("required_specialists", [])
             if isinstance(required, list):
                 missing = {name for name in required if isinstance(name, str) and name in {"rosa", "holmes", "rai"}} - consulted
                 if missing:
-                    raise ModelRetry("必须先调用当前设备配置指定的specialist并如实报告其可用性：" + ", ".join(sorted(missing)))
+                    reject('missing_specialist',"必须先调用当前设备配置指定的specialist并如实报告其可用性：" + ", ".join(sorted(missing)))
             if not gateway.inspected:
-                raise ModelRetry("必须先通过工具读取当前目标的真实证据。")
+                reject('current_target_not_inspected',"必须先通过工具读取当前目标的真实证据。")
             if context.get('require_knowledge_search') is True and not research_state['searched']:
-                raise ModelRetry('必须先调用search_project_knowledge检索项目知识和同权限历史案例；不可用时如实报告。')
+                reject('knowledge_not_searched','必须先调用search_project_knowledge检索项目知识和同权限历史案例；不可用时如实报告。')
             if report.repaired and not gateway.repair_verified:
-                raise ModelRetry("没有真实修改及修改后成功检查，repaired 必须为 false。")
+                reject('repair_not_verified',"没有真实修改及修改后成功检查，repaired 必须为 false。")
             if context.get('operation_mode') == 'verify' and not gateway.verification_attempted:
-                raise ModelRetry('本轮是复测模式，必须实际执行固定verify_argv并如实报告结果。')
+                reject('verify_not_executed','本轮是复测模式，必须实际执行固定verify_argv并如实报告结果。')
             claimed=set().union(*(path_lines(text) for text in (report.summary,report.root_cause,report.solution)))
             if claimed-gateway.observed_locations:
-                raise ModelRetry('分析包含本轮读取或执行回执未出现的路径:行号。请实际读取该来源，或删除未证实的位置并明确待定位。')
+                reject('unobserved_location','分析包含本轮读取或执行回执未出现的路径:行号。请实际读取该来源，或删除未证实的位置并明确待定位。')
+            gateway.last_validation_error=''
             return report
 
         async def invoke():
@@ -515,18 +522,48 @@ async def analyze(payload):
         return redact(result, gateway.secrets)
 
 
+def safe_error_classes(error):
+    """Classify only known exception types; never inspect provider error messages."""
+    allowed={'TimeoutError','UsageLimitExceeded','UnexpectedModelBehavior','ModelRetry','ValidationError',
+             'ModelHTTPError','ModelAPIError','ModelConnectionError','ModelRequestTimeout','ModelTimeoutError',
+             'RuntimeError','ValueError','KeyError','TypeError','JSONDecodeError','CancelledError'}
+    classes=[]
+    seen=set()
+    while error is not None and id(error) not in seen and len(classes)<8:
+        seen.add(id(error))
+        name=type(error).__name__
+        classes.append(name if name in allowed else 'AgentExecutionError')
+        error=error.__cause__ or error.__context__
+    return classes or ['AgentExecutionError']
+
+
+def failed_analysis(payload, runtime, error):
+    gateway=runtime.get('gateway')
+    context=payload.get('context',{}) if isinstance(payload,dict) else {}
+    mode=context.get('operation_mode','diagnose') if isinstance(context,dict) else 'diagnose'
+    classes=safe_error_classes(error)
+    actions,verification=gateway.execution_summary() if gateway else ([],['没有可用的本轮现场复测回执。'])
+    result={'summary':'诊断报告未完成；已获得的现场执行与复测回执保留如下。',
+            'root_cause':'诊断或最终报告阶段失败，根因分析未完成；不能认定整轮 Agent 已成功。',
+            'actions':actions,'verification':verification,
+            'solution':'先核对保留的现场回执及当前状态，再决定是否重试报告；不要盲目重复已执行的修改。',
+            'repaired':False,'verification_passed':bool(gateway and gateway.verification_passed),
+            'repair_locations':gateway.repair_locations if gateway else [],
+            'mode':mode if mode in {'repair','diagnose','verify'} else 'diagnose','outcome':'unresolved',
+            'execution_error':True,'agent_error_code':classes[0],'agent_error_chain':classes}
+    result['validation_reason']=gateway.last_validation_error if gateway else ''
+    return redact(result,gateway.secrets) if gateway else result
+
+
 def main():
+    payload=None
+    runtime={}
     try:
         payload = json.loads(sys.stdin.buffer.read(1024 * 1024 + 1))
-        result = asyncio.run(asyncio.wait_for(analyze(payload), timeout=295))
-    except Exception:
+        result = asyncio.run(asyncio.wait_for(analyze(payload,runtime), timeout=295))
+    except Exception as error:
         # Provider error bodies and arbitrary exception messages must never reach stdout/stderr.
-        result = {"summary": "远程诊断未完成", "root_cause": "执行失败或超时，未确认根因。",
-                  "actions": [], "verification": ["核查诊断服务和工具网关可用性后重试。"],
-                  "solution": "未确认修复。", "repaired": False}
-        context = payload.get('context', {}) if isinstance(locals().get('payload'),dict) else {}
-        mode = context.get('operation_mode','diagnose') if isinstance(context,dict) else 'diagnose'
-        result.update(mode=mode if mode in {'repair','diagnose','verify'} else 'diagnose', outcome='unresolved', verification_passed=False)
+        result=failed_analysis(payload,runtime,error)
     print(json.dumps(result, ensure_ascii=False))
 
 
