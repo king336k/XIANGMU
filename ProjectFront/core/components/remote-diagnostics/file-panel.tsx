@@ -217,7 +217,7 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
         <div>
           <h2 className="text-14 font-medium">现场文件</h2>
           <p className="mt-1 text-12 text-secondary">
-            浏览操作电脑或经由它连接的机器人；文件夹打包为 tar.gz 下载到本机。
+            浏览采集电脑或经由它连接的机器人；文件夹打包为 tar.gz 下载到本机。
           </p>
         </div>
         <select
@@ -235,8 +235,12 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
           }}
           className="rounded border border-subtle bg-surface-1 px-3 py-2 text-13"
         >
-          <option value="operator">操作电脑：{device.username}</option>
-          <option value="robot">机器人：{robotUsername || "用户名待确认"}</option>
+          <option value="operator">
+            采集电脑：{device.username}@{device.ip_address || "IP待确认"}
+          </option>
+          <option value="robot">
+            机器人：{robotUsername || "用户名待确认"}@{configuredRobot?.host || "IP待确认"}
+          </option>
         </select>
       </header>
       <input
@@ -336,7 +340,10 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
               />
             </label>
             <p className="text-12 break-all text-secondary">
-              目标：{target === "robot" ? `机器人：${robotUsername || "用户名待确认"}` : `操作电脑：${device.username}`}
+              目标：
+              {target === "robot"
+                ? `机器人：${robotUsername || "用户名待确认"}@${configuredRobot?.host || "IP待确认"}`
+                : `采集电脑：${device.username}@${device.ip_address || "IP待确认"}`}
               <br />
               {listing ? `${listing.root}/${path}/${uploadName.trim()}`.replace(/\/{2,}/g, "/") : "请先选择目标目录"}
             </p>

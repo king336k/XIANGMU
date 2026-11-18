@@ -101,7 +101,7 @@ export function TerminalPanel({ device, onClose }: { device: RemoteDevice; onClo
           <h2 className="text-14 font-medium">
             终端{" "}
             <span className="font-mono ml-2 text-12 text-secondary">
-              {device.username}@{device.hostname}
+              {device.username}@{device.ip_address || "IP待确认"}
             </span>
           </h2>
           <p role="status" className="mt-1 text-12 text-secondary">
@@ -125,7 +125,11 @@ export function TerminalPanel({ device, onClose }: { device: RemoteDevice; onClo
         </p>
       )}
       <div className="h-96 min-w-0 bg-[#101318] p-3">
-        <div ref={containerRef} aria-label={`${device.hostname} 交互终端`} className="h-full min-w-0" />
+        <div
+          ref={containerRef}
+          aria-label={`${device.username}@${device.ip_address || "IP待确认"} 交互终端`}
+          className="h-full min-w-0"
+        />
       </div>
     </section>
   );

@@ -135,7 +135,7 @@ export function FeedbackPickerDialog({
       }}
     >
       <p className="text-12 text-secondary">
-        仅显示 {device.username}@{device.hostname} 的反馈。
+        仅显示 {device.username}@{device.ip_address || "IP待确认"} 的反馈。
       </p>
       <div className="flex flex-wrap gap-2">
         <input

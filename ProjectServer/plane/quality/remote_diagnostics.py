@@ -91,7 +91,7 @@ def fail_runs(station, reason):
 def station_for(user, pk):
     value = get_object_or_404(RemoteWorkstation.objects.select_related("agent__project__workspace"), pk=pk)
     if not permitted(user, value):
-        raise PermissionDenied("没有这台操作电脑的远程操作权限。")
+        raise PermissionDenied("没有这台采集电脑的远程操作权限。")
     return value
 
 
@@ -161,6 +161,7 @@ def card(value, user):
         "id": str(value.id),
         "username": value.username or value.agent.name,
         "hostname": value.hostname,
+        "ip_address": value.capabilities.get("network", {}).get("ip_address", ""),
         "name": value.agent.name,
         "online": online(value),
         "last_seen_at": value.last_seen_at,
@@ -193,11 +194,11 @@ class RemoteDirectory(BaseAPIView):
         action = request.data.get("action")
         if action == "register":
             if not is_administrator(request.user):
-                raise PermissionDenied("仅管理员可登记远程操作电脑。")
+                raise PermissionDenied("仅管理员可登记远程采集电脑。")
             project = get_object_or_404(Project, pk=request.data.get("project_id"), archived_at__isnull=True)
             if not writable_member(project.id, request.user.id, project.workspace.slug):
                 raise PermissionDenied()
-            name = str(request.data.get("name", "操作电脑")).strip()[:120]
+            name = str(request.data.get("name", "采集电脑")).strip()[:120]
             agent = FieldAgent.objects.create(
                 project=project, created_by=request.user, owner=request.user, name=name
             )
@@ -226,7 +227,7 @@ class RemoteDirectory(BaseAPIView):
         if not permitted(request.user, station):
             raise PermissionDenied()
         if not online(station):
-            raise Conflict("操作电脑离线，请等待连接。")
+            raise Conflict("采集电脑离线，请等待连接。")
         if station.remoteagentrun_set.filter(status__in=["queued","running"],expires_at__gt=timezone.now()).exists():
             raise Conflict("该电脑正在执行 Agent 任务，请结束后再打开人工终端。")
         from .remote_models import RemoteUploadedFile
@@ -304,7 +305,7 @@ class RemoteSession(BaseAPIView):
         if session.status == "closed":
             return Response({"error": "终端已关闭。"}, status=409)
         if not online(session.workstation):
-            raise Conflict("操作电脑离线。")
+            raise Conflict("采集电脑离线。")
         if action == "input":
             data = serializers.CharField(
                 max_length=44000, allow_blank=False, trim_whitespace=False
@@ -580,7 +581,7 @@ class RemoteRuns(BaseAPIView):
         if not permitted(request.user, station):
             raise PermissionDenied()
         if not online(station):
-            raise Conflict("操作电脑离线。")
+            raise Conflict("采集电脑离线。")
         defect = get_object_or_404(
             feedback_for(station, request.data.get("defect_id")), pk=request.data.get("defect_id")
         )

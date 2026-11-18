@@ -4,7 +4,7 @@ const evidenceText =
 const qualification = /尚未|未确认|待现场|需现场|无法确认|未验证|未执行|不能确认|仅.*模拟|不代表.*实机/;
 
 /** Select source sentences only; detailed evidence stays available unchanged. */
-export function compactReportText(value: string, limit = 120): string {
+export function compactReportText(value: string, limit = 240): string {
   const sentences = value
     .replace(/```[\s\S]*?```/g, "")
     .split(/(?<=[。！？；])\s*|\n+/)
@@ -14,7 +14,7 @@ export function compactReportText(value: string, limit = 120): string {
         .replace(/\*\*|`/g, "")
         .trim()
     )
-    .filter((line) => line && !evidenceText.test(line));
+    .filter((line) => line && !/^[。；，、！？\s]+$/.test(line) && !evidenceText.test(line));
   const picked: string[] = [];
   for (const sentence of sentences) {
     if (picked.length >= 2) break;

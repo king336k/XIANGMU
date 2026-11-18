@@ -72,7 +72,9 @@ export function RemoteDiagnostics() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <Monitor className="size-4 shrink-0 text-secondary" aria-hidden="true" />
-                    <h2 className="truncate text-14 font-medium">{device.username || "未知用户"}</h2>
+                    <h2 className="truncate text-14 font-medium">
+                      {device.username || "未知用户"}@{device.ip_address || "IP待确认"}
+                    </h2>
                   </div>
                   <span className={`shrink-0 text-12 ${device.online ? "text-success-primary" : "text-secondary"}`}>
                     {device.online ? "在线" : "离线"}
@@ -94,7 +96,7 @@ export function RemoteDiagnostics() {
             <div className="space-y-4 border-t border-subtle pt-5" key={selected.id}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="font-mono min-w-0 truncate text-13 text-secondary">
-                  {selected.username}@{selected.hostname}
+                  {selected.username}@{selected.ip_address || "IP待确认"}
                   {!selected.online ? " · 离线，请等待重新上线" : ""}
                 </p>
                 {!terminalDevice && (

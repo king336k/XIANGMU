@@ -256,7 +256,7 @@ def run_command(policy, argv, cwd, timeout, max_output=MAX_OUTPUT, stopping=None
 
 
 class Terminal:
-    def __init__(self, root, cols, rows):
+    def __init__(self, root, cols, rows, host_ip=None):
         if type(cols) is not int or type(rows) is not int or not 1 <= cols <= 500 or not 1 <= rows <= 200:
             raise ValueError('invalid terminal dimensions')
         self.master, slave = os.openpty()
@@ -267,10 +267,14 @@ class Terminal:
                   'fcntl.ioctl(0,termios.TIOCSCTTY,0); '
                   'os.execv("/bin/bash",["/bin/bash","--noprofile","--norc","-i"])')
         terminal_env = safe_environment()
+        prompt_host = r'\h'
+        if host_ip:
+            import ipaddress
+            prompt_host = str(ipaddress.ip_address(host_ip))
         terminal_env.update({
             'TERM': 'xterm-256color',
             'COLORTERM': 'truecolor',
-            'PS1': r'\[\033[1;32m\]\u@\h\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$ ',
+            'PS1': r'\[\033[1;32m\]\u@' + prompt_host + r'\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$ ',
         })
         self.process = subprocess.Popen(['/usr/bin/python3', '-c', helper], stdin=slave,
                                         stdout=slave, stderr=slave, cwd=root, env=terminal_env)
@@ -295,8 +299,9 @@ class Terminal:
 
 
 class Engine:
-    def __init__(self, policy):
+    def __init__(self, policy, host_ip=None):
         self.policy, self.terminals = policy, {}
+        self.host_ip = host_ip
         self.results, self.outputs, self.seen, self.tasks = [], [], {}, {}
         self.cache, self.closed_sessions = {}, set()
         self.stopping = threading.Event()
@@ -388,7 +393,7 @@ class Engine:
                     if (sid in self.closed_sessions or sid in self.terminals or len(self.terminals) >= 2
                             or len(self.closed_sessions) >= 4096):
                         raise ValueError('terminal already open or session limit reached')
-                    self.terminals[sid] = Terminal(self.policy.root, command['cols'], command['rows'])
+                    self.terminals[sid] = Terminal(self.policy.root, command['cols'], command['rows'], self.host_ip)
                 else:
                     terminal = self.terminals[sid]
                     terminal.active = time.monotonic()
@@ -496,16 +501,41 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ValueError('exchange redirects are forbidden')
 
 
-def identity(policy=None):
+def routed_host_ip(server_url):
+    """Ask the kernel for the configured server route's source; send no payload."""
+    if not server_url:
+        return None
+    import ipaddress
+    try:
+        server = urllib.parse.urlsplit(server_url)
+        port = server.port or (443 if server.scheme == 'https' else 80)
+        addresses = socket.getaddrinfo(server.hostname, port, type=socket.SOCK_DGRAM)
+        for family, kind, protocol, _canonical, destination in addresses:
+            try:
+                with socket.socket(family, kind, protocol) as route:
+                    route.connect(destination)
+                    address = ipaddress.ip_address(route.getsockname()[0])
+                    if not address.is_unspecified and not address.is_multicast:
+                        return str(address)
+            except OSError:
+                continue
+    except (OSError, ValueError, TypeError):
+        pass
+    return None
+
+
+def identity(policy=None, server_url=None):
     try:
         boot_id = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
     except OSError:
         boot_id = str(uuid.uuid4())
-    result = {'username': getpass.getuser(), 'hostname': socket.gethostname(), 'boot_id': boot_id}
+    result = {'username': getpass.getuser(), 'hostname': socket.gethostname(), 'boot_id': boot_id,
+              'host_ip': routed_host_ip(server_url)}
     if policy is not None:
         # Observed local capabilities only. Server-owned enrollment context remains
         # authoritative; these device claims cannot grant tools or root access.
         result['capabilities'] = {
+            'network': {'ip_address': result['host_ip']},
             'terminal': {'ready': Path('/bin/bash').is_file() and Path('/usr/bin/python3').is_file(),
                          'backend': 'host-pty', 'max_sessions': 2, 'max_input_bytes': 4096},
             'file_browser': {'ready': policy.file_browser_enabled, 'read_only': True, 'max_bytes': 256 * 1024 * 1024},
@@ -577,7 +607,8 @@ def main():
     if not token.startswith('rw_') or len(token) < 12 or any(c.isspace() for c in token):
         parser.error('invalid enrollment token')
     policy = Policy(json.loads(Path(args.policy).read_text()))
-    engine, operator = Engine(policy), identity(policy)
+    operator = identity(policy, args.server)
+    engine = Engine(policy, operator['host_ip'])
     opener = urllib.request.build_opener(NoRedirect, urllib.request.ProxyHandler({}))
     url = args.server.rstrip('/') + '/api/quality-auth/remote-diagnostics/exchange/'
     def stop(_signum, _frame):

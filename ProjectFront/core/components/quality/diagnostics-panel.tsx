@@ -267,7 +267,14 @@ export function DiagnosticsPanel({
         {job.result.answer && (
           <div className="space-y-2 text-13">
             <h4 className="font-medium">结论</h4>
-            <p className="leading-6 whitespace-pre-wrap">{compactReportText(job.result.answer)}</p>
+            <ul className="list-disc space-y-1 pl-5 leading-6" aria-label="诊断结论要点">
+              {compactReportText(job.result.answer)
+                .split(/(?<=[。；！？])\s*/)
+                .filter(Boolean)
+                .map((point) => (
+                  <li key={point}>{point}</li>
+                ))}
+            </ul>
             {job.result.evidence_assessment === "partial" && (
               <p className="text-12 text-warning-primary">材料仅部分支持，现场原因仍需核实。</p>
             )}

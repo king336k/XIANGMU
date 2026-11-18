@@ -73,6 +73,23 @@ test("材料引用同时显示原始上传包名和包内日志路径", () => {
   assert.ok(html.includes("引用：采集原始.log。"), html);
   assert.ok(!html.includes("FILE-file"), html);
 });
+
+test("原始诊断结论以完整句分点呈现并保留未确认限定", () => {
+  const html = render([
+    {
+      id: "bullets",
+      status: "completed",
+      mode: "auto",
+      created_at: "now",
+      result: { answer: "采集请求返回503。硬件原因尚未确认。", model_status: "completed" },
+    },
+  ]);
+  assert.match(
+    html,
+    /<ul[^>]*aria-label="诊断结论要点"[^>]*><li[^>]*>采集请求返回503。<\/li><li[^>]*>硬件原因尚未确认。<\/li><\/ul>/
+  );
+  assert.match(html, /详细证据与处理过程/);
+});
 test("最新报告默认折叠，超时保留规则与读取范围，不把诊断完成写成故障解决", () => {
   const html = render([
     {

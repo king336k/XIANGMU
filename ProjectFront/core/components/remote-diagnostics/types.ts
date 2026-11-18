@@ -3,6 +3,7 @@ export type RemoteDevice = {
   id: string;
   username: string;
   hostname: string;
+  ip_address?: string;
   name: string;
   online: boolean;
   last_seen_at: string | null;

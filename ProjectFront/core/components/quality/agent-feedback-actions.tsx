@@ -68,16 +68,16 @@ export function AgentFeedbackActions({
       <div className="flex flex-wrap items-center gap-2">
         {choices.length > 1 && (
           <select
-            aria-label="现场操作电脑"
+            aria-label="现场采集电脑"
             value={deviceId}
             onChange={(e) => setDeviceId(e.target.value)}
             disabled={busy}
             className="rounded border border-subtle bg-surface-1 px-3 py-2 text-12"
           >
-            <option value="">选择操作电脑</option>
+            <option value="">选择采集电脑</option>
             {choices.map((device) => (
               <option key={device.id} value={device.id}>
-                {device.username}@{device.hostname}
+                {device.username}@{device.ip_address || "IP待确认"}
               </option>
             ))}
           </select>
@@ -117,11 +117,11 @@ export function AgentFeedbackActions({
       </div>
       {selected && (
         <p className="text-11 text-secondary">
-          现场：{selected.username}@{selected.hostname}
+          现场：{selected.username}@{selected.ip_address || "IP待确认"}
           {selected.online ? "" : " · 当前离线"}；自动修复仅在已授权范围内执行。
         </p>
       )}
-      {targets && !choices.length && <p className="text-12 text-secondary">此反馈尚未关联已接入的操作电脑。</p>}
+      {targets && !choices.length && <p className="text-12 text-secondary">此反馈尚未关联已接入的采集电脑。</p>}
       {(error || targetError || runError) && (
         <p role="alert" className="text-12 text-danger-primary">
           {error || errorMessage(targetError || runError)}

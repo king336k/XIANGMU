@@ -250,6 +250,7 @@ const device = {
   name: "现场电脑",
   username: "operator",
   hostname: "robot-01",
+  ip_address: "10.0.0.195",
   online: true,
   can_connect: true,
 };
@@ -267,7 +268,14 @@ test("device card displays identity and selecting it does not open a shell impli
   assert.match(texts, /robot-01/);
   assert.match(texts, /在线/);
   const title = nodes(card).find((node) => node.type === "h2");
-  assert.equal(title.props.children, "operator");
+  assert.equal(title.props.children.join(""), "operator@10.0.0.195");
+});
+
+test("missing collector IP stays unknown instead of substituting hostname or loopback", () => {
+  const { tree } = renderRoot([{ ...device, ip_address: undefined }]);
+  const title = nodes(tree).find((node) => node.type === "h2");
+  assert.equal(title.props.children.join(""), "operator@IP待确认");
+  assert.doesNotMatch(JSON.stringify(title), /127\.0\.0\.1|robot-01/);
 });
 
 test("remote diagnosis uses the workspace page and legacy settings page only redirects", () => {
@@ -387,6 +395,6 @@ test("terminal bundles official CSS so measurement helpers and hidden input stay
 
 test("terminal fit host excludes outer padding and fits again after fonts load", () => {
   const source = readFileSync(new URL("./terminal-panel.tsx", import.meta.url), "utf8");
-  assert.match(source, /ref=\{containerRef\}[^\n]*className="h-full min-w-0"/);
+  assert.match(source, /ref=\{containerRef\}[^>]*className="h-full min-w-0"/);
   assert.match(source, /document.fonts.ready/);
 });

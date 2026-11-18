@@ -9,11 +9,12 @@ const device = {
   id: "computer",
   username: "caiji1",
   hostname: "operator195",
+  ip_address: "10.0.0.195",
   workspace_slug: "workspace",
   project_id: "project",
   online: true,
   can_connect: true,
-  capabilities: { robot: { username: "robot-user" } },
+  capabilities: { robot: { username: "robot-user", host: "10.0.0.177" } },
 };
 const api = {};
 new Function(
@@ -168,6 +169,16 @@ test("upload sends edited filename and exact selected defect, then checks remote
     ["upload_start", "upload_chunk", "upload_finish", "list"]
   );
   assert.match(JSON.stringify(tree), /机器人：/);
+});
+
+test("文件位置用采集电脑称谓并保留实际用户名", () => {
+  const { exports } = load("./file-panel.tsx", []);
+  const tree = exports.FilePanel({ device });
+  const caption = nodes(tree).find((node) => node.type === "option" && node.props.value === "operator");
+  assert.equal(caption.props.children.join(""), "采集电脑：caiji1@10.0.0.195");
+  const robot = nodes(tree).find((node) => node.type === "option" && node.props.value === "robot");
+  assert.equal(robot.props.children.join(""), "机器人：robot-user@10.0.0.177");
+  assert.doesNotMatch(JSON.stringify(tree), /操作电脑/);
 });
 
 test("upload rejects a target filename containing a path before any network mutation", async () => {

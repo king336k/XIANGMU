@@ -19,6 +19,22 @@ import collector_sim
 FLAGS = ('telemetry_enabled', 'accept_commands', 'hardware_required')
 
 
+def ssh_server_ip():
+    parts = os.environ.get('SSH_CONNECTION', '').split()
+    if len(parts) != 4:
+        return None
+    try:
+        ipaddress.ip_address(parts[0])
+        address = ipaddress.ip_address(parts[2])
+        if any(not 0 < int(port) <= 65535 for port in (parts[1], parts[3])):
+            return None
+        if not address.is_unspecified and not address.is_multicast:
+            return str(address)
+    except ValueError:
+        pass
+    return None
+
+
 def config_locations(raw, path, hostname):
     """Locate parsed top-level keys in the exact bytes read, including escaped keys."""
     text = raw.decode('utf-8')
@@ -62,11 +78,13 @@ def robot_config(root):
 def remote_operation(root, operation, payload=None):
     policy, raw, config = robot_config(root)
     hostname = __import__('socket').gethostname()
+    username = __import__('getpass').getuser()
+    host_ip = ssh_server_ip()
     path = policy.root / 'robot-config.json'
     before_locations = config_locations(raw, path, hostname)
     evidence = {'simulation': True, 'config': config, 'config_sha256': hashlib.sha256(raw).hexdigest(),
                 'requires_onsite': config['hardware_required'],
-                'robot_hostname': hostname, 'config_locations': before_locations,
+                'robot_hostname': hostname, 'robot_username': username, 'robot_ip': host_ip, 'config_locations': before_locations,
                 'robot_config_path': str(path)}
     if operation == 'inspect':
         return evidence
@@ -84,7 +102,7 @@ def remote_operation(root, operation, payload=None):
     after_locations = config_locations(after_raw, path, hostname)
     backup = policy.root / result['backup']
     changes = [
-        {'target_hostname': hostname, 'path': str(path), 'key': key,
+        {'target_hostname': hostname, 'target_username': username, 'target_ip': host_ip, 'target_kind': 'robot', 'path': str(path), 'key': key,
          'line': after_locations[key]['line'], 'before_line': before_locations[key]['line'],
          'after_line': after_locations[key]['line'], 'before': before[key], 'after': config[key],
          'backup': str(backup), 'before_sha256': evidence['config_sha256'],

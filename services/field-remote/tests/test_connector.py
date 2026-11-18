@@ -15,10 +15,10 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from connector import Engine, Policy, run_command, exchange, NoRedirect, identity, validate_server
+from connector import Engine, Policy, run_command, exchange, NoRedirect, identity, validate_server, routed_host_ip
 from collector_sim import inspect, verify
 from robot_sim import RobotServer
-from robot_peer import remote_operation, ssh_operation
+from robot_peer import remote_operation, ssh_operation, ssh_server_ip
 import threading
 
 
@@ -135,6 +135,7 @@ class ConnectorTests(unittest.TestCase):
             os.killpg(pid, 0)
 
     def test_terminal_prompt_uses_real_identity_and_ansi_colors(self):
+        self.engine.host_ip='10.10.10.195'
         self.engine.accept(self.command('terminal_open', session_id='identity', cols=120, rows=28))
         for _ in range(100):
             self.engine.pump()
@@ -142,7 +143,7 @@ class ConnectorTests(unittest.TestCase):
             if b'$ ' in raw or b'# ' in raw:
                 break
             time.sleep(0.02)
-        expected = f"{pwd.getpwuid(os.getuid()).pw_name}@{socket.gethostname().split('.')[0]}".encode()
+        expected = f"{pwd.getpwuid(os.getuid()).pw_name}@10.10.10.195".encode()
         self.assertIn(expected, raw)
         self.assertIn(b'\x1b[', raw)
         self.assertNotIn(b'bash-5.', raw)
@@ -153,8 +154,35 @@ class ConnectorTests(unittest.TestCase):
             if any(x['kind'] == 'exit' for x in self.engine.outputs):
                 break
             time.sleep(0.02)
+
         raw = b''.join(base64.b64decode(x['data']) for x in self.engine.outputs if x['kind'] == 'data')
         self.assertIn(b'TERM_CHECK=xterm-256color COLOR_CHECK=truecolor', raw)
+
+    def test_routed_ip_uses_only_configured_destination_source_and_no_hostname_guess(self):
+        route=Mock();route.__enter__=Mock(return_value=route);route.__exit__=Mock(return_value=False)
+        route.getsockname.return_value=('10.10.10.195',45000)
+        address=(socket.AF_INET,socket.SOCK_DGRAM,17,'',('180.153.172.19',18886))
+        with patch('connector.socket.getaddrinfo',return_value=[address]) as resolve,patch('connector.socket.socket',return_value=route):
+            self.assertEqual(routed_host_ip('http://180.153.172.19:18886'),'10.10.10.195')
+            resolve.assert_called_once_with('180.153.172.19',18886,type=socket.SOCK_DGRAM)
+            route.connect.assert_called_once_with(('180.153.172.19',18886))
+            route.send.assert_not_called();route.sendto.assert_not_called()
+            self.assertEqual(identity(self.policy,'http://180.153.172.19:18886')['capabilities']['network']['ip_address'],'10.10.10.195')
+        with patch('connector.socket.getaddrinfo',side_effect=OSError('unavailable')):
+            self.assertIsNone(routed_host_ip('https://configured.invalid'))
+            self.assertIsNone(identity(server_url='https://configured.invalid')['host_ip'])
+
+    def test_robot_ip_is_only_ssh_server_address_or_none(self):
+        with patch.dict(os.environ,{'SSH_CONNECTION':'10.10.10.195 44000 10.10.10.177 22'}):
+            self.assertEqual(ssh_server_ip(),'10.10.10.177')
+            config=self.root/'robot-config.json'
+            config.write_text(json.dumps({'telemetry_enabled':False,'accept_commands':True,'hardware_required':False}))
+            before=remote_operation(self.root,'inspect')
+            self.assertEqual(before['robot_ip'],'10.10.10.177')
+            after=remote_operation(self.root,'repair',{'expected_sha256':before['config_sha256']})
+            self.assertEqual(after['changes'][0]['target_ip'],'10.10.10.177')
+        for connection in ('','bad 22 host-name 22','10.10.10.195 44000 0.0.0.0 22'):
+            with patch.dict(os.environ,{'SSH_CONNECTION':connection}):self.assertIsNone(ssh_server_ip())
 
     def test_patch_duplicate_cached_and_restart_not_reexecuted(self):
         target = self.root / 'config.json'
