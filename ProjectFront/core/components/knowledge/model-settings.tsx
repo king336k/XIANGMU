@@ -6,6 +6,8 @@ import { qualityApi, errorMessage } from "../quality/api";
 import { Field, fieldClass } from "../quality/shared";
 
 type Configuration = {
+  active_profile_id?: string;
+  profiles?: { id: string; model: string; base_url: string; key_present: boolean }[];
   configured: boolean;
   key_present: boolean;
   model: string;
@@ -30,7 +32,8 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [advancedOpen, setAdvancedOpen] = useState(false),
-    [embeddingMode, setEmbeddingMode] = useState("");
+    [embeddingMode, setEmbeddingMode] = useState(""),
+    [adding, setAdding] = useState(false);
   const searchName =
     data?.semantic?.source === "external"
       ? "外部知识检索"
@@ -49,9 +52,67 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
           {errorMessage(error)}
         </p>
       )}
+      {data?.can_configure && (
+        <div className="space-y-3">
+          <h3 className="text-14 font-medium">已保存的模型</h3>
+          <p className="text-12 text-secondary">当前使用的模型用于问答和新建诊断任务；每份配置独立保存密钥。</p>
+          <ul className="space-y-2" aria-label="已保存的模型">
+            {data.profiles?.map((profile) => (
+              <li
+                key={profile.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-subtle p-3"
+              >
+                <div className="min-w-0 text-13">
+                  <strong className="break-all">{profile.model}</strong>
+                  <p className="text-12 break-all text-secondary">{profile.base_url}</p>
+                  <p className="text-12 text-secondary">密钥：{profile.key_present ? "已设置" : "未设置"}</p>
+                </div>
+                {profile.id === data.active_profile_id ? (
+                  <span className="text-12" role="status">
+                    当前使用
+                  </span>
+                ) : (
+                  <Button
+                    type="button"
+                    disabled={busy}
+                    aria-label={`使用 ${profile.model} ${profile.base_url}`}
+                    onClick={async () => {
+                      setBusy(true);
+                      setMessage("");
+                      try {
+                        await qualityApi.write(url, { profile_action: "activate", profile_id: profile.id }, "patch");
+                        await mutate();
+                        setAdding(false);
+                        setEmbeddingMode("");
+                        setMessage("已切换模型。");
+                      } catch (e) {
+                        setMessage(errorMessage(e));
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    使用此模型
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+          <Button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setAdding(!adding);
+              setMessage("");
+            }}
+          >
+            {adding ? "取消添加" : "添加模型"}
+          </Button>
+        </div>
+      )}
       {data && (
         <form
-          key={`${data.model}:${data.base_url}:${data.key_present}:${data.semantic_enabled}:${data.embedding_model}:${data.embedding_base_url}`}
+          key={`${adding}:${data.active_profile_id}:${data.model}:${data.base_url}:${data.key_present}:${data.semantic_enabled}:${data.embedding_model}:${data.embedding_base_url}`}
           className="space-y-4"
           onSubmit={async (event) => {
             event.preventDefault();
@@ -71,6 +132,8 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
               await qualityApi.write(
                 url,
                 {
+                  ...(adding ? { profile_action: "create" } : {}),
+                  ...(!adding && data.active_profile_id ? { profile_id: data.active_profile_id } : {}),
                   model: form.get("model"),
                   base_url: form.get("base_url"),
                   api_key: form.get("api_key") || "",
@@ -91,8 +154,9 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
                 "patch"
               );
               await mutate();
+              setAdding(false);
               setEmbeddingMode("");
-              setMessage("已保存。");
+              setMessage(adding ? "已添加并使用新模型。" : "已保存。");
             } catch (e) {
               setMessage(errorMessage(e));
             } finally {
@@ -105,7 +169,7 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
               required
               name="model"
               maxLength={120}
-              defaultValue={data.model}
+              defaultValue={adding ? "" : data.model}
               disabled={!data.can_configure}
               className={fieldClass}
             />
@@ -116,15 +180,16 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
               name="base_url"
               type="url"
               maxLength={500}
-              defaultValue={data.base_url}
+              defaultValue={adding ? "" : data.base_url}
               disabled={!data.can_configure}
               className={fieldClass}
             />
           </Field>
           {data.can_configure ? (
             <>
-              <Field label="API密钥（留空保留）">
+              <Field label={adding ? "API密钥 *" : "API密钥（留空保留）"}>
                 <input
+                  required={adding}
                   type="password"
                   name="api_key"
                   autoComplete="new-password"
@@ -132,7 +197,7 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
                   className={fieldClass}
                 />
               </Field>
-              {data.key_present && (
+              {!adding && data.key_present && (
                 <label className="flex items-center gap-2 text-12">
                   <input type="checkbox" name="clear_key" />
                   清除已保存的密钥，停用模型问答
@@ -203,7 +268,7 @@ export function ModelSettings({ base, endpoint }: { base: string; endpoint?: str
                 )}
               </details>
               <Button type="submit" disabled={busy}>
-                {busy ? "正在保存…" : "保存模型配置"}
+                {busy ? "正在保存…" : adding ? "添加并使用模型" : "保存模型配置"}
               </Button>
             </>
           ) : (

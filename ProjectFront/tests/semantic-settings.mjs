@@ -60,3 +60,24 @@ test("普通用户看不到可写语义配置", () => {
   assert.ok(!html.includes('name="api_key"'));
   assert.match(html, /修改模型配置请联系管理员/);
 });
+
+test("管理员能保留多份模型并切换，密钥仅显示是否设置", () => {
+  const html = render({
+    configured: true,
+    key_present: true,
+    can_configure: true,
+    model: "original",
+    base_url: "https://api.openai.com/v1",
+    active_profile_id: "old",
+    profiles: [
+      { id: "old", model: "original", base_url: "https://api.openai.com/v1", key_present: true },
+      { id: "new", model: "cx/gpt-6.1-sol", base_url: "http://10.10.10.193:3000/v1", key_present: true },
+    ],
+  });
+  assert.match(html, /当前使用的模型/);
+  assert.match(html, /添加模型/);
+  assert.match(html, /cx\/gpt-6.1-sol/);
+  assert.match(html, /10.10.10.193:3000/);
+  assert.match(html, /当前使用<\/span>/);
+  assert.match(html, /使用此模型/);
+});

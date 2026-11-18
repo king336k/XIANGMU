@@ -77,6 +77,11 @@ def provider_config(workspace_id=None):
     base_url = model_option(
         "KNOWLEDGE_BASE_URL", os.environ.get("KNOWLEDGE_LLM_BASE_URL", "https://api.openai.com/v1"), workspace_id
     )
+    profiles = model_option("KNOWLEDGE_MODEL_PROFILES", "", workspace_id)
+    if profiles:
+        saved = json.loads(profiles)
+        active = next(row for row in saved["items"] if row["id"] == saved["active"])
+        key, model, base_url = active["api_key"], active["model"], active["base_url"]
     valid = valid_provider_url(base_url)
     return {
         "configured": bool(key and valid and provider == "openai"),

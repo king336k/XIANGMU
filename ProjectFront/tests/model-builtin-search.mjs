@@ -227,3 +227,29 @@ test("清除聊天密钥不改向量密钥，非管理员无高级模式入口",
   );
   assert.match(words(tree), /内置知识检索/);
 });
+
+test("新增模型使用独立密钥，切换只提交配置ID", async () => {
+  const data = {
+    ...configured,
+    active_profile_id: "original",
+    profiles: [
+      { id: "original", model: "chat-model", base_url: configured.base_url, key_present: true },
+      { id: "local", model: "local-model", base_url: "http://10.10.10.193:3000/v1", key_present: true },
+    ],
+  };
+  const h = harness(data);
+  const add = nodes(h.render()).find((node) => words(node) === "添加模型");
+  assert.ok(add);
+  add.props.onClick();
+  let tree = h.render();
+  assert.equal(nodes(tree).find((node) => node.type === "input" && node.props.name === "api_key").props.required, true);
+  assert.equal(nodes(tree).find((node) => node.type === "input" && node.props.name === "model").props.defaultValue, "");
+  await submit(tree, { model: "new-model", api_key: "synthetic-new" });
+  assert.equal(h.writes[0][1].profile_action, "create");
+  assert.equal(h.writes[0][1].api_key, "synthetic-new");
+  assert.equal("profile_id" in h.writes[0][1], false);
+  tree = h.render();
+  const use = nodes(tree).find((node) => node.props?.["aria-label"] === "使用 local-model http://10.10.10.193:3000/v1");
+  await use.props.onClick();
+  assert.deepEqual(h.writes[1][1], { profile_action: "activate", profile_id: "local" });
+});
