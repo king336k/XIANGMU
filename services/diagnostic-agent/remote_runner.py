@@ -109,8 +109,20 @@ class Gateway:
     def execution_summary(self):
         """Public executed/verified statements are deterministic receipt summaries."""
         labels={'inspect':'现场取证','specialist':'只读专家检查','repair':'授权修复','read_file':'读取现场文件','patch_file':'写入授权文件'}
-        actions=[labels[row['phase']]+('完成' if row['success'] else '失败或结果未确认')
-                 for row in self.executions if row['phase'] in labels][-15:]
+        actions=[]
+        names={'rosa':'ROSA','rai':'RAI','holmes':'Holmes'}
+        for row in self.executions:
+            if row['phase'] not in labels:
+                continue
+            label=labels[row['phase']]
+            if row.get('specialist') in names:
+                label=names[row['specialist']]+(' 健康探测' if row.get('operation')=='health' else ' 只读检查')
+            action=label+('完成' if row['success'] else '失败或结果未确认')
+            if row.get('path'):
+                action+='：'+row['path']
+            if action not in actions:
+                actions.append(action)
+        actions=actions[-15:]
         checks=[row for row in self.executions if row['phase']=='verify']
         if not checks:
             verification=['未执行固定复测，尚无功能恢复验证结果。']
@@ -189,7 +201,16 @@ class Gateway:
             self.mutation += 1
         result = self.rpc({"operation": "run", "argv": argv, "cwd": cwd, "timeout": min(30, max(1, timeout)), "purpose": "inspect" if phase == "specialist" else phase})
         success=result.get("exit_code") == 0 and result.get("ok") is not False and not result.get("error") and not result.get("timed_out")
-        self.executions.append({'phase':phase,'success':success})
+        execution={'phase':phase,'success':success}
+        if phase=='specialist' and len(argv)>=2 and argv[-2] in {'rosa','rai'} and argv[-1] in {'health','inspect'}:
+            execution.update(specialist=argv[-2],operation=argv[-1])
+            try:
+                specialist_result=json.loads(result.get('stdout','{}'))
+                if isinstance(specialist_result,dict) and specialist_result.get('ready') is False:
+                    execution['success']=False
+            except (ValueError,TypeError):
+                pass
+        self.executions.append(execution)
         self.observe_locations(result)
         if success:
             if phase == "inspect":
@@ -218,7 +239,7 @@ class Gateway:
         """Read current remote file and retain its server-provided SHA256 for patching."""
         result = self.rpc({"operation": "read_file", "path": path})
         successful=not result.get("error") and result.get("ok") is not False and isinstance(result.get("content"),str)
-        self.executions.append({'phase':'read_file','success':successful})
+        self.executions.append({'phase':'read_file','success':successful,**({'path':path} if successful else {})})
         if successful:
             self.observed_locations.update((path,line) for line in range(1,len(result['content'].splitlines())+1))
             self.observe_locations(result)
@@ -251,7 +272,8 @@ class Gateway:
         acknowledged = result.get("ok") is True or result.get("exit_code") == 0 or bool(re.fullmatch(r"[0-9a-f]{64}", str(result.get("sha256", ""))))
         if acknowledged and not result.get("error") and result.get("ok") is not False and result.get("exit_code", 0) == 0 and not result.get("timed_out"):
             self.successful_mutation = self.mutation
-        self.executions.append({'phase':'patch_file','success':self.successful_mutation==self.mutation})
+        patched=self.successful_mutation==self.mutation
+        self.executions.append({'phase':'patch_file','success':patched,**({'path':path} if patched else {})})
         self.observe_locations(result)
         return result
 
@@ -413,6 +435,8 @@ async def analyze(payload):
                         raise ValueError()
                     if report.get("successful_inspections", 0) > 0:
                         gateway.inspected = True
+                    gateway.executions.append({'phase':'specialist','specialist':'holmes','operation':'inspect',
+                        'success':report.get('ready') is True and report.get('investigation_executed') is True and report.get('successful_inspections',0)>0})
                     return redact(report, gateway.secrets)
                 except Exception:
                     return {"integration": name, "ready": False, "reason": "central_holmes_investigation_failed"}

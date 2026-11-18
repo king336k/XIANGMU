@@ -261,7 +261,7 @@ class GatewayTest(unittest.TestCase):
                 'context':{'repair_allowed':False}}))
         self.assertEqual(len(turns),2)
         self.assertIn('/actual/config.py:1',result['root_cause'])
-        self.assertEqual(result['actions'],['读取现场文件完成'])
+        self.assertEqual(result['actions'],['读取现场文件完成：/actual/config.py'])
 
     def test_path_line_handles_do_not_treat_network_ports_as_source_lines(self):
         self.assertEqual(runner.path_lines('10.10.10.177:8093 与 https://example.com:443 是端点'),set())
@@ -306,7 +306,7 @@ class GatewayTest(unittest.TestCase):
                 return ModelResponse(parts=[ToolCallPart('consult_specialist', {'name': 'holmes'})])
             return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'summary': '只读调查',
                 'root_cause': '待进一步定位', 'actions': [], 'verification': ['已读取'], 'solution': '待处理', 'repaired': False})])
-        response = SimpleNamespace(returncode=0, stdout=json.dumps({'integration': 'holmes', 'ready': True,
+        response = SimpleNamespace(returncode=0, stdout=json.dumps({'integration': 'holmes', 'ready': True, 'investigation_executed':True,
             'successful_inspections': 1, 'inspection_calls': 1, 'summary': '当前配置异常'}))
         with patch.object(runner, 'OpenAIChatModel', return_value=FunctionModel(model)), \
              patch.object(runner.os.path, 'isfile', return_value=True), \
@@ -314,6 +314,7 @@ class GatewayTest(unittest.TestCase):
             result = asyncio.run(runner.analyze({'config': {'api_key': 'synthetic-key', 'base_url': 'https://invalid.example/v1', 'model': 'test'},
                 'gateway_url': self.gateway.url, 'tool_token': 'synthetic-token', 'problem': 'synthetic', 'context': {'inspect_argv': ['fixed-inspect'], 'required_specialists': ['holmes']}}))
         self.assertFalse(result['repaired'])
+        self.assertIn('Holmes 只读检查完成',result['actions'])
         argv = process.call_args.args[0]
         self.assertNotIn('synthetic-key', json.dumps(argv))
         self.assertNotIn('synthetic-token', json.dumps(argv))
@@ -353,6 +354,31 @@ if __name__ == "__main__":
     unittest.main()
 
 class LocationReceiptTest(unittest.TestCase):
+    def test_execution_summary_names_real_specialist_phase_and_deduplicates(self):
+        prefix=['/usr/bin/python3','/approved/container_bridge.py']
+        commands=[prefix+['rosa','health'],prefix+['rosa','inspect'],prefix+['rai','health'],prefix+['rai','inspect']]
+        gateway=runner.Gateway('http://unused','synthetic',inspect_argv=['inspect'],specialist_argv=commands)
+        with patch.object(gateway,'rpc',return_value={'ok':True,'exit_code':0,'stdout':'{}'}):
+            gateway.run_command(['inspect'])
+            for argv in commands:
+                gateway.run_command(argv)
+            gateway.run_command(['inspect'])
+            gateway.run_command(commands[1])
+        actions,_=gateway.execution_summary()
+        self.assertEqual(actions,['现场取证完成','ROSA 健康探测完成','ROSA 只读检查完成','RAI 健康探测完成','RAI 只读检查完成'])
+
+    def test_execution_summary_keeps_unavailable_specialist_and_file_receipts_honest(self):
+        argv=['/usr/bin/python3','/approved/bridge.py','rosa','health']
+        gateway=runner.Gateway('http://unused','synthetic',specialist_argv=[argv])
+        with patch.object(gateway,'rpc',return_value={'ok':True,'exit_code':0,'stdout':'{"ready":false}'}):
+            gateway.run_command(argv)
+        with patch.object(gateway,'rpc',return_value={'content':'before','sha256':'a'*64}):
+            gateway.read_file('/actual/config.py')
+        with patch.object(gateway,'rpc',return_value={'ok':True,'sha256':'b'*64}):
+            gateway.patch_file('/actual/config.py','a'*64,'after')
+        actions,_=gateway.execution_summary()
+        self.assertEqual(actions,['ROSA 健康探测失败或结果未确认','读取现场文件完成：/actual/config.py','写入授权文件完成：/actual/config.py'])
+
     def test_repair_location_is_extracted_only_from_successful_execution_receipt(self):
         gateway=runner.Gateway('http://unused','synthetic',inspect_argv=['inspect'],verify_argv=['verify'],repair_argv=['repair','--sha'])
         gateway.inspected=True
