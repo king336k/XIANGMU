@@ -18,7 +18,7 @@ class RemoteFiles(BaseAPIView):
         station=station_for(request.user,request.data.get('device_id'))
         station=RemoteWorkstation.objects.select_for_update().select_related('agent__project__workspace').get(pk=station.pk)
         if not permitted(request.user,station):raise PermissionDenied()
-        if not online(station):raise Conflict('操作电脑离线。')
+        if not online(station):raise Conflict('采集电脑离线。')
         if not station.capabilities.get('file_browser',{}).get('ready'):raise Conflict('现场文件浏览尚未启用。')
         if RemoteFileRequest.objects.filter(owner=request.user,command__workstation=station,command__expires_at__gt=timezone.now(),command__status__in=['pending','delivered']).count()>=2:raise Conflict('请等待当前文件操作完成。')
         action=serializers.ChoiceField(choices=['list','prepare','chunk','upload_start','upload_chunk','upload_finish','upload_abort']).run_validation(request.data.get('action'))

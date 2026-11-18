@@ -112,6 +112,7 @@ def remote_repair(run_id):
     context = dict(run.workstation.capabilities.get("agent_context", {}))
     context["operation_mode"] = run.mode
     context["require_knowledge_search"] = True
+    context["collector_identity"]={"username":run.workstation.username,"hostname":run.workstation.hostname,"label":"采集电脑"}
     context["feedback"] = {"id":str(run.defect_id),"code":run.defect.code,"title":run.defect.title,"description":run.defect.description}
     context["repair_allowed"] = context.get("repair_allowed") is True and run.mode == "repair"
     from .remote_models import RemoteUploadedFile
@@ -154,7 +155,7 @@ def remote_repair(run_id):
                 "root_cause": "分析或现场执行链路尚未完成，根因未确认。",
                 "actions": [],
                 "verification": [],
-                "solution": "检查操作电脑在线状态及模型连接后，在原反馈中重新发起。",
+                "solution": "检查采集电脑在线状态及模型连接后，在原反馈中重新发起。",
                 "repaired": False,
             },
             "failed",
