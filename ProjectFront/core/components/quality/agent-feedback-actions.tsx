@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { qualityApi, errorMessage } from "./api";
-import { remoteDiagnosticsBase, runningAgentStatuses } from "../remote-diagnostics/types";
+import { agentRunStatusLabel, remoteDiagnosticsBase, runningAgentStatuses } from "../remote-diagnostics/types";
 import type { AgentRun, RemoteDevice } from "../remote-diagnostics/types";
 
 export function AgentFeedbackActions({
@@ -25,14 +25,18 @@ export function AgentFeedbackActions({
   const [runId, setRunId] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
-  const { data: run, error: runError } = useSWR(
+  const [submittedRun, setSubmittedRun] = useState<AgentRun | null>(null);
+  const submitting = useRef(false);
+  const { data: runSnapshot, error: runError } = useSWR(
     runId ? `${remoteDiagnosticsBase}agent-runs/${runId}/` : null,
     (url: string) => qualityApi.read<AgentRun>(url),
     { refreshInterval: (value) => (value && runningAgentStatuses.has(value.status) ? 1500 : 0) }
   );
+  const run = runSnapshot || submittedRun;
   const completed = useRef("");
   useEffect(() => {
     if (run && !runningAgentStatuses.has(run.status) && completed.current !== run.id) {
+      submitting.current = false;
       completed.current = run.id;
       onCompleted();
     }
@@ -41,7 +45,8 @@ export function AgentFeedbackActions({
   const selected = choices.find((device) => device.id === (deviceId || (choices.length === 1 ? choices[0].id : "")));
   const busy = starting || !!(run && runningAgentStatuses.has(run.status));
   async function start(mode: string) {
-    if (!selected?.online || busy) return;
+    if (submitting.current || !selected?.online || busy) return;
+    submitting.current = true;
     setStarting(true);
     setError("");
     try {
@@ -56,8 +61,10 @@ export function AgentFeedbackActions({
               ? "请只读复核本反馈当前现场状态，必须执行固定验证入口。禁止修改配置、文件或服务，如实记录验证证据。"
               : "请重新读取当前现场配置与日志，只读诊断本反馈问题，给出证据、根因、具体修复和验证建议；禁止修改配置、文件或服务。",
       });
+      setSubmittedRun(result);
       setRunId(result.id);
     } catch (cause) {
+      submitting.current = false;
       setError(errorMessage(cause));
     } finally {
       setStarting(false);
@@ -109,9 +116,12 @@ export function AgentFeedbackActions({
         <button type="button" onClick={onHistory} className="px-2 py-1.5 text-12 text-accent-primary">
           查看处理过程
         </button>
-        {busy && (
-          <span role="status" className="rounded bg-accent-subtle px-2 py-1 text-12 text-accent-primary">
-            正在处理…
+        {(starting || run) && (
+          <span
+            role="status"
+            className={`rounded px-2 py-1 text-12 ${busy ? "bg-accent-subtle text-accent-primary" : run?.status === "failed" || run?.status === "timed_out" ? "bg-danger-subtle text-danger-primary" : run?.result?.repaired === true || run?.result?.verification_passed === true ? "bg-success-subtle text-success-primary" : "bg-surface-2 text-secondary"}`}
+          >
+            {starting ? "正在提交…" : run ? agentRunStatusLabel(run) : ""}
           </span>
         )}
       </div>
@@ -122,9 +132,9 @@ export function AgentFeedbackActions({
         </p>
       )}
       {targets && !choices.length && <p className="text-12 text-secondary">此反馈尚未关联已接入的采集电脑。</p>}
-      {(error || targetError || runError) && (
+      {(error || targetError || runError || run?.error) && (
         <p role="alert" className="text-12 text-danger-primary">
-          {error || errorMessage(targetError || runError)}
+          {error || (targetError || runError ? errorMessage(targetError || runError) : run?.error)}
         </p>
       )}
     </div>

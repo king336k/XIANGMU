@@ -40,7 +40,7 @@ function load(file, states, extra = {}) {
         return [index < states.length ? states[index] : initial, (value) => changes.push([index, value])];
       },
       useEffect() {},
-      useRef: () => ({ current: true }),
+      useRef: (initial) => ({ current: initial }),
     },
     "react/jsx-runtime": require("react/jsx-runtime"),
     "lucide-react": {

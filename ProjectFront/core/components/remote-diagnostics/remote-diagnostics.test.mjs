@@ -310,7 +310,7 @@ test("Agent diagnosis starts only after explicit action and includes the selecte
     react: {
       ...React,
       useState: () => [states[cursor++], () => {}],
-      useRef: () => ({ current: true }),
+      useRef: (initial) => ({ current: initial }),
       useEffect() {},
     },
     swr: {
@@ -356,7 +356,7 @@ test("Agent diagnosis requires original feedback and does not submit without one
     react: {
       ...React,
       useState: () => [states[cursor++], () => {}],
-      useRef: () => ({ current: true }),
+      useRef: (initial) => ({ current: initial }),
       useEffect() {},
     },
     swr: { default: (url) => ({ data: url ? { results: [] } : undefined, mutate() {} }) },

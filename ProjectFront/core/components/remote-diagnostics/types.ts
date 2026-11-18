@@ -25,6 +25,12 @@ export type TerminalSnapshot = {
 export type AgentRun = {
   id: string;
   status: string;
+  queue?: {
+    position?: number | null;
+    reason?: "device_busy" | "worker_busy" | "terminal_open" | "transfer_active" | string;
+    stage?: "queued" | "inspect" | "repair" | "verify";
+    active_count?: number;
+  };
   result?: {
     summary?: unknown;
     root_cause?: unknown;
@@ -55,4 +61,28 @@ export function agentStatusLabel(status: string) {
       timed_out: "诊断超时",
     }[status] || "状态待确认"
   );
+}
+
+export function agentRunStatusLabel(run: AgentRun): string {
+  if (run.status === "queued") {
+    const reasons: Record<string, string> = {
+      device_busy: "等待采集电脑空闲",
+      worker_busy: "等待诊断资源空闲",
+      terminal_open: "等待终端关闭",
+      transfer_active: "等待文件传输完成",
+    };
+    const waiting = reasons[run.queue?.reason || ""] || "排队中";
+    const position = run.queue?.position;
+    return typeof position === "number" && Number.isSafeInteger(position) && position > 0
+      ? `${waiting} · 前方 ${position} 个任务`
+      : waiting;
+  }
+  if (run.status === "running") {
+    return (
+      ({ inspect: "正在诊断", repair: "正在修复", verify: "正在复测" } as Record<string, string>)[
+        run.queue?.stage || ""
+      ] || "正在处理"
+    );
+  }
+  return agentStatusLabel(run.status);
 }

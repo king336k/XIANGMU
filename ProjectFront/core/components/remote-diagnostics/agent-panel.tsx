@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { qualityApi, errorMessage } from "@/components/quality/api";
 import { fieldClass } from "@/components/quality/shared";
-import { agentStatusLabel, remoteDiagnosticsBase, runningAgentStatuses } from "./types";
+import { agentRunStatusLabel, remoteDiagnosticsBase, runningAgentStatuses } from "./types";
 import type { AgentRun, RemoteDevice } from "./types";
 import { FeedbackPicker } from "./feedback-picker";
 import type { FeedbackChoice } from "./feedback-picker";
@@ -38,6 +38,7 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
     (reply) => -Date.parse(reply.created_at)
   );
   const mountedRef = useRef(true);
+  const submitting = useRef(false);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -51,6 +52,7 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
     run?.status === "completed" && run.result?.verification_passed === true && run.result?.outcome === "verified";
 
   useEffect(() => {
+    if (runId && !runInProgress) submitting.current = false;
     if (!runId || !runInProgress) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -78,7 +80,8 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
   }, [runId, runInProgress, refreshHistory]);
 
   async function start() {
-    if (busy || !device.online || !device.can_connect || !defectId || !problem.trim()) return;
+    if (submitting.current || busy || !device.online || !device.can_connect || !defectId || !problem.trim()) return;
+    submitting.current = true;
     setStarting(true);
     setError("");
     try {
@@ -89,6 +92,7 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
       });
       if (mountedRef.current) setRun(next);
     } catch (cause) {
+      submitting.current = false;
       if (mountedRef.current) setError(errorMessage(cause));
     } finally {
       if (mountedRef.current) setStarting(false);
@@ -210,7 +214,7 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
             <span
               className={`inline-flex rounded px-2 py-1 text-12 ${runInProgress ? "bg-accent-subtle text-accent-primary" : run.status === "failed" ? "bg-surface-2 text-danger-primary" : run.result?.repaired === true || verified ? "bg-surface-2 text-success-primary" : "bg-surface-2 text-warning-primary"}`}
             >
-              {agentStatusLabel(run.status)}
+              {agentRunStatusLabel(run)}
             </span>
             {run.status === "completed" && (
               <span className="font-normal ml-2 text-12 text-secondary">
