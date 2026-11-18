@@ -9,6 +9,7 @@ export function TransferModal({
   onDirection,
   targetControl,
   remoteBrowser,
+  remoteLabel,
   localFile,
   remoteName,
   remotePath,
@@ -27,6 +28,7 @@ export function TransferModal({
   onDirection: (value: TransferDirection) => void;
   targetControl: ReactNode;
   remoteBrowser: ReactNode;
+  remoteLabel?: string;
   localFile?: File;
   remoteName: string;
   remotePath: string;
@@ -52,7 +54,9 @@ export function TransferModal({
         </div>
         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_3rem_minmax(0,1fr)]">
           <section aria-label="本机文件" className="min-w-0 rounded border border-subtle">
-            <header className="border-b border-subtle bg-surface-2 px-3 py-2 text-13 font-medium">本机</header>
+            <header className="border-b border-subtle bg-surface-2 px-3 py-2 text-13 font-medium">
+              本机（当前浏览器所在电脑）
+            </header>
             <div className="min-h-64 space-y-4 p-3">
               {direction === "upload" ? (
                 <>
@@ -120,7 +124,9 @@ export function TransferModal({
             </button>
           </div>
           <section aria-label="远端文件" className="min-w-0 rounded border border-subtle">
-            <header className="border-b border-subtle bg-surface-2 px-3 py-2 text-13 font-medium">远端</header>
+            <header className="border-b border-subtle bg-surface-2 px-3 py-2 text-13 font-medium">
+              远端：{remoteLabel || "目标待选择"}
+            </header>
             <div className="min-h-64 space-y-2 p-3">{remoteBrowser}</div>
           </section>
         </div>

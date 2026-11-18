@@ -173,32 +173,50 @@ test("upload sends edited filename and exact selected defect, then checks remote
   assert.equal(writes[0].path, "incoming");
   assert.deepEqual(
     writes.map((body) => body.action),
-    ["upload_start", "upload_chunk", "upload_finish"]
+    ["upload_start", "upload_chunk", "upload_finish", "list"]
   );
-  for (const reset of [
-    [8, undefined],
-    [4, undefined],
-    [2, ""],
-    [3, undefined],
-    [10, ""],
-    [9, undefined],
-    [11, false],
-  ]) {
-    assert.ok(
-      changes.some(([index, value]) => index === reset[0] && value === reset[1]),
-      `successful upload resets state ${reset[0]}`
-    );
-  }
-  assert.ok(changes.some(([index, value]) => index === 6 && value === "已上传并校验：incoming/retry-name.zip"));
+  assert.equal(
+    changes.some(([index]) => [2, 8, 9, 10, 11].includes(index)),
+    false,
+    "success keeps modal and local source for another explicit transfer"
+  );
+  assert.ok(changes.some(([index, value]) => index === 4 && value === undefined));
+  assert.ok(changes.some(([index, value]) => index === 3 && value === listing));
+  assert.ok(
+    changes.some(
+      ([index, value]) =>
+        index === 6 && value === "已上传并校验：robot-user@10.0.0.177:/home/robot-user/incoming/retry-name.zip"
+    )
+  );
+  const completed = changes.find(([index]) => index === 13)[1];
+  assert.equal(completed.target, "robot");
+  assert.equal(completed.path, "incoming");
+  assert.equal(completed.fullPath, "/home/robot-user/incoming/retry-name.zip");
+  assert.ok(Number.isFinite(Date.parse(completed.completedAt)));
   assert.match(JSON.stringify(tree), /机器人：/);
 });
 
 test("文件位置用采集电脑称谓并保留实际用户名", () => {
-  const { exports } = load("./file-panel.tsx", []);
+  const { exports } = load("./file-panel.tsx", [
+    "operator",
+    "robot-user",
+    "",
+    undefined,
+    undefined,
+    false,
+    "",
+    "",
+    undefined,
+    undefined,
+    "",
+    true,
+    "upload",
+  ]);
   const tree = exports.FilePanel({ device });
-  const caption = nodes(tree).find((node) => node.type === "option" && node.props.value === "operator");
+  const target = nodes(tree).find((node) => node.props?.onStart).props.targetControl;
+  const caption = nodes(target).find((node) => node.type === "option" && node.props.value === "operator");
   assert.equal(caption.props.children.join(""), "采集电脑：caiji1@10.0.0.195");
-  const robot = nodes(tree).find((node) => node.type === "option" && node.props.value === "robot");
+  const robot = nodes(target).find((node) => node.type === "option" && node.props.value === "robot");
   assert.equal(robot.props.children.join(""), "机器人：robot-user@10.0.0.177");
   assert.doesNotMatch(JSON.stringify(tree), /操作电脑/);
 });
@@ -338,7 +356,7 @@ test("feedback dialog searches only the current computer and commits a candidate
   assert.deepEqual(confirmations, [candidate]);
 });
 
-test("file manager keeps upload and download in the left toolbar and waits for explicit confirmation", () => {
+test("main file panel has a single transfer entry and keeps browsing only inside the modal", () => {
   const { exports, changes } = load("./file-panel.tsx", [
     "operator",
     "",
@@ -354,11 +372,17 @@ test("file manager keeps upload and download in the left toolbar and waits for e
     false,
   ]);
   const tree = exports.FilePanel({ device });
-  const toolbar = nodes(tree).find((node) => node.props?.["aria-label"] === "文件操作");
-  const buttons = nodes(toolbar).filter((node) => node.type === "button");
-  assert.equal(buttons.length, 3);
-  assert.match(JSON.stringify(buttons[0]), /上传/);
-  assert.match(JSON.stringify(buttons[1]), /下载/);
+  const buttons = nodes(tree).filter((node) => node.type === "button");
+  assert.equal(buttons.length, 1);
+  assert.equal(buttons[0].props["aria-label"], "打开文件传输");
+  assert.equal(
+    nodes(tree).some((node) => ["select", "table"].includes(node.type)),
+    false
+  );
+  assert.equal(
+    nodes(tree).some((node) => node.props?.["aria-label"] === "上一级目录"),
+    false
+  );
   const input = nodes(tree).find((node) => node.type === "input" && node.props.type === "file");
   assert.equal(input.props.className, "hidden");
   const file = new File(["data"], "archive.zip");
@@ -476,6 +500,19 @@ test("changing transfer target resets remote directory and selection without lau
   assert.equal(mutations, 0);
   modal.props.onClose();
   assert.equal(mutations, 0);
+  for (const [index, expected] of [
+    [8, undefined],
+    [4, undefined],
+    [2, ""],
+    [3, undefined],
+    [10, ""],
+    [9, undefined],
+    [11, false],
+  ])
+    assert.ok(
+      changes.some(([key, value]) => key === index && value === expected),
+      `close clears selection ${index}`
+    );
 });
 
 test("failed upload keeps modal and selections for retry without claiming success", async () => {
@@ -520,7 +557,64 @@ test("failed upload keeps modal and selections for retry without claiming succes
   );
 });
 
-test("verified download closes and clears both sides only after invoking browser save", async () => {
+test("directory refresh failure after verified upload preserves success and does not abort the upload", async () => {
+  const actions = [];
+  const { exports, changes } = load(
+    "./file-panel.tsx",
+    [
+      "operator",
+      "",
+      "incoming",
+      { root: "/home/caiji1", entries: [], total: 0 },
+      undefined,
+      false,
+      "",
+      "",
+      new File([], "empty.zip"),
+      undefined,
+      "empty.zip",
+      true,
+      "upload",
+    ],
+    {
+      "@noble/hashes/sha256": { sha256: () => new Uint8Array(32).fill(1) },
+      "@/components/quality/api": {
+        qualityApi: {
+          async write(url, body) {
+            actions.push(body.action);
+            return { id: body.action };
+          },
+          async read(url) {
+            const action = url.split("/").at(-2);
+            if (action === "list") throw new Error("network");
+            return {
+              status: "done",
+              error: "",
+              result:
+                action === "upload_start"
+                  ? { ticket: "ticket" }
+                  : { uploaded: true, sha256: "01".repeat(32), path: "incoming/empty.zip" },
+            };
+          },
+        },
+        errorMessage: (error) => error.message,
+      },
+    }
+  );
+  nodes(exports.FilePanel({ device }))
+    .find((node) => node.props?.onStart)
+    .props.onStart();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(actions, ["upload_start", "upload_finish", "list"]);
+  assert.ok(changes.some(([index, value]) => index === 6 && value.includes("已上传并校验")));
+  assert.ok(changes.some(([index, value]) => index === 7 && value.includes("文件已上传，但目录刷新失败")));
+  assert.equal(
+    changes.some(([index]) => [8, 9, 10, 11].includes(index)),
+    false
+  );
+});
+
+test("verified download leaves dialog available after invoking browser save", async () => {
   const previousDocument = globalThis.document;
   let saved = false;
   const changesAtSave = [];
@@ -582,17 +676,12 @@ test("verified download closes and clears both sides only after invoking browser
       changesAtSave.some(([index, value]) => index === 11 && value === false),
       false
     );
-    for (const [index, expected] of [
-      [8, undefined],
-      [4, undefined],
-      [2, ""],
-      [3, undefined],
-      [10, ""],
-      [9, undefined],
-      [11, false],
-    ])
-      assert.ok(loaded.changes.some(([key, value]) => key === index && value === expected));
-    assert.ok(loaded.changes.some(([index, value]) => index === 6 && value === "已校验并下载 trace.log"));
+    assert.equal(
+      loaded.changes.some(([index]) => [2, 3, 4, 8, 9, 10, 11].includes(index)),
+      false,
+      "download success does not close or clear current choices"
+    );
+    assert.ok(loaded.changes.some(([index, value]) => index === 6 && value === "已校验并发起下载 trace.log"));
   } finally {
     globalThis.document = previousDocument;
   }
@@ -614,9 +703,8 @@ test("a reopened transfer drops previous path file feedback and disables downloa
     false,
     "upload",
   ]);
-  const toolbar = nodes(exports.FilePanel({ device })).find((node) => node.props?.["aria-label"] === "文件操作");
-  nodes(toolbar)
-    .filter((node) => node.type === "button")[1]
+  nodes(exports.FilePanel({ device }))
+    .find((node) => node.props?.["aria-label"] === "打开文件传输")
     .props.onClick();
   for (const [index, expected] of [
     [8, undefined],
@@ -626,7 +714,7 @@ test("a reopened transfer drops previous path file feedback and disables downloa
     [10, ""],
     [9, undefined],
     [11, true],
-    [12, "download"],
+    [12, "upload"],
   ])
     assert.ok(changes.some(([key, value]) => key === index && value === expected));
   const blank = load("./file-panel.tsx", [
@@ -645,6 +733,79 @@ test("a reopened transfer drops previous path file feedback and disables downloa
     "download",
   ]).exports.FilePanel({ device });
   assert.equal(nodes(blank).find((node) => node.props?.onStart).props.enabled, false);
+});
+
+test("view uploaded target restores only the verified destination and requests its actual target", async () => {
+  const calls = [];
+  const completed = {
+    target: "robot",
+    path: "incoming",
+    fullPath: "/home/robot-user/incoming/patch.zip",
+    deviceLabel: "robot-user@10.0.0.177",
+    filename: "patch.zip",
+    completedAt: "2026-11-18T10:00:00Z",
+  };
+  const { exports, changes } = load(
+    "./file-panel.tsx",
+    [
+      "operator",
+      "robot-user",
+      "",
+      undefined,
+      undefined,
+      false,
+      "已上传并校验",
+      "",
+      undefined,
+      undefined,
+      "",
+      false,
+      "upload",
+      completed,
+    ],
+    {
+      "@/components/quality/api": {
+        qualityApi: {
+          async write(url, body) {
+            calls.push(body);
+            return { id: "list" };
+          },
+          async read() {
+            return {
+              status: "done",
+              error: "",
+              result: { root: "/home/robot-user", path: "incoming", entries: [], total: 0, offset: 0 },
+            };
+          },
+        },
+        errorMessage: String,
+      },
+    }
+  );
+  const tree = exports.FilePanel({ device });
+  assert.equal(
+    nodes(tree).some((node) => ["select", "table"].includes(node.type)),
+    false
+  );
+  nodes(tree)
+    .find((node) => node.type === "button" && node.props.children === "查看目标目录")
+    .props.onClick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, [{ device_id: "computer", target: "robot", action: "list", path: "incoming", offset: 0 }]);
+  for (const [index, expected] of [
+    [8, undefined],
+    [4, undefined],
+    [10, ""],
+    [9, undefined],
+    [0, "robot"],
+    [12, "download"],
+    [11, true],
+  ])
+    assert.ok(changes.some(([key, value]) => key === index && value === expected));
+  assert.equal(
+    changes.some(([index, value]) => index === 8 && value !== undefined),
+    false
+  );
 });
 
 test("selecting a file resets native input so the same package can target a second machine", () => {

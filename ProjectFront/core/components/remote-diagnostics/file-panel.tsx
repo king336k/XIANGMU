@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useRef, useState } from "react";
-import { Download, Upload, Folder, FileText, ArrowUp, RefreshCw } from "lucide-react";
+import { Folder, FileText, ArrowUp, RefreshCw } from "lucide-react";
 import { qualityApi, errorMessage } from "@/components/quality/api";
 import { remoteDiagnosticsBase } from "./types";
 import type { RemoteDevice } from "./types";
@@ -32,6 +32,14 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
   const [uploadName, setUploadName] = useState("");
   const [uploadDialog, setUploadDialog] = useState(false);
   const [direction, setDirection] = useState<TransferDirection>("upload");
+  const [lastCompletedTransfer, setLastCompletedTransfer] = useState<{
+    target: string;
+    path: string;
+    fullPath: string;
+    deviceLabel: string;
+    filename: string;
+    completedAt: string;
+  }>();
   const fileInput = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
   useEffect(
@@ -60,10 +68,10 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
     setUploadDialog(true);
   }
 
-  async function request<T>(payload: object, current: number): Promise<T> {
+  async function request<T>(payload: object, current: number, requestTarget = target): Promise<T> {
     const job = await qualityApi.write<{ id: string }>(`${remoteDiagnosticsBase}files/`, {
       device_id: device.id,
-      target,
+      target: requestTarget,
       ...payload,
     });
     const deadline = Date.now() + 120000;
@@ -83,16 +91,16 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
     }
     return poll();
   }
-  async function browse(next: string, offset = 0) {
+  async function browse(next: string, offset = 0, browseTarget = target) {
     const current = ++generation.current;
     setBusy(true);
     setError("");
     setMessage("");
     setSelected(undefined);
     try {
-      const result = await request<Listing>({ action: "list", path: next, offset }, current);
+      const result = await request<Listing>({ action: "list", path: next, offset }, current, browseTarget);
       if (current === generation.current) {
-        if (target === "robot" && result.username) setRobotUsername(result.username);
+        if (browseTarget === "robot" && result.username) setRobotUsername(result.username);
         setListing(result);
         setPath(result.path === "." ? "" : result.path);
       }
@@ -150,10 +158,8 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 30000);
       setMessage(
-        `已校验并下载 ${prepared.filename}${prepared.skipped ? `；已跳过 ${prepared.skipped} 个密钥、链接或不可下载项` : ""}`
+        `已校验并发起下载 ${prepared.filename}${prepared.skipped ? `；已跳过 ${prepared.skipped} 个密钥、链接或不可下载项` : ""}`
       );
-      resetTransferSelection();
-      setUploadDialog(false);
     } catch (cause) {
       if (current === generation.current) {
         setError(errorMessage(cause));
@@ -217,9 +223,27 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
         current
       );
       if (result.uploaded !== true || result.sha256 !== digest) throw new Error("远端文件完整性校验失败。");
-      setMessage(`已上传并校验：${result.path}`);
-      resetTransferSelection();
-      setUploadDialog(false);
+      const deviceLabel =
+        target === "robot"
+          ? `${robotUsername || "用户名待确认"}@${configuredRobot?.host || "IP待确认"}`
+          : `${device.username}@${device.ip_address || "IP待确认"}`;
+      const fullPath = `${listing.root}/${path}/${uploadName.trim()}`.replace(/\/{2,}/g, "/");
+      setLastCompletedTransfer({
+        target,
+        path,
+        fullPath,
+        deviceLabel,
+        filename: uploadName.trim(),
+        completedAt: new Date().toISOString(),
+      });
+      setMessage(`已上传并校验：${deviceLabel}:${fullPath}`);
+      setSelected(undefined);
+      try {
+        const updated = await request<Listing>({ action: "list", path }, current);
+        setListing(updated);
+      } catch (cause) {
+        setError(`文件已上传，但目录刷新失败：${errorMessage(cause)}`);
+      }
     } catch (cause) {
       if (current === generation.current) {
         setError(errorMessage(cause));
@@ -390,12 +414,18 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
     <section aria-label="现场文件" className="space-y-3 rounded border border-subtle p-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-14 font-medium">现场文件</h2>
-          <p className="mt-1 text-12 text-secondary">
-            浏览采集电脑或经由它连接的机器人；文件夹打包为 tar.gz 下载到本机。
-          </p>
+          <h2 className="text-14 font-medium">文件传输</h2>
+          <p className="mt-1 text-12 text-secondary">在本机与采集电脑或机器人之间上传、下载文件。</p>
         </div>
-        {targetControl}
+        <button
+          type="button"
+          aria-label="打开文件传输"
+          disabled={busy || !enabled}
+          onClick={() => openTransfer("upload")}
+          className="rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
+        >
+          文件传输
+        </button>
       </header>
       <input
         ref={fileInput}
@@ -410,41 +440,17 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
           setUploadName(file?.name || "");
         }}
       />
-      <div className="flex flex-wrap items-center gap-2" aria-label="文件操作">
-        <button
-          type="button"
-          disabled={busy || !enabled}
-          onClick={() => openTransfer("upload")}
-          className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
-        >
-          <Upload className="size-3.5" />
-          上传
-        </button>
-        <button
-          type="button"
-          disabled={busy || !enabled}
-          onClick={() => openTransfer("download")}
-          className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
-        >
-          <Download className="size-3.5" />
-          {selected ? "下载所选" : "下载当前目录"}
-        </button>
-        <button
-          type="button"
-          disabled={busy || !enabled}
-          onClick={() => void browse(path)}
-          className="inline-flex items-center gap-1.5 rounded border border-subtle px-3 py-2 text-13 disabled:opacity-40"
-        >
-          <RefreshCw className="size-3.5" />
-          {listing ? "刷新" : "浏览文件"}
-        </button>
-      </div>
       {uploadDialog && (
         <TransferModal
           direction={direction}
           onDirection={setDirection}
           targetControl={targetControl}
           remoteBrowser={remoteBrowser}
+          remoteLabel={
+            target === "robot"
+              ? `机器人（${robotUsername || "用户名待确认"}@${configuredRobot?.host || "IP待确认"}）`
+              : `采集电脑（${device.username}@${device.ip_address || "IP待确认"}）`
+          }
           localFile={localFile}
           remoteName={selected?.name || (listing ? path.split("/").at(-1) || "当前目录" : "")}
           remotePath={`${target === "robot" ? `${robotUsername || "用户名待确认"}@${configuredRobot?.host || "IP待确认"}` : `${device.username}@${device.ip_address || "IP待确认"}`}:${listing ? `${listing.root}/${path}/${direction === "upload" ? uploadName.trim() : selected?.name || ""}`.replace(/\/{2,}/g, "/") : "请选择远端目录"}`}
@@ -472,12 +478,12 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
             if (!busy || !message) {
               generation.current++;
               setBusy(false);
+              resetTransferSelection();
               setUploadDialog(false);
             }
           }}
         />
       )}
-      {remoteBrowser}
       {busy && (
         <p role="status" className="text-12 text-secondary">
           {message || "正在读取现场文件…"}
@@ -487,6 +493,32 @@ export function FilePanel({ device }: { device: RemoteDevice }) {
         <p role="status" className="text-12 text-success-primary">
           {message}
         </p>
+      )}
+      {lastCompletedTransfer && !busy && (
+        <div className="space-y-1 text-12 text-secondary">
+          <p className="break-all">
+            {lastCompletedTransfer.deviceLabel}:{lastCompletedTransfer.fullPath}
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <span>
+              {lastCompletedTransfer.filename} · SHA256 已校验 ·{" "}
+              {new Date(lastCompletedTransfer.completedAt).toLocaleString("zh-CN", { hour12: false })}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                resetTransferSelection();
+                setTarget(lastCompletedTransfer.target);
+                setDirection("download");
+                setUploadDialog(true);
+                void browse(lastCompletedTransfer.path, 0, lastCompletedTransfer.target);
+              }}
+              className="text-accent-primary"
+            >
+              查看目标目录
+            </button>
+          </div>
+        </div>
       )}
       {error && (
         <p role="alert" className="text-13 text-danger-primary">
