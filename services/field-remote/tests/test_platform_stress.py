@@ -6,9 +6,10 @@ import threading
 import tempfile
 import unittest
 import uuid
+from unittest.mock import Mock, patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from platform_stress import Http, ApiError, validate_manifest, wait_for_markers, mixed_overlap
+from platform_stress import Http, ApiError, validate_manifest, wait_for_markers, mixed_overlap, submit_diagnostic
 
 
 def fixture():
@@ -20,6 +21,25 @@ def fixture():
 
 
 class PlatformStressTests(unittest.TestCase):
+    def test_new_rules_diagnostic_submits_and_requires_real_completed_status(self):
+        job_id=str(uuid.uuid4())
+        path='/api/workspaces/stress/projects/'+str(uuid.uuid4())+'/quality/defects/'+str(uuid.uuid4())+'/diagnostics/'
+        client=Mock()
+        client.request.side_effect=[{'id':job_id,'status':'queued'},
+                                    {'id':job_id,'status':'running'},
+                                    {'id':job_id,'status':'completed','started_at':'start','completed_at':'end'}]
+        with patch('platform_stress.time.sleep'):
+            result=submit_diagnostic(client,path)
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual([row['status'] for row in result['observations']],['running','completed'])
+        submitted=client.request.call_args_list[0]
+        self.assertEqual(submitted.args[:2],('POST',path))
+        self.assertEqual(submitted.args[2]['mode'],'rules')
+        self.assertIsNotNone(uuid.UUID(submitted.args[2]['request_id']))
+        self.assertEqual(client.request.call_args_list[1].args[1],path.split('/defects/')[0]+'/diagnostics/'+job_id+'/')
+        client.request.side_effect=[{'id':job_id,'status':'queued'},{'id':job_id,'status':'failed'}]
+        with self.assertRaisesRegex(AssertionError,'did not complete'):submit_diagnostic(client,path)
+
     def test_rejects_public_or_unmarked_environment_and_mixed_real_model(self):
         validate_manifest(fixture())
         for change in ({'test_environment':False},{'base_url':'http://180.153.172.19:18886'},

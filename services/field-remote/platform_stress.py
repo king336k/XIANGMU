@@ -39,6 +39,12 @@ class ApiError(RuntimeError):
         super().__init__('unexpected HTTP status '+str(status))
 
 
+class DiagnosticFailed(AssertionError):
+    def __init__(self,result):
+        self.result=result
+        super().__init__('new rules diagnostic did not complete: '+str(result['status']))
+
+
 def validate_manifest(value):
     if not isinstance(value,dict) or value.get('test_environment') is not True:
         raise ValueError('explicit isolated test environment required')
@@ -68,9 +74,12 @@ def validate_manifest(value):
                 or not set(row.get('allowed_user_ids',[])).issubset(identifiers)
                 or 'initial_config' not in row or 'expected_repair_config' not in row):
             raise ValueError('invalid isolated station fixture')
-        for path in row.get('diagnostic_paths',[]):
+        for path in row.get('diagnostic_paths',[])+row.get('diagnostic_create_paths',[]):
             if not isinstance(path,str) or not path.startswith('/api/') or path.startswith('//'):
                 raise ValueError('diagnostic paths must be local API paths')
+        if any('/quality/defects/' not in path or not path.endswith('/diagnostics/')
+               for path in row.get('diagnostic_create_paths',[])):
+            raise ValueError('diagnostic create paths must name a defect diagnostic collection')
     if value['model_mode']=='real_model_e2e' and len(stations)!=1:
         raise ValueError('real model evidence must be a separate single-station run')
     return value
@@ -112,6 +121,23 @@ def poll(function,accept,seconds=120):
         if accept(value):return value
         if time.monotonic()>deadline:raise TimeoutError('isolated platform operation deadline exceeded')
         time.sleep(.05)
+
+
+def submit_diagnostic(client,path):
+    created=client.request('POST',path,{'request_id':str(uuid.uuid4()),'mode':'rules'},expected=(201,),operation='diagnostic_create')
+    job_id=str(uuid.UUID(created['id']))
+    project_prefix=path.split('/defects/',1)[0]
+    detail_path=project_prefix+'/diagnostics/'+job_id+'/'
+    observations=[]
+    def read():
+        state=client.request('GET',detail_path,operation='diagnostic_poll')
+        observations.append({'at':time.time(),'status':state.get('status')})
+        return state
+    completed=poll(read,lambda state:state.get('status') in ('completed','failed','cancelled','unconfigured'),180)
+    result={'id':job_id,'mode':'rules','status':completed.get('status'),'observations':observations,
+            'started_at':completed.get('started_at'),'completed_at':completed.get('completed_at')}
+    if result['status']!='completed':raise DiagnosticFailed(result)
+    return result
 
 
 def fixture_root(output):
@@ -239,7 +265,7 @@ def station_job(job):
 
     thread=threading.Thread(target=loop,daemon=True)
     sid=None
-    run_results=[];file_results=[];diagnostics_before={};diagnostics_after={}
+    run_results=[];file_results=[];new_diagnostics=[];diagnostics_before={};diagnostics_after={}
     try:
         # Read-only isolation handshake occurs before the station exchange thread.
         owner.request('GET',BASE,operation='isolation_handshake')
@@ -257,6 +283,11 @@ def station_job(job):
             nonlocal file_results
             phase_started=time.time()
             (shared/('file-active-'+str(index))).touch()
+            for path in station.get('diagnostic_create_paths',[]):
+                try:new_diagnostics.append(submit_diagnostic(owner,path))
+                except DiagnosticFailed as exc:
+                    new_diagnostics.append(exc.result)
+                    raise
             with ThreadPoolExecutor(max_workers=len(participants)) as pool:
                 file_results=list(pool.map(files_for_user,participants))
             for identifier in participants:
@@ -334,6 +365,7 @@ def station_job(job):
     return {'device_id':station['device_id'],'simulated_uid':os.getuid(),'pid':os.getpid(),
             'ok':not errors and not edge_errors,'errors':errors+edge_errors,'samples':samples,'command_counts':command_counts,
             'users':file_results,'phase_intervals':phase_intervals,
+            'new_rules_diagnostics':new_diagnostics,
             'file_http_intervals':[{'started_at':sample['started_at'],'completed_at':sample['completed_at']}
                                    for sample in samples if sample['operation'].startswith('file_')],
             'run_observations':[{'id':row['id'],'mode':row['mode'],'observations':row.get('observations',[]),
