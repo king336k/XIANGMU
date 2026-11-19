@@ -80,7 +80,7 @@ class DefectInput(serializers.Serializer):
     resolution = serializers.CharField(max_length=20000, allow_blank=True, required=False)
     assignee_id = serializers.UUIDField(required=False, allow_null=True)
     repair_issue_id = serializers.UUIDField(required=False, allow_null=True)
-    status = serializers.ChoiceField(choices=("open", "in_progress", "resolved", "closed"), required=False)
+    status = serializers.ChoiceField(choices=("open", "in_progress", "pending_tech", "needs_tech", "resolved", "closed"), required=False)
     regression_execution_id = serializers.UUIDField(required=False)
     verification_method = serializers.ChoiceField(choices=("regression", "manual"), required=False)
     verification_note = serializers.CharField(max_length=4000, allow_blank=True, required=False)
@@ -335,6 +335,12 @@ class EventSerializer(serializers.ModelSerializer):
 
 
 class DefectSerializer(AuthoredRecordSerializer):
+    agent_processing = serializers.SerializerMethodField()
+
+    def get_agent_processing(self, obj):
+        from .agent_lifecycle import agent_processing
+        return agent_processing(obj)
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         from .daq_incidents import trusted_incident, signed_record
@@ -449,4 +455,5 @@ class DefectSerializer(AuthoredRecordSerializer):
             "created_at",
             "updated_at",
             "events",
+            "agent_processing",
         ]

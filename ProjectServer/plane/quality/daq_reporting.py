@@ -169,7 +169,7 @@ class DaqReports(ReportingView):
 
     def get(self, request):
         status = serializers.ChoiceField(
-            choices=["open", "in_progress", "resolved", "closed"], allow_blank=True
+            choices=["open", "in_progress", "pending_tech", "needs_tech", "resolved", "closed"], allow_blank=True
         ).run_validation(request.query_params.get("status", ""))
         search = (
             serializers.CharField(max_length=200, allow_blank=True)
@@ -209,7 +209,7 @@ class DaqReports(ReportingView):
         from .numbering import preload
 
         preload([link.defect for link in links])
-        counts = dict.fromkeys(["all", "open", "in_progress", "resolved", "closed"], 0)
+        counts = dict.fromkeys(["all", "open", "in_progress", "pending_tech", "needs_tech", "resolved", "closed"], 0)
         rows = []
         for link in links:
             record = signed_record(link)
@@ -239,6 +239,8 @@ class DaqReports(ReportingView):
                 rows.append(link)
         paginator = QualityPagination()
         page = paginator.paginate_queryset(rows, request)
+        from .agent_lifecycle import preload_processing
+        preload_processing([link.defect for link in page])
         results = []
         for link in page:
             self.bind_project(link.project)
@@ -281,6 +283,7 @@ class DaqOwnReportDetail(ReportingView):
         expire_stale(defect)
         from .sources import CommentSerializer,with_agent_evidence
         comments=with_agent_evidence(defect.comments.filter(project_id=defect.project_id,visibility="public").order_by("created_at","id"))
+        from .agent_lifecycle import agent_processing
         public_comments=[]
         context={}
         for comment in comments:
@@ -297,6 +300,7 @@ class DaqOwnReportDetail(ReportingView):
                     "code": defect.code,
                     "title": defect.title,
                     "status": defect.status,
+                    "agent_processing": agent_processing(defect),
                     "created_at": defect.created_at,
                     "updated_at": defect.updated_at,
                     "module": {"key": defect.module_id, "name": defect.module.name} if defect.module_id else None,
@@ -327,7 +331,7 @@ def report_timeline(defect):
             "status": "open",
         }
     ]
-    actions = {"in_progress": "开始处理", "resolved": "提交回归", "closed": "验收关闭", "open": "重新打开"}
+    actions = {"pending_tech": "待技术确认", "needs_tech": "待技术处理", "in_progress": "开始处理", "resolved": "提交回归", "closed": "验收关闭", "open": "重新打开"}
     events = (
         defect.events.select_related("created_by")
         .exclude(previous_status="")

@@ -23,7 +23,9 @@ def received(defect_id):
         if context.get("auto_diagnose") is not True or not online(station) or not permitted(station.agent.owner,station):return
         if RemoteAgentRun.objects.filter(defect_id=defect_id).exists():return
         if station.remoteagentrun_set.filter(status__in=["queued","running"],expires_at__gt=timezone.now()).count()>=20:return
-        run=RemoteAgentRun.objects.create(workstation=station,defect_id=defect_id,owner=station.agent.owner,problem=link.defect.description,identity_key=identity_key(station),expires_at=timezone.now()+timedelta(minutes=30))
+        from .models import Defect
+        defect=Defect.objects.select_for_update().get(pk=defect_id)
+        run=RemoteAgentRun.objects.create(workstation=station,defect=defect,owner=station.agent.owner,problem=defect.description,result={'defect_state_version':defect.edit_version},identity_key=identity_key(station),expires_at=timezone.now()+timedelta(minutes=30))
         DefectEvent.objects.create(project_id=link.project_id,defect=link.defect,created_by=station.agent.owner,previous_status=link.defect.status,status=link.defect.status,note=f"Agent 自动诊断：已根据本机签名反馈进入队列；任务 {run.id}。")
         from .remote_tasks import remote_repair
         transaction.on_commit(lambda:remote_repair.apply_async(args=[str(run.id)],queue="field-repairs"))

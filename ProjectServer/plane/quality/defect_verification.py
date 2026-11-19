@@ -517,7 +517,7 @@ def serialize(row, view):
         "can_record": mutable and can_execute,
         "can_submit": mutable and can_execute,
         "can_configure": writable
-        and row.defect.status in {"open", "in_progress", "resolved"}
+        and row.defect.status in {"open", "in_progress", "pending_tech", "needs_tech", "resolved"}
         and row.status not in {"review", "accepted"}
         and defect_scheduler(view, row.defect)
         and not review["blocked_reason"],
@@ -535,7 +535,7 @@ def payload(defect, view):
         "solution_review": review,
         "can_configure": bool(
             not defect.archived_at
-            and defect.status in {"open", "in_progress", "resolved"}
+            and defect.status in {"open", "in_progress", "pending_tech", "needs_tech", "resolved"}
             and (not rows or rows[0].status not in {"review", "accepted"})
             and defect_scheduler(view, defect)
             and not review["blocked_reason"]

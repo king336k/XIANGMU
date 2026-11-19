@@ -542,6 +542,8 @@ def route_completed(job, materials=None):
                 defect.assignment_reason = reason
                 defect.edit_version += 1
                 defect.save(update_fields=["assignment_reason", "edit_version", "updated_at"])
+                from .agent_lifecycle import advance_after_metadata
+                advance_after_metadata(defect,defect.edit_version-1)
                 DefectEvent.objects.create(
                     project=defect.project, defect=defect, created_by=job.created_by,
                     previous_status=defect.status, status=defect.status,
@@ -568,6 +570,8 @@ def route_completed(job, materials=None):
     defect.save(
         update_fields=["module", "assignment_reason", "assignment_origin", "assignee", "edit_version", "updated_at"]
     )
+    from .agent_lifecycle import advance_after_metadata
+    advance_after_metadata(defect,defect.edit_version-1)
     if target:
         DefectEvent.objects.create(
             project=defect.project,

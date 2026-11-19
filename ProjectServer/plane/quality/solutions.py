@@ -186,10 +186,11 @@ def locked_solution(view, pk):
 
 
 def start_processing(view, defect):
-    if defect.status != "open" or (
+    if defect.status not in {"open", "pending_tech", "needs_tech"} or (
         defect.assignee_id != view.request.user.id and not is_administrator(view.request.user)
     ):
         return
+    previous_status = defect.status
     defect.status = "in_progress"
     defect.edit_version += 1
     fields = ["status", "edit_version", "updated_at"]
@@ -201,7 +202,7 @@ def start_processing(view, defect):
     DefectEvent.objects.create(
         defect=defect,
         project=defect.project,
-        previous_status="open",
+        previous_status=previous_status,
         status="in_progress",
         created_by=view.request.user,
         note="维护技术方案，开始处理缺陷。",

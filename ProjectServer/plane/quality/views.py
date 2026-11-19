@@ -431,6 +431,7 @@ class ExecutionList(QualityView):
 
 
 def defect_queryset():
+    from .agent_lifecycle import processing_prefetch
     return Defect.objects.select_related(
         "assignee",
         "module",
@@ -443,7 +444,7 @@ def defect_queryset():
         "regression_execution__item__revision",
         "regression_execution__item__plan",
         "regression_execution__created_by",
-    ).prefetch_related("events__created_by", "sources")
+    ).prefetch_related("events__created_by", "sources", processing_prefetch())
 
 
 class ExecutionDefect(QualityView):
@@ -583,13 +584,23 @@ class DefectDetail(QualityView):
         old_status = defect.status
         new_status = data.get("status", old_status)
         allowed = {
-            "open": {"open", "in_progress", "resolved"},
-            "in_progress": {"open", "in_progress", "resolved"},
+            "open": {"open", "in_progress", "pending_tech", "needs_tech", "resolved"},
+            "in_progress": {"open", "in_progress", "pending_tech", "needs_tech", "resolved"},
+            "pending_tech": {"open", "in_progress", "pending_tech", "needs_tech", "resolved"},
+            "needs_tech": {"open", "in_progress", "pending_tech", "needs_tech", "resolved"},
             "resolved": {"open", "resolved", "closed"},
             "closed": {"closed", "open"},
         }
         if new_status not in allowed[old_status]:
             raise ValidationError({"status": "请先修复，再完成回归验证。"})
+        if new_status in {'pending_tech','needs_tech'} and new_status != old_status:
+            if expected is None:
+                raise ValidationError({'expected_version':'请刷新当前版本后确认技术跟进状态。'})
+            if new_status == 'pending_tech':
+                from .agent_lifecycle import terminal_state
+                run=defect.remoteagentrun_set.order_by('-created_at','-id').first()
+                if run is None or terminal_state(run) not in {'repaired','verified'}:
+                    raise ValidationError({'status':'最新Agent结果尚未完成有效复测，不能标记待技术确认。'})
         if old_status == "closed" and new_status != "open" and data:
             raise ValidationError({"status": "已关闭缺陷请先重开再修改。"})
         regression_id = data.pop("regression_execution_id", None)

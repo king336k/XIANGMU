@@ -38,7 +38,8 @@ def finish(run_id, result, status="completed", error=""):
             status="failed";error="现场身份或授权已变化"
         run.completed_at=timezone.now()
         result={**result,'target_snapshot':run.result.get('target_snapshot',{}),
-            'display_policy_snapshot':run.result.get('display_policy_snapshot'),'queued_at':run.created_at.timestamp(),
+            'display_policy_snapshot':run.result.get('display_policy_snapshot'),
+            'defect_state_version':run.result.get('defect_state_version'),'queued_at':run.created_at.timestamp(),
             'worker_started_at':run.started_at.timestamp() if run.started_at else None,
             'worker_completed_at':run.completed_at.timestamp(),'worker_queue':'field-repairs'}
         fields = [
@@ -48,8 +49,10 @@ def finish(run_id, result, status="completed", error=""):
             ("复测", "verification"),
             ("后续方案", "solution"),
         ]
-        verified_only = run.mode == "verify" and result.get("outcome") == "verified" and result.get("verification_passed") is True
-        outcome = "已修复" if result.get("repaired") is True else "验证通过" if verified_only else "未自动修复"
+        from .agent_lifecycle import readonly_verified,handoff
+        verified_only = status=='completed' and readonly_verified(run,result)
+        repaired = status=='completed' and result.get('repaired') is True and result.get('verification_passed') is True
+        outcome = "已修复" if repaired else "验证通过" if verified_only else "未自动修复"
         lines = ["Agent 远程处理：" + outcome]
         for label, key in fields:
             value = result.get(key, "")
@@ -77,9 +80,11 @@ def finish(run_id, result, status="completed", error=""):
         run.tool_credential_hash = ""
         run.comment = comment
         run.save(update_fields=["result", "status", "error", "tool_credential_hash", "comment", "completed_at"])
+        handoff(run)
+        run.defect.refresh_from_db(fields=['status'])
         DefectEvent.objects.create(project_id=run.defect.project_id, defect=run.defect, created_by=run.owner,
             previous_status=run.defect.status, status=run.defect.status,
-            note="Agent 处理结束：" + ("已修复并通过复测" if result.get("repaired") is True else "验证通过，未修改现场" if verified_only else "未自动修复，根因及后续方案见现场处理结果") + f"；任务 {run.id}。")
+            note="Agent 处理结束：" + ("已修复并通过复测" if repaired else "验证通过，未修改现场" if verified_only else "未自动修复，根因及后续方案见现场处理结果") + f"；任务 {run.id}。")
 
 
 @shared_task(bind=True, name="plane.quality.remote_repair", queue="field-repairs", soft_time_limit=400, time_limit=430, max_retries=None)
@@ -121,6 +126,8 @@ def remote_repair(self, run_id):
             raw = "rr_" + secrets.token_urlsafe(36)
             run.tool_credential_hash = hashlib.sha256(raw.encode()).hexdigest()
             run.status = "running"
+            from .agent_lifecycle import mark_started
+            mark_started(run)
             run.result={**run.result,'display_policy_snapshot':display_policy,'target_snapshot':{
                 'collector':{'username':run.workstation.username,'host':run.workstation.capabilities.get('network',{}).get('ip_address','')},
                 'robot':{key:run.workstation.capabilities.get('robot',{}).get(key) for key in ['username','host','target_revision']}}}

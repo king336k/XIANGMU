@@ -266,7 +266,7 @@ class ReportDownload(QualityView):
                 )
             lines.append("")
         lines.extend(["## 关联缺陷", "", "| 缺陷 | 状态 | 处理说明 |", "| --- | --- | --- |"])
-        statuses = {"open": "待处理", "in_progress": "处理中", "resolved": "待回归", "closed": "已关闭"}
+        statuses = {"open": "待处理", "in_progress": "处理中", "pending_tech": "待技术确认", "needs_tech": "待技术处理", "resolved": "待回归", "closed": "已关闭"}
         for defect in snapshot["defects"]:
             lines.append(
                 "| "

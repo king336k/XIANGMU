@@ -206,7 +206,7 @@ def todo_query(user, options):
     )
     defect_query = (
         Defect.objects.filter(
-            project_id__in=defects, archived_at__isnull=True, status__in=["open", "in_progress", "resolved"]
+            project_id__in=defects, archived_at__isnull=True, status__in=["open", "in_progress", "pending_tech", "needs_tech", "resolved"]
         )
         .filter(Q(assignee=user) | Q(pending_assignee=user))
         .annotate(active_regression=Exists(active_regression))
@@ -282,7 +282,7 @@ def todo_query(user, options):
         archived_at__isnull=True,
         defect_verification__status="testing",
         defect_verification__defect__archived_at__isnull=True,
-        defect_verification__defect__status__in=["open", "in_progress", "resolved"],
+        defect_verification__defect__status__in=["open", "in_progress", "pending_tech", "needs_tech", "resolved"],
         assignee=user,
         pk__in=current_verifications(execute).filter(status="testing").values("plan_id"),
     )
@@ -301,7 +301,7 @@ def todo_query(user, options):
             archived_at__isnull=True,
             defect_verification__status__in=["testing", "review"],
             defect_verification__defect__archived_at__isnull=True,
-            defect_verification__defect__status__in=["open", "in_progress", "resolved"],
+            defect_verification__defect__status__in=["open", "in_progress", "pending_tech", "needs_tech", "resolved"],
             pk__in=current_verifications(execute).filter(status="testing").values("plan_id"),
         )
         arrangement_plans = TestPlan.objects.filter(
@@ -349,7 +349,7 @@ def todo_query(user, options):
             When(verification_status="review", then=Value("review")),
             When(
                 is_verification=True,
-                verification_defect_status__in=["open", "in_progress"],
+                verification_defect_status__in=["open", "in_progress", "pending_tech", "needs_tech"],
                 then=Value("waiting_repair"),
             ),
             When(verification_mode="manual", has_manual_execution=False, then=Value("waiting_test")),
@@ -369,7 +369,7 @@ def todo_query(user, options):
         ),
         action=Case(
             When(verification_status="review", then=Value("验收结果")),
-            When(is_verification=True, verification_defect_status__in=["open", "in_progress"], then=Value("等待修复")),
+            When(is_verification=True, verification_defect_status__in=["open", "in_progress", "pending_tech", "needs_tech"], then=Value("等待修复")),
             When(is_verification=True, assignee__isnull=True, then=Value("安排测试")),
             When(verification_mode="cases", has_verification_cases=False, then=Value("补充用例")),
             When(verification_mode="cases", has_verification_cases=True, has_pending_verification_cases=True, then=Value("执行用例")),

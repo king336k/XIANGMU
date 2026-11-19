@@ -114,8 +114,12 @@ def feedback_for(station, defect_id=None):
     ).distinct()
 
 
+@transaction.atomic
 def invalidate_run(run, reason):
     """End authorization immediately; actual worker release is recorded separately."""
+    RemoteWorkstation.objects.select_for_update(of=('self',)).get(pk=run.workstation_id)
+    RemoteAgentRun.objects.select_for_update(of=('self',)).get(pk=run.pk)
+    run.refresh_from_db()
     if run.status not in {'queued','running'}:return
     run.status='failed';run.error=reason;run.tool_credential_hash='';run.completed_at=timezone.now()
     run.result={**run.result,'queued_at':run.created_at.timestamp(),
@@ -123,6 +127,8 @@ def invalidate_run(run, reason):
         'worker_completed_at':None,'invalidated_at':run.completed_at.timestamp(),
         'worker_queue':'field-repairs','repaired':False,'verification_passed':False}
     run.save(update_fields=['status','error','tool_credential_hash','completed_at','result'])
+    from .agent_lifecycle import handoff
+    handoff(run)
     run.remotecommand_set.filter(status__in=['pending','delivered']).update(status='expired',payload={})
 
 
@@ -614,11 +620,14 @@ class RemoteFeedback(BaseAPIView):
             numbered = BusinessNumber.objects.filter(resource="quality.defect", code__icontains=query).values("object_id")
             rows = rows.filter(Q(title__icontains=query) | Q(description__icontains=query) | Q(pk__in=numbered))
         latest = RemoteAgentRun.objects.filter(workstation=station, defect_id=OuterRef("pk")).order_by("-created_at", "-id")
+        from .agent_lifecycle import with_mutation_evidence
+        latest=with_mutation_evidence(latest)
+        rows=rows.annotate(latest_mutation=Subquery(latest.values('processing_mutation')[:1]))
         rows = rows.annotate(latest_run_status=Subquery(latest.values("status")[:1]), latest_mode=Subquery(latest.values("mode")[:1]), latest_outcome=Subquery(latest.values("result__outcome")[:1]), latest_repaired=Subquery(latest.values("result__repaired")[:1]), latest_verified=Subquery(latest.values("result__verification_passed")[:1]), latest_run_id=Subquery(latest.values("id")[:1]), run_count=Count("remoteagentrun", filter=Q(remoteagentrun__workstation=station), distinct=True))
         rows = rows.annotate(latest_status=Case(
             When(latest_run_status__in=["queued", "running"], then=Value("running")),
-            When(latest_run_status="completed", latest_repaired=True, then=Value("repaired")),
-            When(latest_run_status="completed", latest_mode="verify", latest_outcome="verified", latest_verified=True, then=Value("verified")),
+            When(latest_run_status="completed", latest_repaired=True, latest_verified=True, then=Value("repaired")),
+            When(latest_run_status="completed", latest_outcome__in=["verified","verified_without_repair"], latest_verified=True, latest_mutation=False, then=Value("verified")),
             When(latest_run_status__isnull=True, then=Value("pending")),
             default=Value("unresolved"), output_field=CharField()))
         state = serializers.ChoiceField(choices=["all", "needs_attention", "pending", "running", "repaired", "unresolved"]).run_validation(request.query_params.get("state", "all"))
@@ -641,16 +650,18 @@ def run_queue(run):
     station = run.workstation
     now = timezone.now()
     if run.status == "running":
-        latest = run.remotecommand_set.order_by("-created_at", "-id").first()
+        cached=getattr(run,'_processing_commands',None)
+        latest = (cached[0] if cached else None) if cached is not None else run.remotecommand_set.order_by("-created_at", "-id").first()
         stage = "inspect"
         if latest:
-            context = station.capabilities.get("agent_context", {})
-            argv = latest.payload.get("argv")
-            if argv and argv == context.get("verify_argv"):
+            from .remote_event_display import safe_argv
+            context = run.result.get('display_policy_snapshot') or station.capabilities.get("agent_context", {})
+            argv = safe_argv(latest.payload.get("argv"))
+            if argv and argv == safe_argv(context.get("verify_argv")):
                 stage = "verify"
             elif latest.payload.get("kind") == "patch_file" or (
                 context.get("repair_argv") and isinstance(argv, list)
-                and argv[:len(context["repair_argv"])] == context["repair_argv"]
+                and argv[:len(context["repair_argv"])] == safe_argv(context["repair_argv"])
             ):
                 stage = "repair"
         return {"position": None, "reason": "", "stage": stage}
@@ -681,6 +692,7 @@ class RemoteRuns(BaseAPIView):
         defect = get_object_or_404(
             feedback_for(station, request.data.get("defect_id")), pk=request.data.get("defect_id")
         )
+        defect=Defect.objects.select_for_update().get(pk=defect.pk)
         problem = serializers.CharField(max_length=8000).run_validation(request.data.get("problem"))
         mode = serializers.ChoiceField(choices=["diagnose", "repair", "verify"], default="repair").run_validation(request.data.get("mode", "repair"))
         active = RemoteAgentRun.objects.filter(workstation=station, status__in=["queued", "running"], expires_at__gt=timezone.now())
@@ -698,6 +710,7 @@ class RemoteRuns(BaseAPIView):
             mode=mode,
             expires_at=timezone.now() + timedelta(minutes=30),
             identity_key=identity_key(station),
+            result={'defect_state_version':defect.edit_version},
         )
         DefectEvent.objects.create(project_id=defect.project_id,defect=defect,created_by=request.user,previous_status=defect.status,status=defect.status,note=f"Agent {'重新诊断' if mode == 'diagnose' else '重新验证' if mode == 'verify' else '诊断与自动修复'}：已进入队列；任务 {run.id}。")
         from .remote_tasks import remote_repair

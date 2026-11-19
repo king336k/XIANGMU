@@ -283,7 +283,7 @@ def source_spec(view, data, project):
         rows = statistics_queryset(project, params, request.user)
         if metric == "unclosed":
             rows = rows.exclude(status="closed")
-        elif metric in {"open", "in_progress", "resolved", "closed"}:
+        elif metric in {"open", "in_progress", "pending_tech", "needs_tech", "resolved", "closed"}:
             rows = rows.filter(status=metric)
         elif metric != "total":
             raise serializers.ValidationError({"metric": "请选择有效缺陷指标。"})

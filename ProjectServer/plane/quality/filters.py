@@ -45,7 +45,7 @@ SPECS = {
     },
     "defect": {
         "search": ["title", "description", "resolution"],
-        "status": ("status", choice("open in_progress resolved closed")),
+        "status": ("status", choice("open in_progress pending_tech needs_tech resolved closed")),
         "severity": ("severity", choice("critical major minor trivial")),
         "responsible_department": ("responsible_department", TEXT),
         "component": ("component", TEXT),
@@ -168,7 +168,7 @@ def filter_records(queryset, params, user):
     filters.update(china_date_filter(dates.get("created_after"), dates.get("created_before")))
     if queryset.model._meta.model_name == "defect" and params.get("exclude_status"):
         raw_excluded = params.getlist("exclude_status") if hasattr(params, "getlist") else [params["exclude_status"]]
-        excluded = [choice("open in_progress resolved closed").run_validation(value) for value in raw_excluded]
+        excluded = [choice("open in_progress pending_tech needs_tech resolved closed").run_validation(value) for value in raw_excluded]
         queryset = queryset.exclude(status__in=excluded)
     if source_filters:
         generic = Q(**source_filters)

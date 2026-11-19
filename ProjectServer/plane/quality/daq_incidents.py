@@ -210,6 +210,7 @@ def verified_sessions(incident):
 
 
 def receipt(link, view, session=None):
+    from .agent_lifecycle import agent_processing
     sessions = verified_sessions(link)
     if session is None:
         session = sessions[0] if sessions else None
@@ -219,6 +220,7 @@ def receipt(link, view, session=None):
         "issueId": str(link.defect_id),
         "issueCode": link.defect.code,
         "status": link.defect.status,
+        "agent_processing": agent_processing(link.defect),
         "eventId": data["eventId"],
         "hubProjectId": str(link.project_id),
         "category": data.get("category", "Other"),

@@ -27,7 +27,7 @@ def test_skipped_stages_are_not_marked_complete_and_state_ignores_history_pagina
     response = session_client.get(url)
     assert response.status_code == 200, response.content
     state = {stage["key"]: stage["state"] for stage in response.data["stages"]}
-    assert state == {"open": "completed", "in_progress": "skipped", "resolved": "current", "closed": "pending"}
+    assert state == {"open": "completed", "in_progress": "skipped", "needs_tech": "skipped", "pending_tech": "skipped", "resolved": "current", "closed": "pending"}
     # Completion facts must not change when the visible history page changes.
     for _ in range(24):
         DefectEvent.objects.create(
@@ -63,7 +63,7 @@ def test_reopen_clears_previous_round_completion_and_keeps_specific_actions(sess
     response = session_client.get(url)
     assert response.status_code == 200
     state = {stage["key"]: stage["state"] for stage in response.data["stages"]}
-    assert state == {"open": "current", "in_progress": "pending", "resolved": "pending", "closed": "pending"}
+    assert state == {"open": "current", "in_progress": "pending", "needs_tech": "pending", "pending_tech": "pending", "resolved": "pending", "closed": "pending"}
     assert response.data["events"][-2]["label"] == "已关闭 → 待处理"
     assert response.data["events"][-2]["tone"] == "failed"
     assert response.data["events"][-1]["label"] == "验证安排"

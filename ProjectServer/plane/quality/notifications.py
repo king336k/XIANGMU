@@ -126,7 +126,7 @@ def serialize_with_current_status(notifications, request):
     issues = {row.id: row for row in Issue.objects.filter(id__in=ids, project_id__in=projects).select_related("state")}
     requirements = {row.issue_id: row for row in Requirement.objects.filter(issue_id__in=ids, project_id__in=projects)}
     labels = {
-        "defect": {"open": "待处理", "in_progress": "处理中", "resolved": "已修复，待回归", "closed": "已关闭"},
+        "defect": {"open": "待处理", "in_progress": "处理中", "pending_tech": "待技术确认", "needs_tech": "待技术处理", "resolved": "已修复，待回归", "closed": "已关闭"},
         "plan": {
             "pending": "待分派",
             "ready": "待认领",

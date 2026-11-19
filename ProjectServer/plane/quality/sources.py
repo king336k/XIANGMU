@@ -234,7 +234,7 @@ class DefectCollaboration(QualityView):
         defect = get_object_or_404(Defect.objects.select_for_update(), pk=pk, project_id=self.project_id)
         if data["action"] == "claim":
             require_assignee(self, request.user.id, "TECHNICIAN")
-            if defect.status not in {"open", "in_progress"}:
+            if defect.status not in {"open", "in_progress", "pending_tech", "needs_tech"}:
                 raise Conflict("当前缺陷不在可认领阶段。")
             if defect.assignee_id and defect.assignee_id != request.user.id:
                 raise PermissionDenied("缺陷已分派给其他处理人。")

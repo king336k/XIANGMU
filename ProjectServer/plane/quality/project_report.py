@@ -239,7 +239,7 @@ class ProjectPeriodReport(QualityView):
                 statuses = {
                     "work": {"backlog", "unstarted", "started"},
                     "plans": {"pending", "ready", "running", "paused", "review", "returned", "unexecuted"},
-                    "defects": {"open", "in_progress", "resolved"},
+                    "defects": {"open", "in_progress", "pending_tech", "needs_tech", "resolved"},
                 }
                 if resource not in statuses or status not in statuses[resource] or not data.get("assignee_id"):
                     raise serializers.ValidationError({"detail": "请选择人员、记录类型和有效状态。"})

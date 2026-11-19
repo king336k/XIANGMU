@@ -339,7 +339,7 @@ def test_feedback_search_pagination_and_latest_run_status(remote):
     for index in range(25):
         defect=Defect.objects.create(project=project,title=f'camera fault {index}',description='camera')
         RemoteFeedbackBinding.objects.create(workstation=station,defect=defect)
-    repaired=RemoteAgentRun.objects.create(workstation=station,defect=defect,owner=station.agent.owner,identity_key=identity_key(station),status='completed',result={'repaired':True},expires_at=timezone.now()+timedelta(minutes=1))
+    repaired=RemoteAgentRun.objects.create(workstation=station,defect=defect,owner=station.agent.owner,identity_key=identity_key(station),status='completed',result={'repaired':True,'verification_passed':True},expires_at=timezone.now()+timedelta(minutes=1))
     data=client.get(BASE+'feedback/',{'device_id':device,'per_page':10,'page':2,'q':'camera','state':'all'}).data
     assert data['count']==25 and len(data['results'])==10
     passed=client.get(BASE+'feedback/',{'device_id':device,'state':'repaired'}).data

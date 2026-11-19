@@ -123,6 +123,30 @@ def call(path, data=None, method="GET", actor=16, headers=None):
     )
 
 
+@pytest.mark.parametrize('state',['pending_tech','needs_tech'])
+def test_reporting_triage_status_filters_counts_and_processing_share_the_defect_contract(reporting,state):
+    from datetime import timedelta
+    from plane.quality.remote_models import RemoteWorkstation,RemoteAgentRun
+    from plane.quality.models import FieldAgent
+    destination,user,payload,_=reporting
+    created=call('/api/quality-auth/daq-reports/',{**payload,'hubProjectId':str(destination.id)},'POST')
+    assert created.status_code==201,created.content
+    defect=Defect.objects.get(pk=created.data['issueId'])
+    defect.status=state;defect.save()
+    agent=FieldAgent.objects.create(project=destination,owner=destination.workspace.owner,name='report-progress',credential_hash='a'*64)
+    station=RemoteWorkstation.objects.create(agent=agent,credential_hash='b'*64,credential_expires_at=timezone.now()+timedelta(days=1))
+    run=RemoteAgentRun.objects.create(workstation=station,defect=defect,owner=agent.owner,status='completed',
+        result={'outcome':'verified_without_repair','verification_passed':True,'repaired':False},expires_at=timezone.now()+timedelta(minutes=5))
+    response=call('/api/quality-auth/daq-reports/?status='+state)
+    assert response.status_code==200 and response.data['count']==1
+    assert response.data['status_counts'][state]==1
+    assert response.data['results'][0]['agent_processing']['state']=='verified'
+    detail=call('/api/quality-auth/daq-reports/'+str(defect.id)+'/')
+    assert detail.data['defect']['status']==state
+    assert detail.data['defect']['agent_processing']==detail.data['source']['agent_processing']
+    assert detail.data['source']['agent_processing']['run_id']==str(run.id)
+
+
 def test_collector_can_choose_only_granted_nonarchived_projects_without_membership(reporting):
     destination, user, payload, state = reporting
     archived = Project.objects.create(
@@ -545,7 +569,7 @@ def test_report_only_progress_returns_status_without_internal_materials_or_diagn
     assert set(response.data) == {"defect", "source", "timeline", "comments"}
     assert all(set(item) == {"id", "actor", "action", "created_at", "status"} for item in response.data["timeline"])
     assert set(response.data["defect"]) == {
-        "id", "code", "title", "status", "created_at", "updated_at", "module", "assignee_name", "assignment_origin"
+            "id", "code", "title", "status", "created_at", "updated_at", "module", "assignee_name", "assignment_origin", "agent_processing"
     }
     assert response.data["defect"]["status"] == "resolved"
     assert b"internal-" not in response.content and b"KN-PRIVATE" not in response.content

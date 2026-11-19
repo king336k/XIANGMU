@@ -97,7 +97,7 @@ def test_history_status_filter_counts_across_all_states_and_paginates(reporting)
     assert result.data["count"] == 3
     assert len(result.data["results"]) == 1
     assert all(row["status"] == "resolved" for row in result.data["results"])
-    assert result.data["status_counts"] == {"all": 12, "open": 3, "in_progress": 3, "resolved": 3, "closed": 3}
+    assert result.data["status_counts"] == {"all": 12, "open": 3, "in_progress": 3, "pending_tech": 0, "needs_tech": 0, "resolved": 3, "closed": 3}
 
 
 @pytest.mark.parametrize(
@@ -160,6 +160,8 @@ def test_thousand_reports_use_request_local_authority_cache_and_page_only_receip
         "all": total,
         "open": total // 4,
         "in_progress": total // 4,
+        "pending_tech": 0,
+        "needs_tech": 0,
         "resolved": total // 4,
         "closed": total // 4,
     }

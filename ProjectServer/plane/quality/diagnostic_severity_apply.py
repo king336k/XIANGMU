@@ -30,6 +30,8 @@ def apply_severity(job, result, materials=None):
     defect.save(
         update_fields=["severity", "severity_origin", "severity_reason", "severity_job", "edit_version", "updated_at"]
     )
+    from .agent_lifecycle import advance_after_metadata
+    advance_after_metadata(defect,defect.edit_version-1)
     names = {"": "待评估", "critical": "致命", "major": "严重", "minor": "一般", "trivial": "轻微"}
     DefectEvent.objects.create(
         defect=defect,

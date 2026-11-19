@@ -74,7 +74,7 @@ def defect_event_display(event, labels, note):
         else "passed"
         if event.status == "closed"
         else "running"
-        if event.status in {"in_progress", "resolved"}
+        if event.status in {"in_progress", "pending_tech", "needs_tech", "resolved"}
         else "neutral"
     )
     return label, tone
@@ -196,7 +196,7 @@ class RecordProgress(QualityView):
             dates = [{"label": "创建", "date": row.created_at}, {"label": "结果确认", "date": row.reviewed_at}]
         elif kind == "defect":
             row = self.obj(Defect, pk)
-            stages = [("open", "待处理"), ("in_progress", "处理中"), ("resolved", "待回归"), ("closed", "已关闭")]
+            stages = [("open", "待处理"), ("in_progress", "处理中"), ("needs_tech", "待技术处理"), ("pending_tech", "待技术确认"), ("resolved", "待回归"), ("closed", "已关闭")]
             current = row.status
             selected, pagination = event_page(
                 row.events.select_related("created_by").order_by("created_at", "id"), request

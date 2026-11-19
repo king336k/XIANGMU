@@ -217,6 +217,10 @@ def event_process(event,context):
         value['details']=('实际命令：'+shlex.join(safe_argv(argv)))if argv else operation
     elif '进入队列' in note:
         value['summary']=task+'：已排队'
+    elif '开始现场排查' in note:
+        value.update(summary=task+'：开始排查',stage='inspect')
+    elif '结果已交技术跟进' in note:
+        value.update(summary=task+'：'+('待技术确认' if '待技术确认' in note else '待技术处理'),stage='completed')
     elif '处理结束' in note:
         value.update(summary=task+'：'+('已修复并复测通过'if'已修复并通过复测'in note else'复测通过，未修改现场'if'验证通过'in note else'未确认解决，查看现场处理结果'),stage='completed')
     return value
