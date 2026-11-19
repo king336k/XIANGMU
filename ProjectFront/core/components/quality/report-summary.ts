@@ -4,6 +4,18 @@ const qualification = /尚未|未确认|待现场|需现场|无法确认|未验�
 
 /** Select source sentences only; detailed evidence stays available unchanged. */
 export function compactReportText(value: string, limit = 240): string {
+  const professional = new Map<string, string>();
+  for (const line of value.split("\n")) {
+    const clean = line
+      .replace(/^\s*(?:#{1,6}\s*|[-*]\s+|\d+[.、]\s*)/, "")
+      .replace(/\*\*|`/g, "")
+      .trim();
+    if (/^(?:详细证据与处理过程|详细依据)[:：]/.test(clean)) break;
+    const point = /^(问题|原因|处理|验证)[:：]\s*(.+)$/.exec(clean);
+    if (point && !professional.has(point[1])) professional.set(point[1], point[2]);
+  }
+  if (professional.size === 4)
+    return ["问题", "原因", "处理", "验证"].map((label) => `${label}：${professional.get(label)}`).join("\n");
   const sentences = value
     .replace(/```[\s\S]*?```/g, "")
     .split(/(?<=[。！？；])\s*|\n+/)
@@ -30,6 +42,10 @@ export function compactReportText(value: string, limit = 240): string {
 
 export function reportSections(content: string): { label: string; text: string }[] {
   const names: Record<string, string> = {
+    问题: "问题",
+    原因: "原因",
+    处理: "处理",
+    验证: "验证",
     结论: "结论",
     原因与证据: "原因",
     已执行操作: "处理",
@@ -39,8 +55,12 @@ export function reportSections(content: string): { label: string; text: string }
   };
   const sections: { label: string; text: string }[] = [];
   for (const line of content.split("\n").slice(1)) {
-    if (line.trim() === "详细证据与处理过程：") break;
-    const match = /^(结论|原因与证据|已执行操作|修改位置|复测|后续方案)：(.*)$/.exec(line);
+    const clean = line
+      .replace(/^\s*(?:#{1,6}\s*|[-*]\s+)/, "")
+      .replace(/\*\*|`/g, "")
+      .trim();
+    if (/^(?:详细证据与处理过程|详细依据)[:：]/.test(clean)) break;
+    const match = /^(问题|原因|处理|验证|结论|原因与证据|已执行操作|修改位置|复测|后续方案)[:：](.*)$/.exec(clean);
     if (match) sections.push({ label: names[match[1]], text: match[2] });
     else if (sections.length) sections[sections.length - 1].text += `\n${line}`;
   }

@@ -138,6 +138,9 @@ export type RemoteProcess = {
       after_line?: number | null;
       path?: string;
       backup?: string;
+      before_file_exists?: boolean;
+      before_source_path?: string;
+      before_source_role?: string;
       before_sha256?: string;
       after_sha256?: string;
     }[];

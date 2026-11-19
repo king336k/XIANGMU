@@ -102,6 +102,7 @@ type Job = {
     verification_steps?: string[];
     notice?: string;
     answer?: string;
+    evidence_details?: string;
     model_confidence?: number | null;
     evidence_assessment?: "supported" | "partial" | "insufficient" | null;
     confidence_basis?: string;
@@ -269,7 +270,7 @@ export function DiagnosticsPanel({
             <h4 className="font-medium">结论</h4>
             <ul className="list-disc space-y-1 pl-5 leading-6" aria-label="诊断结论要点">
               {compactReportText(job.result.answer)
-                .split(/(?<=[。；！？])\s*/)
+                .split(/\n+|(?<=[。；！？])\s+/)
                 .filter(Boolean)
                 .map((point) => (
                   <li key={point}>{point}</li>
@@ -432,6 +433,11 @@ export function DiagnosticsPanel({
             {job.result.answer && (
               <div className="max-h-80 overflow-y-auto rounded-md bg-layer-1 p-3 text-13 leading-6">
                 <AssistantMarkdown content={job.result.answer} />
+              </div>
+            )}
+            {job.result.evidence_details && (
+              <div className="max-h-80 overflow-y-auto rounded-md bg-layer-1 p-3 text-13 leading-6">
+                <AssistantMarkdown content={job.result.evidence_details} />
               </div>
             )}
             {job.result.model_status === "completed" &&

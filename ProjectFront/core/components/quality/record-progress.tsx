@@ -267,26 +267,6 @@ export function RecordProgress({
                                     </dd>
                                   </div>
                                 )}
-                                {item.remote_process?.command?.kind === "run" &&
-                                !item.remote_process.command.changes?.length ? (
-                                  <div>
-                                    <dt className="text-tertiary">执行记录</dt>
-                                    <dd className="mt-2">
-                                      <CommandExecutionResult command={item.remote_process.command} />
-                                    </dd>
-                                  </div>
-                                ) : (
-                                  !!item.remote_process?.command?.argv?.length && (
-                                    <div>
-                                      <dt className="text-tertiary">命令参数</dt>
-                                      <dd>
-                                        <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
-                                          {JSON.stringify(item.remote_process.command.argv, null, 2)}
-                                        </pre>
-                                      </dd>
-                                    </div>
-                                  )
-                                )}
                                 {item.remote_process?.command?.path && !item.remote_process.command.changes?.length && (
                                   <div>
                                     <dt className="text-tertiary">文件位置</dt>
@@ -299,6 +279,12 @@ export function RecordProgress({
                                     <dd className="mt-2">
                                       <ConfigurationChangeDiff command={item.remote_process.command} />
                                     </dd>
+                                  </div>
+                                )}
+                                {(item.remote_process?.command?.kind === "run" ||
+                                  !!item.remote_process?.command?.argv?.length) && (
+                                  <div className="mt-2">
+                                    <CommandExecutionResult command={item.remote_process.command} target="执行详情" />
                                   </div>
                                 )}
                                 {(item.remote_process?.command?.kind !== "run" ||

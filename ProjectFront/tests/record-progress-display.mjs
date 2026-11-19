@@ -528,5 +528,16 @@ test("实际run回执复用命令结果分栏，说明保留技术记录，配�
     events: [{ id: "diff", label: "配置变更", date: "2026-11-19", remote_process: process }],
   }).render();
   assert.ok(nodes(changed).some((node) => node.props?.["aria-label"] === "配置差异"));
-  assert.ok(!nodes(changed).some((node) => node.props?.["aria-label"] === "命令执行记录"));
+  assert.ok(nodes(changed).some((node) => node.props?.["aria-label"] === "命令执行记录"));
+  const executionDetails = nodes(changed).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children]
+        .flat()
+        .some((child) => child?.type === "summary" && [child.props.children].flat().includes("执行详情"))
+  );
+  assert.ok(executionDetails);
+  assert.equal(executionDetails.props.open, undefined);
+  assert.match(JSON.stringify(executionDetails), /robot_peer verify/);
+  assert.match(JSON.stringify(executionDetails), /verified=true/);
 });

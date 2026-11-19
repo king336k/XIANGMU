@@ -33,6 +33,14 @@ export function ConfigurationChangeDiff({ command }: { command: Command }) {
                   {change.before_exists === false ? "新增字段" : "删除字段"}
                 </p>
               )}
+              {change.before_file_exists === false && (
+                <p className="px-3 py-1.5 text-11 text-secondary">新建配置文件 · 修改前目标文件不存在</p>
+              )}
+              {change.before_source_path && (
+                <p className="px-3 py-1.5 text-11 text-secondary">
+                  原值来源（{change.before_source_role || "执行回执"}）：{change.before_source_path}
+                </p>
+              )}
               <div className="grid sm:grid-cols-2">
                 <div aria-label={`修改前 ${change.key}`} className="min-w-0 bg-danger-subtle px-3 py-2">
                   <p className="mb-1 text-11 text-danger-primary">− 修改前 · {lineNumber(change.before_line)}</p>
@@ -64,7 +72,7 @@ export function ConfigurationChangeDiff({ command }: { command: Command }) {
                   <summary className="cursor-pointer">备份与校验信息</summary>
                   <div className="mt-2 space-y-1">
                     <p>
-                      备份 / 修改前：
+                      {change.before_file_exists === false ? "空备份标记（原文件不存在）：" : "备份 / 修改前："}
                       {change.backup || command.backup ? (
                         <span title={change.backup || command.backup}>
                           {backupCaption(change.backup || command.backup!)}

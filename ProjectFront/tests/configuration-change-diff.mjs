@@ -125,3 +125,31 @@ test("connector 32 character unique backup suffix also stays explicitly abbrevia
   assert.equal(caption.props.children, "/real/config.json.backup…");
   assert.ok(text(tree).includes(backup));
 });
+
+test("new override distinguishes effective original value from nonexistent file and empty backup marker", () => {
+  const tree = ConfigurationChangeDiff({
+    command: {
+      changes: [
+        {
+          path: "/runtime/override.yaml",
+          key: "initial_joint_states.right_arm[0]",
+          before: 3.3065,
+          after: 0.3065,
+          after_line: 2,
+          before_file_exists: false,
+          before_source_role: "effective",
+          before_source_path: "/runtime/effective.yaml",
+          backup: "/runtime/override.yaml.backup-marker",
+        },
+      ],
+    },
+  });
+  assert.match(text(tree), /新建配置文件/);
+  assert.match(text(tree), /原值来源.*effective/);
+  assert.match(text(tree), /空备份.*原文件不存在/);
+  assert.match(text(tree), /3.3065/);
+  assert.match(text(tree), /0.3065/);
+  const before = nodes(tree).find((node) => node.props?.["aria-label"] === "修改前 initial_joint_states.right_arm[0]");
+  assert.match(text(before), /行号未记录/);
+  assert.doesNotMatch(text(before), /第2行/);
+});

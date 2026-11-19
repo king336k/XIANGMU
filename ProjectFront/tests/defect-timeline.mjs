@@ -519,5 +519,14 @@ test("实际run回执复用命令结果分栏，说明保留技术记录，配�
   process.command.changes = [{ path: "/config.json", key: "enabled", before: false, after: true }];
   const changed = render([{ ...events[0], remote_process: process }], []);
   assert.ok(nodes(changed).some((node) => node.props?.["aria-label"] === "配置差异"));
-  assert.ok(!nodes(changed).some((node) => node.props?.["aria-label"] === "命令执行记录"));
+  assert.ok(nodes(changed).some((node) => node.props?.["aria-label"] === "命令执行记录"));
+  const executionDetails = nodes(changed).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children]
+        .flat()
+        .some((child) => child?.type === "summary" && [child.props.children].flat().includes("执行详情"))
+  );
+  assert.ok(executionDetails);
+  assert.equal(executionDetails.props.open, undefined);
 });

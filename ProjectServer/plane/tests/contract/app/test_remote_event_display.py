@@ -94,7 +94,7 @@ def test_fixed_robot_repair_uses_actual_stdout_identity_and_changes(remote):
     assert value['command']['changes'][0]['before'] is False
     command.payload={'kind':'run','argv':['unrelated','command']};command.save()
     ignored=EventSerializer(event,context={}).data['remote_process']
-    assert ignored['command']['changes']==[] and ignored['target']['label'].startswith('采集电脑')
+    assert ignored['command']['changes'][0]['key']=='telemetry_enabled' and ignored['target']['label']=='机器人'
 
 
 def test_frozen_display_policy_survives_registration_changes(remote):
@@ -140,7 +140,7 @@ def test_worker_freezes_only_safe_display_policy_and_finish_preserves_it(remote)
     station.capabilities={'agent_context':{'repair_argv':['replacement','repair']}};station.save()
     command=RemoteCommand.objects.create(workstation=station,run=run,
         payload={'kind':'run','argv':['fixed','repair','--token','synthetic-policy-secret']},status='done',expires_at=run.expires_at,
-        result={'ok':True,'exit_code':0,'stdout':json.dumps({'simulation':True,'changes':[{'target_kind':'robot','target_username':'robot','target_ip':'10.10.10.177','key':'enabled','after':True,'after_line':4}]})})
+        result={'ok':True,'exit_code':0,'stdout':json.dumps({'simulation':True,'changes':[{'target_kind':'robot','target_username':'robot','target_ip':'10.10.10.177','path':'/robot/config.json','key':'enabled','after':True,'after_line':4}]})})
     event=DefectEvent.objects.create(project=project,defect=defect,created_by=station.agent.owner,status=defect.status,previous_status=defect.status,note=f'Agent 现场修复：任务 {run.id}；命令 {command.id}。')
     display=EventSerializer(event,context={}).data['remote_process']
     assert display['target']['host']=='10.10.10.177' and display['command']['changes'][0]['after_line']==4
@@ -209,3 +209,44 @@ def test_reply_line_evidence_never_crosses_targets_and_robot_command_target_is_a
     change.update(target_kind='collector',target_username='collector',target_ip='10.0.0.195',after_line=4)
     command.result={'ok':True,'exit_code':0,'changes':[change]};command.save()
     assert CommentSerializer(comment).data['repair_changes'][0]['after_line']==4
+
+
+def test_real_file_receipt_overrides_command_classification_and_public_reply_keeps_execution(remote):
+    import json
+    from plane.quality.models import DefectComment
+    from plane.quality.sources import CommentSerializer
+    _,edge,device,project=remote;heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device)
+    comment=DefectComment.objects.create(project=project,defect=Defect.objects.create(project=project,title='D499 file receipt',description='real configuration'),created_by=station.agent.owner,visibility='public',content='Agent 远程处理：已修复')
+    run=RemoteAgentRun.objects.create(workstation=station,defect=comment.defect,owner=station.agent.owner,comment=comment,expires_at=timezone.now()+timedelta(minutes=5),result={'target_snapshot':{'collector':{'username':'collector','host':'10.0.0.195'}}})
+    change={'target_kind':'collector','path':'/runtime/override.yaml','key':'initial_joint_states.right_arm[0]','before':3.3065,'after':.3065,'line':2,'backup':'/runtime/override.yaml.backup-marker'}
+    repair={'changes':[change],'override_path':'/runtime/override.yaml','backup_existed':False}
+    stdout={'configuration':{'evaluated_source':'effective','files':[{'role':'effective','path':'/runtime/effective.yaml'}],'repair':repair}}
+    command=RemoteCommand.objects.create(workstation=station,run=run,payload={'kind':'run','argv':['unknown-wrapper','repair']},status='done',result={'ok':True,'exit_code':0,'changes':[change],'stdout':json.dumps(stdout)},expires_at=run.expires_at)
+    event=DefectEvent.objects.create(project=project,defect=comment.defect,created_by=station.agent.owner,status=comment.defect.status,previous_status=comment.defect.status,note=f'Agent 现场修复：任务 {run.id}；命令 {command.id}。')
+    display=EventSerializer(event,context={}).data['remote_process']
+    actual=display['command']['changes'][0]
+    assert display['stage']=='repair' and '修改配置文件' in display['summary']
+    assert actual['after_line']==2 and 'before_line' not in actual
+    assert actual['before_file_exists'] is False and actual['before_source_role']=='effective'
+    assert actual['before_source_path']=='/runtime/effective.yaml'
+    public=CommentSerializer(comment).data
+    assert public['repair_changes'][0]['after']==.3065
+    assert public['repair_changes'][0]['target']=='采集电脑：collector@10.0.0.195'
+    assert public['command_operations'][0]['argv']==['unknown-wrapper','repair']
+    assert public['command_operations'][0]['has_file_changes'] is True
+    # A failed verification after a real write must retain both the diff and failure.
+    command.result={**command.result,'ok':False,'exit_code':1};command.save()
+    partial=CommentSerializer(comment).data
+    assert partial['repair_changes'][0]['after']==.3065
+    assert partial['command_operations'][0]['ok'] is False
+
+
+def test_file_receipt_normalization_preserves_null_and_rejects_non_file_changes():
+    import json
+    from plane.quality.remote_event_display import receipt_file_changes
+    change={'path':'/config.yaml','key':'nullable','before':None,'after':False}
+    assert receipt_file_changes({'stdout':json.dumps({'configuration':{'repair':{'changes':[change]}}})})==[change]
+    for value in [{'key':'pip','before':'old','after':'new'}, {'path':'/config.yaml','key':'empty'}, {'path':'relative.yaml','key':'x','after':1}]:
+        assert receipt_file_changes({'changes':[value]})==[]
+    assert receipt_file_changes({'stdout':'service restarted','execution_steps':[{'argv':['pip','install','package']} ]})==[]

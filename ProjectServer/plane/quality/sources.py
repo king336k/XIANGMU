@@ -124,7 +124,7 @@ class CommentSerializer(serializers.ModelSerializer):
         if obj.id in cache:return cache[obj.id]
         changes=[];operations=[]
         from django.core.exceptions import ObjectDoesNotExist
-        from .remote_event_display import safe_changes,safe_argv,safe_output,execution_steps
+        from .remote_event_display import safe_changes,safe_argv,safe_output,execution_steps,receipt_file_changes
         try:run=obj.remoteagentrun
         except ObjectDoesNotExist:run=None
         if run is not None and run.defect_id==obj.defect_id and run.defect.project_id==obj.project_id:
@@ -136,14 +136,9 @@ class CommentSerializer(serializers.ModelSerializer):
             rows.sort(key=lambda row:(row.created_at,str(row.id)))
             observed=[];receipts={}
             for row in rows:
-                if row.status!='done' or row.result.get('ok') is not True or row.result.get('exit_code',0)!=0:continue
-                receipt=row.result
-                if row.payload.get('kind')=='run' and isinstance(receipt.get('stdout'),str) and len(receipt['stdout'])<=65536:
-                    try:
-                        parsed=json.loads(receipt['stdout'])
-                        if isinstance(parsed,dict) and parsed.get('simulation') is True:receipt=parsed
-                    except (ValueError,TypeError):pass
-                if isinstance(receipt.get('changes'),list):observed.extend(receipt['changes'][:20])
+                if row.status!='done':continue
+                receipt={**row.result,'changes':receipt_file_changes(row.result)}
+                observed.extend(receipt['changes'])
                 receipts[row.id]=receipt
             locations=run.result.get('repair_locations',[]) if isinstance(run.result,dict) else []
             for location in locations[:10] if isinstance(locations,list) else []:
@@ -164,20 +159,34 @@ class CommentSerializer(serializers.ModelSerializer):
             user=snapshot.get('username') or run.workstation.username
             host=snapshot.get('host') or run.workstation.capabilities.get('network',{}).get('ip_address','')
             target=('采集电脑：' if frozen else '采集电脑（当前登记信息）：')+user+('@'+host if host else '')
+            # Receipt facts take precedence over model-authored location summaries.
+            for actual in observed:
+                cleaned=safe_changes([actual])
+                if not cleaned:continue
+                fact=cleaned[0]
+                kind=actual.get('target_kind')
+                actual_user=actual.get('target_username')
+                actual_host=actual.get('target_ip')
+                actual_target=(('机器人：' if kind=='robot' else '采集电脑：')+actual_user+'@'+actual_host
+                    if kind in {'collector','robot'} and isinstance(actual_user,str) and actual_user and isinstance(actual_host,str) and actual_host else target)
+                identity=(fact.get('path'),fact.get('key'),actual_target)
+                existing=next((index for index,item in enumerate(changes)
+                    if (item.get('path'),item.get('key'),item.get('target'))==identity),None)
+                entry={**fact,'target':safe_output(actual_target)[:300]}
+                if existing is None:changes.append(entry)
+                else:changes[existing]=entry
             policy=run.result.get('display_policy_snapshot') or run.workstation.capabilities.get('agent_context',{})
             # Public summaries retain a bounded tail; all events remain available separately.
             for row in [row for row in rows if row.payload.get('kind')=='run'][-12:]:
                 result=row.result if isinstance(row.result,dict) else {}
                 argv=safe_argv(row.payload.get('argv'))
-                if argv==safe_argv(policy.get('inspect_argv')) or (len(argv)>=2 and argv[-2] in {'rosa','rai'} and argv[-1] in {'health','inspect'}):continue
+                receipt=receipts.get(row.id,{})
+                receipt_changes=receipt.get('changes',[])
+                if not receipt_changes and (argv==safe_argv(policy.get('inspect_argv')) or (len(argv)>=2 and argv[-2] in {'rosa','rai'} and argv[-1] in {'health','inspect'})):continue
                 repair=safe_argv(policy.get('repair_argv'))
                 stage='verify' if argv==safe_argv(policy.get('verify_argv')) else 'repair' if repair and argv[:len(repair)]==repair else 'command'
                 command_target=target
-                receipt=receipts.get(row.id,{})
-                receipt_changes=receipt.get('changes',[])
-                if stage=='repair' and changes and isinstance(receipt_changes,list) and any(
-                    isinstance(item,dict) and any(item.get('path')==shown.get('path') and item.get('key')==shown.get('key')
-                        for shown in changes) for item in receipt_changes):continue
+                if receipt_changes:stage='repair'
                 actual_targets={(item.get('target_kind'),item.get('target_username'),item.get('target_ip'))
                     for item in (receipt_changes if isinstance(receipt_changes,list) else []) if isinstance(item,dict)
                     and item.get('target_kind') in {'robot','collector'}
@@ -186,7 +195,7 @@ class CommentSerializer(serializers.ModelSerializer):
                     kind,username,host=next(iter(actual_targets))
                     command_target=('机器人：' if kind=='robot' else '采集电脑：')+username+'@'+host
                 operations.append({'target':safe_output(command_target)[:300],
-                    'argv':argv,'stage':stage,'stdout':safe_output(result.get('stdout'))[-4096:],'execution_steps':execution_steps(result),
+                    'argv':argv,'stage':stage,'has_file_changes':bool(receipt_changes),'stdout':safe_output(result.get('stdout'))[-4096:],'execution_steps':execution_steps(result),
                     'stderr':safe_output(result.get('stderr'))[-4096:],'status':row.status,
                     'ok':result.get('ok') if type(result.get('ok')) is bool else None,
                     'exit_code':result.get('exit_code'),'timed_out':result.get('timed_out') is True})

@@ -54,7 +54,7 @@ def safe_changes(values):
     for change in values:
         if not isinstance(change,dict):continue
         safe={}
-        for field in ['key','before','after','before_exists','after_exists','line','before_line','after_line','path','backup','before_sha256','after_sha256']:
+        for field in ['key','before','after','before_exists','after_exists','line','before_line','after_line','path','backup','before_sha256','after_sha256','before_file_exists','before_source_path','before_source_role']:
             if field not in change:continue
             value_part=change[field]
             if field in {'before','after'} and sensitive_name(change.get('key','')):
@@ -69,6 +69,48 @@ def safe_changes(values):
             elif isinstance(value_part,str):safe[field]=redact(value_part)[:2000]
             elif value_part is None or type(value_part) in {bool,int}:safe[field]=value_part
         if safe:changes.append(safe)
+    return changes
+
+
+def receipt_file_changes(result):
+    """Project file facts from the command receipt, independent of wrapper names."""
+    if not isinstance(result,dict):return []
+    parsed={}
+    stdout=result.get('stdout')
+    if isinstance(stdout,str) and len(stdout)<=65536:
+        try:
+            value=json.loads(stdout)
+            if isinstance(value,dict):parsed=value
+        except (ValueError,TypeError):pass
+    configuration=parsed.get('configuration',{})
+    configuration=configuration if isinstance(configuration,dict) else {}
+    repair=configuration.get('repair',parsed.get('repair',{}))
+    repair=repair if isinstance(repair,dict) else {}
+    candidates=result.get('changes')
+    if not isinstance(candidates,list) or not candidates:
+        candidates=parsed.get('changes') or repair.get('changes',[])
+    files=configuration.get('files',[])
+    files=files if isinstance(files,list) else []
+    source_role=configuration.get('evaluated_source')
+    sources=[item for item in files if isinstance(item,dict) and item.get('role')==source_role
+        and isinstance(item.get('path'),str) and item['path'].startswith('/')]
+    changes=[]
+    for item in candidates[:20] if isinstance(candidates,list) else []:
+        if not isinstance(item,dict) or not isinstance(item.get('path'),str) or not item['path'].startswith('/'):
+            continue
+        if not isinstance(item.get('key'),str) or not item['key'] or not any(key in item for key in ('before','after','before_exists','after_exists')):
+            continue
+        change={key:value for key,value in item.items() if value is not None or key in {'before','after'}}
+        if repair.get('override_path')==change['path']:
+            if type(repair.get('backup_existed')) is bool:
+                change['before_file_exists']=repair['backup_existed']
+            # This receipt producer explicitly reports the written override's line.
+            if type(change.get('line')) is int and change['line']>0:
+                change.setdefault('after_line',change['line'])
+            if change.get('before_file_exists') is False and len(sources)==1:
+                change['before_source_role']=source_role
+                change['before_source_path']=sources[0]['path']
+        changes.append(change)
     return changes
 
 
@@ -174,27 +216,18 @@ def event_process(event,context):
         elif argv and match_argv==context_policy.get('inspect_argv'):label='检查现场环境与运行状态'
         success=row.result.get('ok')is True and row.result.get('exit_code',0)==0
         receipt=row.result
-        # Only the registered fixed repair command returns this structured robot receipt.
-        if kind=='run' and stage=='repair' and success:
-            stdout=row.result.get('stdout','')
-            if isinstance(stdout,str) and len(stdout)<=65536:
-                try:
-                    parsed=json.loads(stdout)
-                    if isinstance(parsed,dict) and parsed.get('simulation') is True:
-                        receipt=parsed
-                except (ValueError,TypeError):pass
         # Only actual per-command receipt identity can override the station snapshot.
         if row.result.get('target_kind') in {'collector','robot'}:
             target={'label':'机器人'if row.result['target_kind']=='robot'else'采集电脑',
                 'username':row.result.get('target_username',''),'host':row.result.get('target_ip','')}
-        raw_changes=receipt.get('changes',[])
-        raw_changes=raw_changes[:20] if isinstance(raw_changes,list) else []
-        robot_targets={(change.get('target_username'),change.get('target_ip')) for change in raw_changes
-            if isinstance(change,dict) and change.get('target_kind')=='robot'
+        raw_changes=receipt_file_changes(row.result)
+        if raw_changes:stage='repair'
+        receipt_targets={(change.get('target_kind'),change.get('target_username'),change.get('target_ip')) for change in raw_changes
+            if isinstance(change,dict) and change.get('target_kind') in {'collector','robot'}
             and isinstance(change.get('target_username'),str) and isinstance(change.get('target_ip'),str)}
-        if len(robot_targets)==1:
-            username,host=next(iter(robot_targets))
-            target={'label':'机器人','username':redact(username),'host':redact(host),'identity_source':'execution_receipt'}
+        if len(receipt_targets)==1:
+            target_kind,username,host=next(iter(receipt_targets))
+            target={'label':'机器人' if target_kind=='robot' else '采集电脑','username':redact(username),'host':redact(host),'identity_source':'execution_receipt'}
         changes=safe_changes(raw_changes)
         steps=execution_steps(row.result)
         if stage=='repair':

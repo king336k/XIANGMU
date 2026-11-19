@@ -19,7 +19,7 @@ type Reply = {
   content: string;
   created_at: string;
   repair_changes?: (Change & { target: string })[];
-  command_operations?: (CommandExecution & { target: string; stage?: string })[];
+  command_operations?: (CommandExecution & { target: string; stage?: string; has_file_changes?: boolean })[];
 };
 const prefix = "Agent 远程处理：";
 
@@ -133,7 +133,11 @@ export function AgentFeedbackResults({
                     const occurrence = (commandOccurrences.get(key) || 0) + 1;
                     commandOccurrences.set(key, occurrence);
                     return (
-                      <CommandExecutionResult key={`${key}:${occurrence}`} target={command.target} command={command} />
+                      <CommandExecutionResult
+                        key={`${key}:${occurrence}`}
+                        target={command.has_file_changes ? `${command.target || "现场"} · 执行详情` : command.target}
+                        command={command}
+                      />
                     );
                   })}
                   <details className="border-t border-subtle pt-2">

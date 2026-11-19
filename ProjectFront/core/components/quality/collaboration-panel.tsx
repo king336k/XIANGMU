@@ -320,25 +320,6 @@ export function CollaborationPanel({
                                 </dd>
                               </div>
                             )}
-                            {row.process?.command?.kind === "run" && !row.process.command.changes?.length ? (
-                              <div>
-                                <dt className="text-tertiary">执行记录</dt>
-                                <dd className="mt-2">
-                                  <CommandExecutionResult command={row.process.command} />
-                                </dd>
-                              </div>
-                            ) : (
-                              !!row.process?.command?.argv?.length && (
-                                <div>
-                                  <dt className="text-tertiary">命令参数</dt>
-                                  <dd>
-                                    <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
-                                      {JSON.stringify(row.process.command.argv, null, 2)}
-                                    </pre>
-                                  </dd>
-                                </div>
-                              )
-                            )}
                             {row.process?.command?.path && !row.process.command.changes?.length && (
                               <div>
                                 <dt className="text-tertiary">文件位置</dt>
@@ -351,6 +332,11 @@ export function CollaborationPanel({
                                 <dd className="mt-2">
                                   <ConfigurationChangeDiff command={row.process.command} />
                                 </dd>
+                              </div>
+                            )}
+                            {(row.process?.command?.kind === "run" || !!row.process?.command?.argv?.length) && (
+                              <div className="mt-2">
+                                <CommandExecutionResult command={row.process.command} target="执行详情" />
                               </div>
                             )}
                             {!row.process?.command?.changes?.length &&
