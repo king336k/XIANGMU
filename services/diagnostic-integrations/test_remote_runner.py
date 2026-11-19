@@ -837,6 +837,40 @@ class DiagnosticReasoningTest(unittest.TestCase):
         self.assertEqual(value['findings'][0]['evidence_refs'],['uploaded:0'])
         self.assertEqual(value['remaining_gaps'],['原失败业务操作尚未复测'])
 
+    def test_offline_approved_configuration_is_not_blocked_by_unrelated_robot_connection(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        turns=[];repaired=[]
+        def respond(body):
+            if body.get('operation')=='knowledge':return {'results':[]}
+            if body.get('argv')==['daq-local-diagnostics-v1','repair','a'*64]:
+                repaired.append(True)
+                return {'ok':True,'exit_code':0,'stdout':json.dumps({'configuration':{'repair':{'state':'applied','changed':['initial_joint_states.arm[0]']}}})}
+            return {'ok':True,'exit_code':0,'stdout':json.dumps({'scope':'configuration_validation','checks':[{'state':'fail'}],
+                'configuration':{'state':'pass'if repaired else 'fail','current_scope':'offline_configuration_validation',
+                    'repair_allowed':True,'repair_authority':'explicit_repair_plan','snapshot_sha256':'a'*64}})}
+        self.responder=respond
+        def model(messages,info):
+            index=len(turns);turns.append(index)
+            calls=[('run_command',{'argv':['daq-local-diagnostics-v1','inspect']}),('search_project_knowledge',{'query':'reset failure'})]
+            if index<len(calls):return ModelResponse(parts=[ToolCallPart(*calls[index])])
+            if index==3:
+                self.assertTrue(any('不需要启动或连接机器人' in str(getattr(part,'content',''))
+                    for message in messages for part in message.parts))
+                return ModelResponse(parts=[ToolCallPart('apply_configuration_repair',{})])
+            if repaired and index==4:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['daq-local-diagnostics-v1','verify'],'purpose':'verify'})])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'配置修复待处理'if not repaired else '配置已修复，业务待验收',
+                'root_cause':'配置检查发现异常。','actions':[],'verification':[],'solution':'先连接机器人再修改配置。'if not repaired else '另行验收机器人复位。','repaired':False})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'research_url':self.gateway.url,'tool_token':'synthetic','problem':'排查修复',
+                'context':{'operation_mode':'repair','repair_allowed':True,'verification_scope':'configuration_validation',
+                    'require_knowledge_search':True,'inspect_argv':['daq-local-diagnostics-v1','inspect'],
+                    'repair_argv':['daq-local-diagnostics-v1','repair'],'verify_argv':['daq-local-diagnostics-v1','verify']}}))
+        self.assertTrue(repaired)
+        self.assertTrue(result['configuration_repaired'])
+        self.assertFalse(result['repaired'])
+
     def test_receipt_scope_restricts_default_context_business_claim(self):
         self.gateway.run_command(['inspect'])
         self.gateway.run_command(['repair'],purpose='repair')
@@ -1062,6 +1096,86 @@ class DiagnosticReasoningTest(unittest.TestCase):
                 'gateway_url':self.gateway.url,'tool_token':'synthetic-token','context':{'inspect_argv':['inspect'],
                     'operation_mode':'diagnose','repair_allowed':True}}))
         self.assertFalse(any(body.get('argv')==['repair'] for _,body in self.requests))
+
+class ReceiptFinalizationTest(unittest.TestCase):
+    def test_budget_after_verified_write_uses_one_tool_free_report_without_replaying(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        from pydantic_ai.exceptions import UsageLimitExceeded
+        requests=[];dispatched=[];runtime={}
+        def rpc(gateway,body):
+            dispatched.append(body)
+            if body['argv']==['repair','a'*64]:
+                return {'exit_code':0,'stdout':json.dumps({'changes':[{'path':'/approved/config.yaml','key':'pose',
+                    'before':3.3,'after':0.3,'backup':'/approved/config.backup'}]})}
+            return {'exit_code':0,'stdout':'actual check'}
+        def model(messages,info):
+            requests.append(info)
+            if not info.function_tools:
+                text=json.dumps([getattr(part,'content','') for message in messages for part in message.parts])
+                self.assertIn('using_receipts',text);self.assertIn('/approved/config.yaml',text)
+                return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'配置已修改并通过配置复查，业务待验收',
+                    'root_cause':'本轮配置变更和检查已有真实回执','actions':[],'verification':[],
+                    'solution':'由获授权人员验收原业务操作','repaired':False})])
+            index=len(requests)-1
+            sequence=[('run_command',{'argv':['inspect']}),('run_command',{'argv':['repair','a'*64],'purpose':'repair'}),
+                ('run_command',{'argv':['verify'],'purpose':'verify'})]
+            if index<len(sequence):
+                name,args=sequence[index];return ModelResponse(parts=[ToolCallPart(name,args)])
+            raise UsageLimitExceeded('synthetic-private-provider-body')
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)),patch.object(runner.Gateway,'rpc',rpc):
+            result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':'http://unused','tool_token':'synthetic-token','context':{'inspect_argv':['inspect'],
+                    'verify_argv':['verify'],'repair_argv':['repair'],'verification_scope':'configuration_validation'}},runtime))
+        self.assertEqual(len(dispatched),3);self.assertEqual(len(requests),5)
+        self.assertTrue(result['configuration_repaired']);self.assertFalse(result['repaired'])
+        self.assertEqual(result['finalization_stage'],'receipt_only');self.assertTrue(result['using_receipts'])
+        self.assertEqual(result['analysis_stop_reason'],'UsageLimitExceeded')
+        self.assertNotIn('synthetic-private-provider-body',json.dumps(result))
+
+    def test_exhausted_analysis_token_budget_leaves_one_no_tool_report_request(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        from pydantic_ai.usage import RequestUsage
+        requests=[]
+        def model(messages,info):
+            requests.append(info)
+            if not info.function_tools:
+                return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'现场已取证，原因待进一步验证',
+                    'root_cause':'当前回执仅支持检查已完成','actions':[],'verification':[],
+                    'solution':'补充原故障业务验收','repaired':False})],usage=RequestUsage(input_tokens=10,output_tokens=200))
+            return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})],
+                usage=RequestUsage(input_tokens=10,output_tokens=12000))
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)),patch.object(runner.Gateway,'rpc',return_value={'exit_code':0}):
+            result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':'http://unused','tool_token':'synthetic-token','context':{'inspect_argv':['inspect']}},{}))
+        self.assertEqual(len(requests),2)
+        self.assertEqual(result['analysis_usage']['output_tokens'],12000)
+        self.assertEqual(result['finalization_usage']['output_tokens'],200)
+        self.assertEqual(result['finalization_stage'],'receipt_only')
+        self.assertFalse(result['repaired'])
+
+    def test_partial_or_unverified_receipts_cannot_be_promoted_by_finalizer(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        from pydantic_ai.exceptions import UsageLimitExceeded
+        calls=[];runtime={}
+        def model(messages,info):
+            calls.append(info)
+            if not info.function_tools:
+                return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'未完成验证','root_cause':'现有证据不足',
+                    'actions':[],'verification':[],'solution':'先重新确认当前状态','repaired':True})])
+            if len(calls)==1:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})])
+            raise UsageLimitExceeded('synthetic')
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)),patch.object(runner.Gateway,'rpc',return_value={'exit_code':0}):
+            with self.assertRaises(UsageLimitExceeded) as error:
+                asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                    'gateway_url':'http://unused','tool_token':'synthetic-token','context':{'inspect_argv':['inspect']}},runtime))
+        result=runner.failed_analysis({'context':{}},runtime,error.exception)
+        self.assertFalse(result['repaired'] or result['configuration_repaired'])
+        self.assertEqual(len(calls),3)
+        self.assertEqual(result['finalization_stage'],'failed')
+
 
 class LocationReceiptTest(unittest.TestCase):
     def test_failed_patch_receipt_cannot_add_locations_or_ip_as_line(self):

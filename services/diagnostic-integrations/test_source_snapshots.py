@@ -88,6 +88,7 @@ class SourceSnapshotTest(unittest.TestCase):
     def test_tampered_content_and_symlink_escape_fail_closed(self):
         self.build();file=self.output/'files/src/main.py';file.chmod(0o600);file.write_text('changed')
         with self.assertRaises(ValueError):self.adapter.read(self.root,'project-a','daq-source','src/main.py')
+        file.parent.chmod(0o755)
         file.unlink();file.symlink_to(self.repo/'src/main.py')
         with self.assertRaises(ValueError):self.adapter.read(self.root,'project-a','daq-source','src/main.py')
 
@@ -126,6 +127,9 @@ class SourceSnapshotTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'duplicate_snapshot_source_id'):self.adapter.catalog(self.root,'project-a')
         for path in duplicate.rglob('*'):
             if not path.is_symlink():path.chmod(0o700 if path.is_dir() else 0o600)
+        for directory in duplicate.rglob('*'):
+            if directory.is_dir():directory.chmod(0o755)
+        duplicate.chmod(0o755)
         shutil.rmtree(duplicate)
         (self.output/'manifest.json').chmod(0o644)
         self.assertEqual(self.adapter.catalog(self.root,'project-a')['sources'],[])

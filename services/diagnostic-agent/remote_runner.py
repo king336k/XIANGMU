@@ -17,11 +17,11 @@ from urllib.request import Request, ProxyHandler, build_opener, HTTPRedirectHand
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, ModelRetry
-from pydantic_ai.exceptions import ModelTimeoutError
+from pydantic_ai.exceptions import ModelTimeoutError, UsageLimitExceeded, RunTimedOut
 from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
-from pydantic_ai.usage import UsageLimits
+from pydantic_ai.usage import UsageLimits, RunUsage
 
 
 class TimeoutRetryModel(WrapperModel):
@@ -640,6 +640,7 @@ async def analyze(payload, runtime=None):
                 'last_tool_validation_error':gateway.last_tool_validation_error},gateway.secrets)
         consulted = set()
         research_state = {'searched': False, 'calls': 0}
+        code_jobs = {}
 
         def research_rpc(body):
             if research_state['calls'] >= 10 or time.monotonic() >= gateway.deadline:
@@ -698,6 +699,32 @@ async def analyze(payload, runtime=None):
             if offset:request['offset']=offset
             result=research_rpc(request)
             if not result.get('error'):gateway.observe_locations(result)
+            return result
+
+        @agent.tool_plain(sequential=True, timeout=20)
+        def start_code_repair(source_id: str, problem: str, gap: str) -> dict:
+            """Ask the isolated OpenHands worker to repair an approved source snapshot.
+
+            Only use for a confirmed source defect after current inspection and knowledge search.
+            The central service chooses the exact commit and test command. No production deployment
+            or robot modification is performed. Poll the returned job with code_repair_status.
+            """
+            if context.get('operation_mode','repair') != 'repair':return {'error':'code_repair_mode_required'}
+            if not gateway.inspected or not research_state['searched']:return {'error':'inspect_and_search_project_knowledge_first'}
+            if not 1<=len(gap.strip())<=1000 or not 1<=len(problem.strip())<=20000:return {'error':'bounded_code_evidence_gap_required'}
+            result=research_rpc({'operation':'code_repair_start','source_id':source_id,'problem':problem,'gap':gap})
+            if isinstance(result.get('job_id'),str):code_jobs[result['job_id']]=result
+            return result
+
+        @agent.tool_plain(sequential=True, timeout=20)
+        def code_repair_status(job_id: str) -> dict:
+            """Read only this run's isolated code job. A passing patch is not a deployed fix."""
+            if job_id not in code_jobs:return {'error':'code_job_not_started_by_this_run'}
+            result=research_rpc({'operation':'code_repair_status','job_id':job_id,'gap':'查看本轮隔离代码修改及独立测试结果'})
+            if not result.get('error'):
+                code_jobs[job_id]=result
+                if result.get('status') in {'completed','failed'}:
+                    gateway.retain_evidence('isolated_code_worker',result,'code_repair')
             return result
 
         @agent.tool_plain(sequential=True, timeout=80)
@@ -789,6 +816,15 @@ async def analyze(payload, runtime=None):
                 reject('repair_not_verified',"没有真实修改及修改后成功检查，repaired 必须为 false。")
             if context.get('operation_mode') == 'verify' and not gateway.verification_attempted:
                 reject('verify_not_executed','本轮是复测模式，必须实际执行固定verify_argv并如实报告结果。')
+            configuration=gateway.configuration_observation
+            if (context.get('operation_mode','repair')=='repair' and gateway.repair_allowed and gateway.mutation==0
+                    and configuration.get('current_scope')=='offline_configuration_validation'
+                    and configuration.get('state')=='fail' and configuration.get('repair_allowed') is True
+                    and configuration.get('repair_authority') in {'explicit_repair_plan','verified_device_baseline'}):
+                reject('approved_offline_configuration_plan_not_attempted',
+                    '现场入口明确支持offline_configuration_validation，且已返回独立批准计划和当前异常快照。'
+                    '它只修改采集电脑配置，不需要启动或连接机器人。请调用apply_configuration_repair执行已批准计划，'
+                    '再调用固定verify检查配置；若实际工具拒绝，则按真实回执报告阻断原因。不要虚构连接前置条件或业务恢复。')
             uploaded_refs={item['ref'] for item in uploaded}
             if uploaded_refs and not any(uploaded_refs.intersection(finding.evidence_refs) for finding in report.findings):
                 reject('uploaded_evidence_not_assessed','已提供原缺陷上传材料。先结合feedback_materials.excerpt分析原始错误，findings引用对应uploaded:N；不能仅做连通性检查就忽略原故障。可调用get_diagnostic_state查看编号与真实缺口。')
@@ -808,11 +844,56 @@ async def analyze(payload, runtime=None):
             gateway.validation_mismatches=[]
             return report
 
+        analysis_usage=RunUsage()
+        stage={'finalization_stage':'analysis','using_receipts':False}
+        if runtime is not None:runtime['finalization']=stage
+
+        def analysis_model_settings(run_context):
+            remaining=12000-run_context.usage.output_tokens
+            if remaining<=0:raise UsageLimitExceeded('analysis_output_budget_reserved')
+            return {'max_tokens':min(3500,remaining)}
+
         async def invoke():
-            result = await agent.run(json.dumps({"problem": payload.get("problem", ""), "context": payload.get("context", {})}, ensure_ascii=False),
-                usage_limits=UsageLimits(request_limit=15, tool_calls_limit=20, output_tokens_limit=15000),
-                model_settings={"max_tokens": 3500}, timeout=285)
-            return result.output.model_dump()
+            try:
+                result = await agent.run(json.dumps({"problem": payload.get("problem", ""), "context": payload.get("context", {})}, ensure_ascii=False),
+                    usage_limits=UsageLimits(request_limit=14, tool_calls_limit=18, output_tokens_limit=12000),
+                    usage=analysis_usage,model_settings=analysis_model_settings, timeout=max(1,gateway.deadline-time.monotonic()-70))
+                return result.output.model_dump()
+            except (UsageLimitExceeded,RunTimedOut) as error:
+                # Reserve one request and 3000 output tokens from the existing total budget.
+                # Never restart the tool workflow: this final pass has no executable tools.
+                final_tokens=min(3000,15000-analysis_usage.output_tokens)
+                if (not gateway.evidence or gateway.deadline-time.monotonic()<2 or
+                        final_tokens<1 or analysis_usage.requests>=15):raise
+                stage.update(finalization_stage='receipt_only',using_receipts=True,analysis_stop_reason=type(error).__name__,
+                    analysis_usage={key:getattr(analysis_usage,key) for key in ('requests','tool_calls','input_tokens','output_tokens')})
+                final_usage=RunUsage()
+                facts={'using_receipts':True,'analysis_stop_reason':type(error).__name__,'problem':payload.get('problem',''),
+                    'feedback':context.get('feedback',{}),'uploaded_evidence':uploaded[:20],
+                    'uploaded_total':len(uploaded),'feedback_materials':{key:value for key,value in materials.items() if key!='sources'} if isinstance(materials,dict) else {},
+                    'current_receipts':gateway.evidence[-6:],
+                    'configuration':gateway.configuration_observation,'repair_locations':gateway.repair_locations,
+                    'execution_summary':gateway.execution_summary(),'capability_state':gateway.capability_state(),
+                    'verification_scope':gateway.verification_scope,'repaired':gateway.repair_verified,
+                    'configuration_repaired':gateway.configuration_repaired,'verification_passed':gateway.verification_passed,
+                    'observed_locations':sorted(gateway.observed_locations)[:1000]}
+                finalizer=Agent(model,output_type=Report,retries=0,instructions=(
+                    '你是本轮诊断的最终报告整理器，只使用输入真实回执与已上传证据，不调用工具、不提出已执行的新操作。'
+                    '证据工具循环因预算结束；只整理已证实状态，未知根因明确待证。历史日志不代表当前状态。'
+                    '配置或连通性检查只证明其scope，不代表原运动或采集业务恢复；只有输入repaired=true才可repaired=true。'
+                    '已执行配置修改并复查通过时直说配置已恢复、业务待验收，不写成整轮未执行或重新修复。'
+                    'findings只引用输入uploaded:N或tool:N，observed必须有引用；明确剩余证据及验收缺口。'
+                    'summary/root_cause/solution中路径行号必须出自observed_locations；输出中文typed Report。'))
+                try:
+                    report_result=await finalizer.run(json.dumps(redact(facts,gateway.secrets),ensure_ascii=False),
+                        usage_limits=UsageLimits(request_limit=1,tool_calls_limit=1,output_tokens_limit=final_tokens),usage=final_usage,
+                        model_settings={'max_tokens':min(2200,final_tokens)},timeout=min(70,max(1,gateway.deadline-time.monotonic())))
+                    report=evidence_gate(report_result.output)
+                    stage['finalization_usage']={key:getattr(final_usage,key) for key in ('requests','tool_calls','input_tokens','output_tokens')}
+                    return report.model_dump()
+                except Exception as final_error:
+                    stage.update(finalization_stage='failed',finalization_error_chain=safe_error_classes(final_error))
+                    raise error from None
 
         # LangGraph is an installed lifecycle dependency when enabled; no fabricated fallback status.
         try:
@@ -836,6 +917,7 @@ async def analyze(payload, runtime=None):
             graph.add_edge("verify_evidence", END)
             result = (await graph.compile().ainvoke({"report": {}}))["report"]
         mode = context.get('operation_mode', 'repair')
+        result.update(stage)
         result['mode'] = mode if mode in {'repair','diagnose','verify'} else 'diagnose'
         result['verification_passed'] = gateway.verification_passed
         result['verification_scope'] = gateway.verification_scope
@@ -844,6 +926,7 @@ async def analyze(payload, runtime=None):
         result['needs_business_verification'] = gateway.needs_business_verification
         result['configuration_repaired'] = gateway.configuration_repaired
         result['capability_gaps'] = gateway.capability_state()['gaps']
+        result['isolated_code_jobs'] = list(code_jobs.values())
         # Locations come from actual execution receipts, never model-authored paths/lines.
         result['repair_locations'] = gateway.repair_locations
         result['actions'],result['verification']=gateway.execution_summary()
@@ -855,7 +938,7 @@ def safe_error_classes(error):
     """Classify only known exception types; never inspect provider error messages."""
     allowed={'TimeoutError','UsageLimitExceeded','UnexpectedModelBehavior','ModelRetry','ValidationError',
              'ModelHTTPError','ModelAPIError','ModelConnectionError','ModelRequestTimeout','ModelTimeoutError',
-             'RuntimeError','ValueError','KeyError','TypeError','JSONDecodeError','CancelledError','ToolValidationError'}
+             'RuntimeError','RunTimedOut','ValueError','KeyError','TypeError','JSONDecodeError','CancelledError','ToolValidationError'}
     classes=[]
     seen=set()
     while error is not None and id(error) not in seen and len(classes)<8:
@@ -887,6 +970,7 @@ def failed_analysis(payload, runtime, error):
             'repair_locations':gateway.repair_locations if gateway else [],
             'mode':mode if mode in {'repair','diagnose','verify'} else 'diagnose','outcome':'unresolved',
             'execution_error':True,'agent_error_code':classes[0],'agent_error_chain':classes}
+    result.update(runtime.get('finalization',{}))
     result['validation_reason']=gateway.last_validation_error if gateway else ''
     result['tool_validation_reason']=gateway.last_tool_validation_error if gateway else ''
     result['validation_mismatches']=gateway.validation_mismatches if gateway else []
