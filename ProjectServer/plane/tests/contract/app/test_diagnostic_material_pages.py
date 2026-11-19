@@ -265,6 +265,8 @@ def test_material_coverage_distinguishes_verified_image_from_read_text(material_
         "status": "unsupported",
         "reason": "当前诊断未读取图片内容",
         "verified": True,
+        "integrity_verified": True,
+        "semantic_scan_complete": False,
     }
     log = next(row for row in coverage if row["file_id"] == str(text.id))
     assert log["status"] == "analyzed" and log["verified"] is True

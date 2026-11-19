@@ -102,6 +102,16 @@ def run_diagnostic(job_id):
         text, sources, findings = (
             inspect(job, materials, coverage=coverage) if job.mode in {"llm", "auto"} else inspect(job)
         )
+        incomplete_scan = any(row.get("scan_incomplete") for row in sources)
+        integrity_failed = any(row.get("integrity_verified", row.get("verified")) is False for row in coverage) or any(
+            row.get("integrity_verified") is False for row in sources)
+        verified_subset = (incomplete_scan and not integrity_failed and bool(sources)
+            and all(row.get("integrity_verified") is True for row in sources)
+            and any(row.get("read_bytes", 0) > 0 and row.get("scanned_bytes", 0) > 0 for row in sources))
+        partial_warning = {"unread_sources": [
+            {key: row.get(key) for key in ("file_id", "archive_entry", "scanned_bytes", "file_bytes", "selection_scope")}
+            for row in sources if row.get("scan_incomplete")],
+            "constraints": ["只陈述已读取原始事实", "不得以未见推断不存在、完整覆盖或已修复", "建议列明待验证步骤，不自动执行"]}
         facts = meta.get("input", {}).get("context", {})
         findings = [*findings, *evaluate(facts)]
         result.update(
@@ -113,7 +123,11 @@ def run_diagnostic(job_id):
             model_status="not_requested",
             timeout_seconds=timeout_seconds(),
             progress={"stage": "rule_check", "at": timezone.now().isoformat()},
-            materials_status="read" if sources else "awaiting_materials",
+            materials_status="partial" if verified_subset else "read" if sources else "awaiting_materials",
+            analysis_scope="verified_read_subset" if verified_subset else "full_evidence_scan",
+            material_coverage_status="partial" if incomplete_scan else "complete",
+            integrity_verified=not integrity_failed,
+            semantic_scan_complete=not incomplete_scan,
             read_bytes=sum(row["read_bytes"] for row in sources),
             input_scope={
                 "model_text_chars": min(len(text), 12000),
@@ -139,13 +153,15 @@ def run_diagnostic(job_id):
             result["materials_status"] = "unsupported"
         elif incomplete_upload or (automatic and (not meta.get("input", {}).get("files") or not sources)):
             result["model_status"] = "awaiting_materials"
-        elif any(row.get("scan_incomplete") for row in sources):
+        elif integrity_failed:
+            result["model_status"] = "material_integrity_failed"
+        elif incomplete_scan and not verified_subset:
             result["model_status"] = "material_scan_incomplete"
         elif job.mode in {"llm", "auto"}:
             config = assistant.provider_config(job.project.workspace_id)
             if not config["configured"]:
                 result["model_status"] = "unconfigured"
-            elif time.monotonic() - started > (30 if any(row["kind"] == "image" for row in coverage) else 20):
+            elif not verified_subset and time.monotonic() - started > (30 if any(row["kind"] == "image" for row in coverage) else 20):
                 result["model_status"] = "timeout"
                 result["model_error_code"] = "MODEL_TIMEOUT"
                 result["model_failure"] = safe_model_failure(
@@ -153,6 +169,8 @@ def run_diagnostic(job_id):
                 )
             else:
                 model_text = summarize(redact(text), 12000)
+                if verified_subset:
+                    model_text = "本轮分析已核验并读取的材料片段；未读取部分未参与诊断。\n" + model_text
                 # The server may use approved knowledge without granting the collector knowledge access.
                 query = diagnostic_search_query(text, sources)
                 if report_only:
@@ -180,8 +198,14 @@ def run_diagnostic(job_id):
                     from .diagnostic_context import diagnostic_context
 
                     context_references = diagnostic_context(job, report_only=report_only, sources=sources)
+                    if verified_subset:
+                        import json
+                        context_references.append({"reference": "MATERIAL-COVERAGE", "title": "材料读取覆盖范围",
+                            "content": json.dumps(partial_warning, ensure_ascii=False)})
                     answer = analyze_diagnostic(
-                        {**config, "require_actionable_report": True},
+                        {**config, "require_actionable_report": True,
+                         **({"analysis_scope": "verified_read_subset", "material_coverage": "partial",
+                             "partial_source_warning": partial_warning} if verified_subset else {})},
                         model_text,
                         sources,
                         [*references, *context_references],
@@ -189,6 +213,12 @@ def run_diagnostic(job_id):
                     )
                     result["context_references"] = context_references
                     result.update(answer, method="hybrid", notice="规则与模型分析", model_status="completed")
+                    if verified_subset:
+                        result.update(analysis_scope="verified_read_subset", materials_status="partial",
+                            material_coverage_status="partial", partial_source_warning=partial_warning,
+                            integrity_verified=True, semantic_scan_complete=False,
+                            evidence_assessment="partial", repaired=False, business_verified=False,
+                            automatic_decisions="pending_material_coverage")
                 except (TimeoutError, APITimeoutError) as error:
                     result["model_status"] = "timeout"
                     result["model_error_code"] = "MODEL_TIMEOUT"
@@ -267,10 +297,13 @@ def run_diagnostic(job_id):
         if current.status == "completed":
             from .module_routing import route_completed
 
-            route_completed(current, materials)
             from .diagnostic_severity_apply import apply_severity
 
-            assessment = apply_severity(current, current.result, materials)
+            if current.result.get("analysis_scope") == "verified_read_subset" or current.result.get("integrity_verified") is False:
+                assessment = {"severity": "", "basis": "材料仅部分读取，严重程度及模块分派待完整证据或人工核验。", "evidence": []}
+            else:
+                route_completed(current, materials)
+                assessment = apply_severity(current, current.result, materials)
             current.result = {
                 **current.result,
                 "severity_proposal": current.result.get("severity_assessment", {}),

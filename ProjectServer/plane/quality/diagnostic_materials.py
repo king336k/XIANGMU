@@ -116,6 +116,8 @@ def inspect(job, materials=None, *, coverage=None):
                 "status": "not_read",
                 "reason": "材料尚未读取",
                 "verified": False,
+                "integrity_verified": False,
+                "semantic_scan_complete": False,
             }
             entries[str(file.id)] = entry
             coverage.append(entry)
@@ -150,8 +152,11 @@ def inspect(job, materials=None, *, coverage=None):
                     coverage_entry["reason"] = "材料SHA256校验失败"
                 sources.append(incomplete(file, "材料SHA256校验失败"))
                 continue
+            if suffix == ".zip":
+                with path.open("rb") as handle:
+                    validate_archive(handle, file.name)
             if coverage_entry is not None:
-                coverage_entry["verified"] = True
+                coverage_entry.update(verified=True, integrity_verified=True)
             if suffix == ".png" and coverage_entry is not None:
                 from .diagnostic_image_text import extract_png
 
@@ -203,6 +208,8 @@ def inspect(job, materials=None, *, coverage=None):
                         "original_bytes_scope": "image_ocr",
                         "origin": "image_ocr",
                         "requires_review": True,
+                        "integrity_verified": True,
+                        "semantic_scan_complete": True,
                         "scan_incomplete": False,
                         "preview_truncated": len(clean) > 8000,
                         "truncated": len(clean) < len(extracted["text"]),
@@ -220,8 +227,6 @@ def inspect(job, materials=None, *, coverage=None):
                     )
                 continue
             if suffix == ".zip":
-                with path.open("rb") as handle:
-                    validate_archive(handle, file.name)
                 with zipfile.ZipFile(path) as archive:
                     readable = sorted(
                         (entry for entry in archive.infolist()
@@ -235,7 +240,7 @@ def inspect(job, materials=None, *, coverage=None):
                         slots = len(readable) - entry_index + len(files) - file_index - 1
                         entry_budget = remaining // max(1, slots)
                         if time.monotonic() >= deadline:
-                            source = incomplete(file, "ZIP材料扫描总时间预算耗尽")
+                            source = incomplete(file, "ZIP材料扫描总时间预算耗尽", integrity_verified=True)
                             source.update(archive_entry=entry.filename, file_bytes=entry.file_size)
                             sources.append(source)
                             continue
@@ -272,6 +277,8 @@ def inspect(job, materials=None, *, coverage=None):
                                 "file_bytes": entry.file_size,
                                 "scanned_bytes": scanned,
                                 "scan_incomplete": scan_incomplete,
+                                "integrity_verified": True,
+                                "semantic_scan_complete": not scan_incomplete,
                                 "preview_truncated": len(clean) > 8000,
                                 "truncated": entry.file_size > len(sample),
                             }
@@ -307,13 +314,21 @@ def inspect(job, materials=None, *, coverage=None):
                         "scanned_bytes": scanned,
                         **selection,
                         "scan_incomplete": scan_incomplete,
+                        "integrity_verified": True,
+                        "semantic_scan_complete": not scan_incomplete,
                         "preview_truncated": len(clean) > 8000,
                         "truncated": file.size > len(sample),
                     }
                 )
         except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, ValidationError):
+            for source in sources[source_start:]:
+                source.update(integrity_verified=False, semantic_scan_complete=False)
+            if materials is not None:
+                for reference in list(materials):
+                    if reference == f"FILE-{file.id}" or reference.startswith(f"FILE-{file.id}:"):
+                        materials.pop(reference)
             if coverage_entry is not None:
-                coverage_entry.update(status="not_read", reason="材料读取或ZIP校验失败")
+                coverage_entry.update(status="not_read", reason="材料读取或ZIP校验失败", verified=False, integrity_verified=False)
             sources.append(incomplete(file, "材料读取或ZIP校验失败"))
             continue
         if coverage_entry is not None:
@@ -323,7 +338,7 @@ def inspect(job, materials=None, *, coverage=None):
                 and any(row.get("read_bytes", 0) > 0 for row in read)
                 and not any(row.get("scan_incomplete") for row in read)
             ):
-                coverage_entry.update(status="analyzed", reason="")
+                coverage_entry.update(status="analyzed", reason="", semantic_scan_complete=True)
             elif not read:
                 coverage_entry.update(status="unsupported", reason="压缩包内没有可读取的文本")
             else:
@@ -340,12 +355,14 @@ def inspect(job, materials=None, *, coverage=None):
     return text, sources, findings
 
 
-def incomplete(file, reason):
+def incomplete(file, reason, *, integrity_verified=False):
     return {
         "file_id": str(file.id),
         "name": file.name,
         "sha256": file.sha256,
         "excerpt": reason,
+        "integrity_verified": integrity_verified,
+        "semantic_scan_complete": False,
         "read_bytes": 0,
         "file_bytes": file.size,
         "scanned_bytes": 0,
