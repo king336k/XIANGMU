@@ -13,7 +13,7 @@ export function AgentReportText({ content }: { content: string }) {
         const count = (occurrences.get(line) || 0) + 1;
         occurrences.set(line, count);
         const label =
-          /^(Agent\s*远程处理|故障|已处理|待验证|当前检查|历史处理|问题|原因|处理|验证|结论|原因与证据|已执行操作|复测|后续方案|修改位置)([：:])(.*)$/.exec(
+          /^(?:\*\*)?(Agent\s*远程处理|故障|已处理|待验证|当前检查|历史处理|问题|原因|处理|验证|结论|原因与证据|已执行操作|复测|后续方案|修改位置)(?:\*\*)?([：:])(.*)$/.exec(
             line
           );
         return (

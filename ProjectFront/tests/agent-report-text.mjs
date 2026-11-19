@@ -37,3 +37,17 @@ test("public summary and readable basis keep technical identifiers in a separate
   assert.match(html, /joint limit violation/);
   assert.match(html, new RegExp(id));
 });
+test("brief report Markdown headings render as bold labels while body symbols and HTML remain exact escaped text", () => {
+  const original =
+    "**故障**：初始化失败，原因未确认。\n**已处理**：初值由3.3065改为0.3065，原式 **left * right** 保留。\n**待验证**：执行一次遥操作；<script>unsafe()</script>\n**未知标题**：保留原文";
+  const html = renderToStaticMarkup(React.createElement(AgentReportText, { content: original }));
+  for (const label of ["故障", "已处理", "待验证"]) {
+    assert.ok(html.includes(`>${label}：</strong>`), label);
+    assert.ok(!html.includes(`**${label}**`), label);
+  }
+  assert.match(html, /3\.3065改为0\.3065/);
+  assert.ok(html.includes("**left * right**"));
+  assert.ok(html.includes("**未知标题**：保留原文"));
+  assert.match(html, /&lt;script&gt;unsafe\(\)&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script>/);
+});
