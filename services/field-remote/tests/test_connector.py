@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import getpass
 import json
 import os
 import pwd
@@ -65,6 +66,37 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(target.read_text(), 'new')
         self.assertEqual((self.root / result['backup']).read_text(), 'old')
         self.assertEqual(result['sha256'], hashlib.sha256(b'new').hexdigest())
+
+    def test_file_receipts_report_actual_collector_path_backup_and_json_changes(self):
+        target=self.root/'config.json';before={'robot_port':18778,'keep':True,'removed':3}
+        after={'robot_port':18777,'keep':True,'added':False}
+        target.write_text(json.dumps(before));old=target.read_bytes();self.engine.host_ip='10.10.10.195'
+        self.engine.accept(self.command('read_file',path='config.json'))
+        read=self.engine.results[-1]
+        self.assertEqual(read['resolved_path'],str(target))
+        self.engine.accept(self.command('patch_file',path='config.json',expected_sha256=read['sha256'],content=json.dumps(after)))
+        receipt=self.engine.results[-1]
+        self.assertTrue(receipt['ok'])
+        self.assertEqual(receipt['resolved_path'],str(target))
+        self.assertTrue(Path(receipt['backup']).is_absolute())
+        self.assertEqual(Path(receipt['backup']).read_bytes(),old)
+        changes={row['key']:row for row in receipt['changes']}
+        self.assertEqual(set(changes),{'robot_port','added','removed'})
+        self.assertEqual((changes['robot_port']['before'],changes['robot_port']['after']),(18778,18777))
+        self.assertFalse(changes['added']['before_exists']);self.assertFalse(changes['removed']['after_exists'])
+        for row in receipt['changes']:
+            self.assertEqual(row['path'],str(target));self.assertEqual(row['target_kind'],'collector')
+            self.assertEqual(row['target_username'],getpass.getuser());self.assertEqual(row['target_ip'],'10.10.10.195')
+            self.assertEqual(row['backup'],receipt['backup']);self.assertNotIn('line',row)
+
+    def test_non_json_patch_has_actual_path_but_no_invented_key_changes(self):
+        target=self.root/'config.json';target.write_text('unstructured text')
+        self.engine.accept(self.command('patch_file',path='config.json',expected_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),content='updated text'))
+        receipt=self.engine.results[-1]
+        self.assertTrue(receipt['ok']);self.assertEqual(receipt['resolved_path'],str(target));self.assertEqual(receipt['changes'],[])
+        self.assertNotIn('line',receipt)
+        self.engine.accept(self.command('read_file',path='../config.json'))
+        self.assertFalse(self.engine.results[-1]['ok']);self.assertNotIn('resolved_path',self.engine.results[-1])
 
     def test_path_escape_and_secret_refused(self):
         (self.root / 'escape').symlink_to('/etc')

@@ -490,10 +490,41 @@ class Engine:
                 return
             elif kind == 'read_file':
                 data = self.policy.read(command['path'])
-                result.update(content=data.decode('utf-8'), sha256=hashlib.sha256(data).hexdigest())
+                result.update(content=data.decode('utf-8'), sha256=hashlib.sha256(data).hexdigest(),
+                              resolved_path=str(self.policy.root / command['path']),
+                              target_username=getpass.getuser(),target_ip=self.host_ip,target_kind='collector')
             elif kind == 'patch_file':
                 self.journal(command_id, self.seen[command_id])
-                result.update(self.policy.patch(command['path'], command['expected_sha256'], command['content']))
+                patched=self.policy.patch(command['path'], command['expected_sha256'], command['content'])
+                backup_data=self.policy.read(patched['backup'])
+                actual=self.policy.read(command['path'])
+                if hashlib.sha256(actual).hexdigest()!=patched['sha256']:
+                    raise ValueError('file changed after patch; read actual state before reporting')
+                resolved_path=str(self.policy.root / command['path'])
+                backup_path=str(self.policy.root / patched['backup'])
+                metadata={'target_username':getpass.getuser(),'target_ip':self.host_ip,'target_kind':'collector'}
+                changes=[]
+                try:
+                    def unique_keys(pairs):
+                        value={}
+                        for key,item in pairs:
+                            if key in value:raise ValueError('ambiguous JSON duplicate key')
+                            value[key]=item
+                        return value
+                    before=json.loads(backup_data,object_pairs_hook=unique_keys)
+                    after=json.loads(actual,object_pairs_hook=unique_keys)
+                    if isinstance(before,dict) and isinstance(after,dict):
+                        for key in sorted(set(before)|set(after)):
+                            if (key in before and key in after and
+                                    json.dumps(before[key],sort_keys=True)==json.dumps(after[key],sort_keys=True)):
+                                continue
+                            changes.append({**metadata,'path':resolved_path,'key':key,'before':before.get(key),
+                                'after':after.get(key),'before_exists':key in before,'after_exists':key in after,
+                                'backup':backup_path,'before_sha256':hashlib.sha256(backup_data).hexdigest(),
+                                'after_sha256':patched['sha256']})
+                except (ValueError,UnicodeDecodeError):pass
+                result.update(**metadata,sha256=patched['sha256'],resolved_path=resolved_path,
+                              backup=backup_path,changes=changes)
             else:
                 raise ValueError('unknown command kind')
         except (ValueError, OSError, KeyError, TypeError, AttributeError, binascii.Error) as exc:
