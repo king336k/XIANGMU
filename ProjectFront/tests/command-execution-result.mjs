@@ -109,3 +109,55 @@ test("output and argv are text escaped by React and redacted placeholders stay u
   assert.match(text(tree), /\[已隐藏\]/);
   assert.ok(nodes(tree).every((node) => !node.props?.dangerouslySetInnerHTML));
 });
+
+test("actual execution steps replace the wrapper and keep each actual outcome", () => {
+  const tree = CommandExecutionResult({
+    target: "collector@10.0.0.195",
+    command: {
+      argv: ["python3", "action_acceptance.py", "repair"],
+      status: "done",
+      exit_code: 0,
+      stdout: "wrapper summary must not duplicate real steps",
+      execution_steps: [
+        {
+          argv: ["venv/bin/python", "-m", "pip", "install", "--no-index", "colorama.whl"],
+          stdout: "Successfully installed colorama-0.4.6",
+          exit_code: 0,
+          ok: true,
+          status: "done",
+        },
+        {
+          argv: ["systemctl", "--user", "restart", "engram-diagnostic-action-test.service"],
+          stderr: "unit failed",
+          exit_code: 1,
+          ok: false,
+          status: "done",
+        },
+      ],
+    },
+  });
+  const commandRegions = nodes(tree).filter((node) => node.props?.["aria-label"] === "执行命令");
+  const resultRegions = nodes(tree).filter((node) => node.props?.["aria-label"] === "执行结果");
+  assert.equal(commandRegions.length, 2);
+  assert.match(text(commandRegions[0]), /pip install --no-index colorama.whl/);
+  assert.match(text(commandRegions[1]), /systemctl --user restart/);
+  assert.match(resultRegions[0].props.className, /bg-success-subtle/);
+  assert.match(resultRegions[1].props.className, /bg-danger-subtle/);
+  assert.doesNotMatch(text(tree), /action_acceptance.py|wrapper summary/);
+  assert.match(text(tree), /collector@10.0.0.195/);
+});
+
+test("empty steps fall back to the actual wrapper and nested untrusted steps are not interpreted", () => {
+  const fallback = CommandExecutionResult({
+    command: { argv: ["wrapper"], execution_steps: [], status: "done", exit_code: 0 },
+  });
+  assert.match(text(fallback), /wrapper/);
+  const tree = CommandExecutionResult({
+    command: {
+      execution_steps: [{ argv: ["real-step"], timed_out: true, execution_steps: [{ argv: ["not-an-actual-step"] }] }],
+    },
+  });
+  assert.match(text(tree), /real-step|命令执行超时/);
+  assert.doesNotMatch(text(tree), /not-an-actual-step/);
+  assert.equal(nodes(tree).filter((node) => node.props?.["aria-label"] === "执行命令").length, 1);
+});

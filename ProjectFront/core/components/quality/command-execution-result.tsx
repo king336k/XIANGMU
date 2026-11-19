@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-export type CommandExecution = {
+export type CommandExecutionStep = {
   argv?: string[];
   stdout?: string;
   stderr?: string;
@@ -8,7 +8,8 @@ export type CommandExecution = {
   status?: string;
   timed_out?: boolean;
 };
-export function CommandExecutionResult({ command, target }: { command: CommandExecution; target?: string }) {
+export type CommandExecution = CommandExecutionStep & { execution_steps?: CommandExecutionStep[] };
+function executionResult({ command, target }: { command: CommandExecutionStep; target?: string }) {
   const hasExit = typeof command.exit_code === "number" && Number.isInteger(command.exit_code);
   const failed =
     command.timed_out === true ||
@@ -78,5 +79,21 @@ export function CommandExecutionResult({ command, target }: { command: CommandEx
         </div>
       </div>
     </section>
+  );
+}
+
+export function CommandExecutionResult({ command, target }: { command: CommandExecution; target?: string }) {
+  if (!command.execution_steps?.length) return executionResult({ command, target });
+  const occurrences = new Map<string, number>();
+  return (
+    <div aria-label="实际执行步骤" className="space-y-3">
+      {target && <p className="text-12 break-all text-secondary">{target}</p>}
+      {command.execution_steps.map((step) => {
+        const signature = JSON.stringify(step);
+        const occurrence = (occurrences.get(signature) || 0) + 1;
+        occurrences.set(signature, occurrence);
+        return <div key={`${signature}:${occurrence}`}>{executionResult({ command: step })}</div>;
+      })}
+    </div>
   );
 }
