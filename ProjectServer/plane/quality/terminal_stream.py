@@ -1,6 +1,7 @@
 """Low-latency browser transport over the existing terminal authorization boundary."""
 import asyncio
 import json
+import time
 from urllib.parse import urlsplit
 
 from channels.db import database_sync_to_async
@@ -251,7 +252,7 @@ class StationConsumer(AsyncJsonWebsocketConsumer):
         self.lock = asyncio.Lock()
         self.identity = None
         self.seq = 0
-        self.sent_commands = set()
+        self.sent_commands = {}
         headers = dict(self.scope.get("headers", []))
         credential = headers.get(b"authorization", b"").decode()
         if headers.get(b"origin") or not credential.startswith("Bearer rw_") or len(credential)>128:
@@ -281,7 +282,7 @@ class StationConsumer(AsyncJsonWebsocketConsumer):
                 await self.close(code=4403,reason="exchange_rejected"); return
             self.seq = content["seq"]
             self.identity = content["payload"].get("identity")
-            self.sent_commands.update(row["id"] for row in result.get("commands",[]))
+            self.sent_commands.update({row["id"]:row["expires_at"] for row in result.get("commands",[])})
             await self.send_json({"type":"exchange","seq":self.seq,**result})
 
     async def push_commands(self):
@@ -290,6 +291,7 @@ class StationConsumer(AsyncJsonWebsocketConsumer):
             while True:
                 await asyncio.sleep(.03)
                 now=asyncio.get_running_loop().time()
+                self.sent_commands={key:expiry for key,expiry in self.sent_commands.items()if expiry>time.time()}
                 if now-last_check>5 and await station_identity(self.raw) is None:
                     await self.close(code=4403); return
                 if now-last_check>5:last_check=now
@@ -299,7 +301,7 @@ class StationConsumer(AsyncJsonWebsocketConsumer):
                     if status!=200:
                         await self.close(code=4403);return
                     fresh=[row for row in result.get("commands",[])if row["id"]not in self.sent_commands]
-                    self.sent_commands.update(row["id"]for row in fresh)
+                    self.sent_commands.update({row["id"]:row["expires_at"]for row in fresh})
                     if fresh:await self.send_json({"type":"commands","commands":fresh})
 
         except asyncio.CancelledError:pass
