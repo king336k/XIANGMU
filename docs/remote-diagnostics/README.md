@@ -23,7 +23,7 @@ PydanticAI 是唯一诊断决策者；LangGraph 编排诊断与证据检查；RO
 
 同一采集电脑最多保留20个待处理任务，同一反馈不会重复入队。不同反馈按创建顺序等待，空闲后由现有 Celery 自动执行，不增加负责调度的模型。已打开终端或已有上传可以继续完成，Agent 保持等待；新终端、新上传在已有任务时提示稍后操作。Agent 执行期间，文件浏览/传输提示处理完成后重试，避免抢占执行槽。
 
-状态接口的 queue.position 是本采集电脑前方的排队任务数，0不表示立即运行；reason 区分等待终端关闭、文件传输完成、采集电脑空闲或处理资源；stage 来自真实现场命令。页面不预测完成时间。任务等待上限30分钟，开始执行后上限8分钟；过期不盲目重放修复。Celery 释放等待任务的工作槽，不阻塞其他采集电脑。部署继续使用现有 diagnostics 队列、固定并发与 prefetch=1。
+状态接口的 queue.position 是本采集电脑前方的排队任务数，0不表示立即运行；reason 区分等待终端关闭、文件传输完成、采集电脑空闲或处理资源；stage 来自真实现场命令。页面不预测完成时间。任务等待上限30分钟，开始执行后上限8分钟；过期不盲目重放修复。Celery 释放等待任务的工作槽，不阻塞其他采集电脑。现场完整任务使用独立 field-repairs 队列，默认4个工作位、prefetch=1；普通诊断报告保留独立 diagnostics 队列与2个工作位。诊断、支持范围内的修复、复测和原反馈回写属于同一RemoteAgentRun.id，仅入队一次，不在阶段间另排修复队列。
 
 现场执行器单次只接收一个文件/工具任务，终端输入作为独立传输。数据库只锁本设备/本任务，避免多个采集电脑连带锁住同一个项目行。
 
@@ -31,7 +31,7 @@ PydanticAI 是唯一诊断决策者；LangGraph 编排诊断与证据检查；RO
 
 ## 部署
 
-数据库迁移 0057–0063。API/diagnostic-worker 使用同一版本 ProjectServer；worker 必须有固定 PydanticAI 和 LangGraph 依赖，Holmes 通过无公开端口的独立服务接入。ROSA/RAI 使用隔离的 Humble/CycloneDDS 容器，不能以标准 topic 可见替代机器人现场验证。
+数据库迁移 0057–0064。API/diagnostic-worker 使用同一版本 ProjectServer；worker 必须有固定 PydanticAI 和 LangGraph 依赖，Holmes 通过无公开端口的独立服务接入。ROSA/RAI 使用隔离的 Humble/CycloneDDS 容器，不能以标准 topic 可见替代机器人现场验证。
 
 新安装在DAQ正常启动时安装用户服务，DAQ成功登录后私有授权marker触发自动接入；用户无需手工编辑token/config。平台部署须预先配置 `QUALITY_REMOTE_AUTO_ENROLLMENT`（enabled、project_id、owner_user_id），它允许新安装独立claim自登记，反馈密钥不具备该权限；登记服务端不会把DAQ反馈票据视为登录证明。
 
@@ -54,3 +54,11 @@ PydanticAI 是唯一诊断决策者；LangGraph 编排诊断与证据检查；RO
 `plane/tests/contract/app/test_remote_mixed_load.py` 默认跳过，仅在配置专用 `REMOTE_STRESS_BROKER` 后启用。必须使用独立 PostgreSQL 测试数据库、专用Redis及具备普通UID/Bash/`/usr/bin/python3`的Linux镜像。环境变量 `REMOTE_STRESS_STATIONS` 每次为4、8或16，**每档单独pytest进程并重建其独立测试库**，避免嵌入式Celery线程生命周期跨档污染。测试镜像挂载 `/code` 为ProjectServer，`/repo` 为仓库，只读源码以外的测试数据写入 Documents/tmp/artifacts。镜像、DB URL与Cookie/令牌由运行器动态注入，禁止写入报告。
 
 Bulk使用明确标识 controlled_stub 的固定模型替身，但HTTP、签名反馈、PostgreSQL、Redis/Celery、独立采集进程、PTY、文件原子修改与校验均真实执行。不同站点错开终端/传输/修复阶段，并计算真实工具执行与文件HTTP的时间交集；模型响应速度、真实机器人运动、多物理机容量不属于该测试结论。真实模型和195至177现场链路另做单次验收，不能与受控模型结果混报。
+
+## 完整任务并发验收（2026-11-19）
+
+十个独立登录账号、十个独立采集进程的真实HTTP/PTY/文件测试已执行；终端保持60秒期间持续发送独立序号并读取回显确认，每站至少20次往返。十条完整现场任务峰值4条、其余排队，另行创建10次普通规则诊断与20次签名反馈。真实Redis/Celery工作进程与数据库、文件读写/备份/校验均运行；批量模型为controlled_stub，不能外推真实模型服务吞吐或长期实机容量。
+
+真实195/177隔离联合故障另由平台当前模型处理：采集电脑端口不匹配及机器人遥测关闭在同一任务内完成修复，最终从195固定联合复测通过并回写D474。不得将这次模拟验收外推为真实电机或全量采集验收。
+
+worker_started_at/worker_completed_at是服务器覆盖的实际工作位生命周期，invalidated_at/completed_at是任务授权终止时间，两者分开以避免断连时伪造已释放工作位。压测反馈签名在发送时生成，维持服务端60秒校验窗口。失败、超时、目标改变和部分修复必须保留未解决项，不能仅因一项变更成功就标记整轮已修复。
