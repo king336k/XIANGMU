@@ -258,3 +258,17 @@ def test_agent_lifecycle_events_have_readable_actions_without_run_ids_in_summary
     assert any('开始排查' in value for value in summaries)
     assert any('待技术确认' in value for value in summaries)
     assert all(str(run.id) not in value for value in summaries)
+
+
+def test_valid_json_stdout_cannot_hide_outer_partial_mutation_receipt(job):
+    _,station,defect,run=job
+    RemoteCommand.objects.create(workstation=station,run=run,status='done',expires_at=run.expires_at,
+        payload={'kind':'run','argv':['fixed','repair']},result={'ok':False,'exit_code':1,
+            'changes':[{'key':'partially_modified','before':False,'after':True}],
+            'stdout':'{"simulation":true,"ok":false}'})
+    finish(run.id,{'summary':'verified after a partial change','outcome':'verified_without_repair',
+        'verification_passed':True,'repaired':False})
+    defect.refresh_from_db();run.refresh_from_db()
+    assert defect.status=='needs_tech'
+    assert run.comment.content.startswith('Agent 远程处理：未自动修复')
+    assert DefectSerializer(defect).data['agent_processing']['state']=='unresolved'

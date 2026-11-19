@@ -33,6 +33,7 @@ def readonly_verified(run, result=None):
         # A failing command may already have applied part of a patch.
         if command.payload.get('kind') == 'patch_file' and command.status in {'delivered','done'}:return False
         receipt = command.result
+        if receipt.get('changes'):return False
         if isinstance(receipt.get('stdout'),str):
             try:receipt=json.loads(receipt['stdout'])
             except (ValueError,TypeError):pass
