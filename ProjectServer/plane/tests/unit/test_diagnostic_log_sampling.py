@@ -390,3 +390,63 @@ def test_long_record_overlap_cannot_invent_a_fault_word_boundary():
         fault_context = sample.split(b'[fault context]\n', 1)[1].split(b'[matched error context]\n', 1)[0]
         assert b'unique_normal_record' not in fault_context
         assert scanned == len(raw) and not incomplete
+
+
+def test_dense_epoch_retry_compression_keeps_complete_boundaries_targets_and_epoch_changes():
+    from plane.quality.log_evidence import compact_repeated_records
+
+    first = b'1795066709.000001 [5] tev: ddsi_udp_conn_write to udp/10.0.0.1:1234 failed with retcode -1\n'
+    last = first.replace(b'.000001', b'.999999')
+    target = b'1795066709.999999 [5] tev: ddsi_udp_conn_write to udp/10.0.0.2:5678 failed with retcode -2\n'
+    epoch = b'1795066769.000001 [5] tev: ddsi_udp_conn_write to udp/10.0.0.1:1234 failed with retcode -1\n'
+    raw = first * 10000 + last + b'ERROR unique middle root cause\n' + target * 10 + epoch * 10
+    sample = compact_repeated_records(raw)
+    assert len(sample) < len(raw) // 20
+    assert first in sample and last in sample and target in sample and epoch in sample
+    assert b'ERROR unique middle root cause' in sample
+    assert b'omitted_identical_records=' in sample
+
+
+def test_dense_retry_same_second_keeps_different_reason_and_non_epoch_records_unchanged():
+    from plane.quality.log_evidence import compact_repeated_records
+
+    rows = [f'1795066709.{index:06d} [node] failed reason={index}\n'.encode() for index in range(100)]
+    raw = b''.join(rows) + b'INFO no numeric epoch\n' * 100
+    assert compact_repeated_records(raw) == raw
+
+
+def test_interleaved_targets_keep_each_first_last_and_unique_middle_fault():
+    import re
+    from plane.quality.log_evidence import compact_repeated_records, collect
+
+    rows = []
+    for index in range(5000):
+        for target in range(3):
+            rows.append(f'1795066709.{index:06d} [node] failed target={target} reason=network\n'.encode())
+        if index == 2500:
+            rows.append(b'1795066709.002500 ERROR unique_middle_root E-ONLY-ROOT\n')
+    raw = b''.join(rows)
+    compact = compact_repeated_records(raw)
+    assert len(compact) < len(raw) // 100
+    assert b'E-ONLY-ROOT' in compact
+    for target in range(3):
+        records = [line for line in compact.splitlines() if f'target={target}'.encode() in line]
+        assert len(records) == 2
+        assert records[0].startswith(b'1795066709.000000')
+        assert records[-1].startswith(b'1795066709.004999')
+    sample, scanned, incomplete = collect(io.BytesIO(raw), len(raw))
+    assert b'E-ONLY-ROOT' in sample and scanned == len(raw) and not incomplete
+
+
+def test_unique_middle_root_survives_many_epoch_target_retry_groups():
+    from plane.quality.log_evidence import collect
+
+    retry = lambda minute: b''.join(
+        f'{1795066709 + minute * 60}.{index:06d} [node] failed target={target} reason=network\n'.encode()
+        for index in range(20) for target in range(25))
+    raw = b''.join(retry(minute) for minute in range(20))
+    raw += b'ERROR E-UNIQUE-MIDDLE-ROOT actual root cause\n'
+    raw += b''.join(retry(minute) for minute in range(20, 150))
+    sample, scanned, incomplete = collect(io.BytesIO(raw), len(raw))
+    assert scanned == len(raw) and not incomplete
+    assert b'E-UNIQUE-MIDDLE-ROOT' in sample

@@ -7,11 +7,52 @@ import time
 
 ERROR = re.compile(rb"\berror\b|exception|traceback|fatal|failed|refused|timed out|\bwarn(?:ing)?\b|E-[A-Z0-9-]+", re.I)
 FAULT = re.compile(rb"\berror\b|exception|traceback|fatal|failed|refused|timed out|E-[A-Z0-9-]+", re.I)
+LOWER_FAULT = re.compile(rb"\berror\b|exception|traceback|fatal|failed|refused|timed out|e-[a-z0-9-]+")
+LOWER_WARNING = re.compile(rb"\bwarn(?:ing)?\b")
 LIMIT = 256 * 1024
 NODE_FAULT = re.compile(r"error|exception|traceback|fatal|failed|refused|timed out|invalid|violation|aborted|异常|失败", re.I)
 FAULT_HINTS = (b"error", b"exception", b"traceback", b"fatal", b"failed", b"refused", b"timed out", b"e-")
 WARNING = re.compile(rb"\bwarn(?:ing)?\b", re.I)
 LEADING_TIME = re.compile(rb"^\s*(?:\d{4}-\d{2}-\d{2}[T ][0-9:.+Z-]+|\d+(?:\.\d+)?)\s+")
+
+
+# Repeated targets often interleave. Group only within one bounded scan block,
+# the same UTC epoch-minute bucket and exact payload (including target and cause).
+EPOCH_RECORDS = re.compile(rb"(?m)^(?P<epoch>[0-9]{9,12})\.[0-9]{1,9}(?P<payload>[ \t]+[^\r\n]*)\r?\n")
+
+
+def compact_repeated_records(data):
+    """Retain original first/last records per exact retry identity and epoch-minute bucket.
+
+    C regex finds complete records; Python builds context only for retained
+    representatives. Every original byte is still read for ZIP CRC/counts.
+    """
+    groups, pieces = {}, []
+    previous = 0
+    repeated = False
+    for match in EPOCH_RECORDS.finditer(data):
+        start, end = match.span()
+        if start > previous:
+            pieces.append((previous, data[previous:start]))
+        key = int(match['epoch']) // 60, match['payload']
+        group = groups.get(key)
+        if group is None:
+            groups[key] = [start, end, start, end, 1]
+        else:
+            group[2], group[3], group[4] = start, end, group[4] + 1
+            repeated |= group[4] > 2
+        previous = end
+    if not repeated:
+        return data
+    if previous < len(data):
+        pieces.append((previous, data[previous:]))
+    for first, first_end, last, last_end, count in groups.values():
+        pieces.append((first, data[first:first_end]))
+        if last != first:
+            marker = (b"[omitted_identical_records=" + str(count - 2).encode()
+                      + b"; same epoch minute and exact payload]\n") if count > 2 else b""
+            pieces.append((last, marker + data[last:last_end]))
+    return b"".join(value for _, value in sorted(pieces))
 
 
 def feedback_observations(text, budget, window=None):
@@ -198,6 +239,7 @@ def collect(stream, size, deadline=None, *, window=None):
     faults = deque()
     fault_bytes = warning_bytes = scanned = 0
     first_faults = bytearray()
+    distinct_faults, distinct_signatures = bytearray(), set()
     document = bytearray() if size <= 1024 * 1024 else None
     deadline = min(deadline, time.monotonic() + 20) if deadline is not None else time.monotonic() + 20
     pending = b""
@@ -253,9 +295,14 @@ def collect(stream, size, deadline=None, *, window=None):
         position = int(skip_prefix)
         lowered = data.lower()
         has_fault_hint = any(hint in lowered for hint in FAULT_HINTS)
+        if has_fault_hint:
+            unfinalized = len(data) - scan_end
+            data = compact_repeated_records(data)
+            scan_end = len(data) - unfinalized
+            lowered = data.lower()
         repeated_last = b""
         while has_fault_hint:
-            match = FAULT.search(data, position)
+            match = LOWER_FAULT.search(lowered, position)
             if not match or match.start() >= scan_end:
                 break
             start = data.rfind(b"\n", 0, match.start()) + 1
@@ -266,6 +313,12 @@ def collect(stream, size, deadline=None, *, window=None):
             # codes and payloads remain distinct evidence. Dense retries retain
             # the actual latest record rather than allocating overlapping windows.
             signature = LEADING_TIME.sub(b"", record) if len(record) <= 8192 else record
+            if signature not in distinct_signatures and len(distinct_faults) < 48 * 1024:
+                # Retry representatives can still fill the recency queue. Keep
+                # the first original record for each distinct target/cause so
+                # a unique middle root survives later retry epochs.
+                distinct_signatures.add(signature)
+                distinct_faults.extend(record[:min(4096, 48 * 1024 - len(distinct_faults))])
             position = end
             if signature == previous_signature:
                 repeated_last = record
@@ -286,7 +339,7 @@ def collect(stream, size, deadline=None, *, window=None):
                 fault_bytes -= len(faults.popleft())
         # Keep first and last warning contexts per block, rather than building
         # an overlapping eight-line window for every duplicate queue warning.
-        warning = WARNING.search(data, int(skip_prefix)) if b"warn" in lowered else None
+        warning = LOWER_WARNING.search(lowered, int(skip_prefix)) if b"warn" in lowered else None
         if warning:
             value, _ = context(data, warning.start())
             windows.append(value)
@@ -313,7 +366,7 @@ def collect(stream, size, deadline=None, *, window=None):
         rows = feedback_observations(document_text, LIMIT - 1)
         if rows:
             return "\n".join(rows).encode(), scanned, False
-    fault_sample = bytes(first_faults) + b"".join(faults)
+    fault_sample = bytes(first_faults) + bytes(distinct_faults) + b"".join(faults)
     last = bytes(tail)
     warning_sample = b"".join(windows)[-(LIMIT - len(head) - len(last) - len(fault_sample) - 128):]
     sample = (bytes(head) + b"\n[fault context]\n" + fault_sample
