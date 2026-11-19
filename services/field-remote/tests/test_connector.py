@@ -98,6 +98,33 @@ class ConnectorTests(unittest.TestCase):
         self.engine.accept(self.command('read_file',path='../config.json'))
         self.assertFalse(self.engine.results[-1]['ok']);self.assertNotIn('resolved_path',self.engine.results[-1])
 
+    def test_patch_receipt_lines_are_from_exact_backup_and_after_bytes(self):
+        cases=[
+            (b'{"robot_port":18778,"removed":true}',b'{"robot_port":18777,"added":false}',
+             {'robot_port':(1,1),'removed':(1,None),'added':(None,1)}),
+            (b'{\n  "robot_\\u0070ort": 18778,\n\n  "removed": true\n}',
+             b'{\n\n  "added": false,\n  "robot_port": 18777\n}',
+             {'robot_port':(2,4),'removed':(4,None),'added':(None,3)}),
+        ]
+        for before,after,expected in cases:
+            with self.subTest(expected=expected):
+                target=self.root/'config.json';target.write_bytes(before)
+                self.engine.accept(self.command('patch_file',path='config.json',expected_sha256=hashlib.sha256(before).hexdigest(),content=after.decode()))
+                receipt=self.engine.results[-1];self.assertTrue(receipt['ok'])
+                changes={row['key']:row for row in receipt['changes']}
+                for key,(old_line,new_line) in expected.items():
+                    self.assertEqual(changes[key]['before_line'],old_line)
+                    self.assertEqual(changes[key]['after_line'],new_line)
+                self.assertEqual(Path(receipt['backup']).read_bytes(),before)
+                self.assertEqual(target.read_bytes(),after)
+
+    def test_duplicate_json_keys_produce_no_ambiguous_receipt_lines(self):
+        target=self.root/'config.json';before=b'{"robot_port":18778,"robot_port":18779}'
+        target.write_bytes(before)
+        self.engine.accept(self.command('patch_file',path='config.json',expected_sha256=hashlib.sha256(before).hexdigest(),content='{"robot_port":18777}'))
+        self.assertTrue(self.engine.results[-1]['ok'])
+        self.assertEqual(self.engine.results[-1]['changes'],[])
+
     def test_path_escape_and_secret_refused(self):
         (self.root / 'escape').symlink_to('/etc')
         for path in ('../outside', '/etc/passwd', 'escape/passwd', '.env', 'id_rsa', '.ssh/key'):

@@ -514,12 +514,19 @@ class Engine:
                     before=json.loads(backup_data,object_pairs_hook=unique_keys)
                     after=json.loads(actual,object_pairs_hook=unique_keys)
                     if isinstance(before,dict) and isinstance(after,dict):
+                        # Lazy import avoids module initialization cycles:
+                        # robot_peer already reuses this connector's Policy.
+                        from robot_peer import config_locations
+                        before_locations=config_locations(backup_data,resolved_path,socket.gethostname())
+                        after_locations=config_locations(actual,resolved_path,socket.gethostname())
                         for key in sorted(set(before)|set(after)):
                             if (key in before and key in after and
                                     json.dumps(before[key],sort_keys=True)==json.dumps(after[key],sort_keys=True)):
                                 continue
                             changes.append({**metadata,'path':resolved_path,'key':key,'before':before.get(key),
                                 'after':after.get(key),'before_exists':key in before,'after_exists':key in after,
+                                'before_line':before_locations[key]['line'] if key in before_locations else None,
+                                'after_line':after_locations[key]['line'] if key in after_locations else None,
                                 'backup':backup_path,'before_sha256':hashlib.sha256(backup_data).hexdigest(),
                                 'after_sha256':patched['sha256']})
                 except (ValueError,UnicodeDecodeError):pass
