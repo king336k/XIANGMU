@@ -641,7 +641,7 @@ test("live stream sends ordered input with acknowledgements and no HTTP polling 
   }
 });
 
-test("WebSocket input does not wait one network round trip per keystroke", async () => {
+test("slow server acknowledgements keep input bounded and coalesce queued keys", async () => {
   const oldWindow = globalThis.window,
     oldSocket = globalThis.WebSocket,
     sockets = [];
@@ -668,7 +668,7 @@ test("WebSocket input does not wait one network round trip per keystroke", async
   globalThis.WebSocket = Socket;
   try {
     const c = new TerminalConnection(
-      { read: () => new Promise(() => {}), write: async () => ({ id: "pipeline", status: "open" }) },
+      { read: () => new Promise(() => {}), write: async () => ({ id: "bounded", status: "open" }) },
       "/remote/",
       () => {},
       () => {}
@@ -678,7 +678,10 @@ test("WebSocket input does not wait one network round trip per keystroke", async
     await flushInputFrame();
     c.input("d");
     await flushInputFrame();
-    assert.equal(sockets[0].messages.length, 2, "second input must leave before first ACK");
+    assert.equal(sockets[0].messages.length, 1, "do not flood a slower receiver with per-key frames");
+    sockets[0].onmessage({ data: JSON.stringify({ type: "ack", seq: 1 }) });
+    await flush();
+    assert.equal(sockets[0].messages.length, 2);
     assert.deepEqual(
       sockets[0].messages.map((m) => m.seq),
       [1, 2]

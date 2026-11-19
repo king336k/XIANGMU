@@ -26,7 +26,10 @@ export class TerminalConnection {
   private sending = false;
   private stream: WebSocket | undefined;
   private streamSeq = 0;
-  private pendingAcks = new Map<number, ReturnType<typeof setTimeout>>();
+  private pendingAcks = new Map<
+    number,
+    { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+  >();
   private resizeQueue: { cols: number; rows: number } | undefined;
 
   constructor(
@@ -97,7 +100,7 @@ export class TerminalConnection {
       this.inputTimer = setTimeout(() => {
         this.inputTimer = undefined;
         void this.flush();
-      }, 16);
+      }, 30);
     }
   }
 
@@ -193,8 +196,9 @@ export class TerminalConnection {
           if (message.type === "ack") {
             const pending = this.pendingAcks.get(message.seq);
             if (pending) {
-              clearTimeout(pending);
+              clearTimeout(pending.timer);
               this.pendingAcks.delete(message.seq);
+              pending.resolve();
             }
           } else if (message.type === "output") this.consume(message);
           else if (message.type === "error") this.fail(new Error(message.error || "终端连接已中断，请重新连接。"));
@@ -223,19 +227,20 @@ export class TerminalConnection {
     if (socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 256 * 1024)
       throw new Error("终端连接积压或已断开，请重新连接。");
     const seq = ++this.streamSeq;
-    if (this.pendingAcks.size >= 64) throw new Error("终端输入积压，请稍后重新连接。");
-    const timer = setTimeout(() => {
-      this.pendingAcks.delete(seq);
-      if (!this.disposed) this.fail(new Error("终端输入确认超时，请重新连接。"));
-    }, 10000);
-    this.pendingAcks.set(seq, timer);
-    try {
-      socket.send(JSON.stringify({ ...payload, seq }));
-    } catch (error) {
-      clearTimeout(timer);
-      this.pendingAcks.delete(seq);
-      throw error;
-    }
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingAcks.delete(seq);
+        reject(new Error("终端输入确认超时，请重新连接。"));
+      }, 10000);
+      this.pendingAcks.set(seq, { resolve, reject, timer });
+      try {
+        socket.send(JSON.stringify({ ...payload, seq }));
+      } catch (error) {
+        clearTimeout(timer);
+        this.pendingAcks.delete(seq);
+        reject(error);
+      }
+    });
   }
 
   private consume(response: TerminalSnapshot) {
@@ -283,7 +288,8 @@ export class TerminalConnection {
     this.disposed = true;
     this.stream?.close();
     for (const pending of this.pendingAcks.values()) {
-      clearTimeout(pending);
+      clearTimeout(pending.timer);
+      pending.reject(new Error("终端已关闭。"));
     }
     this.pendingAcks.clear();
     clearTimeout(this.pollTimer);
