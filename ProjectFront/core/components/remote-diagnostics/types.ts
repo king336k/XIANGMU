@@ -50,7 +50,7 @@ export type AgentRun = {
     solution?: unknown;
     repaired?: boolean;
     verification_passed?: boolean;
-    outcome?: "verified" | "repaired" | "unresolved";
+    outcome?: "verified" | "verified_without_repair" | "repaired" | "unresolved";
   } | null;
   error?: string;
 };
@@ -79,7 +79,11 @@ export function agentRunStatusLabel(run: AgentRun): string {
   if (run.status === "timed_out") return "处理超时";
   if (run.status === "completed") {
     if (run.result?.repaired === true && run.result.verification_passed === true) return "已修复并复测";
-    if (run.result?.outcome === "verified" && run.result.verification_passed === true) return "复测通过";
+    if (
+      ["verified", "verified_without_repair"].includes(run.result?.outcome || "") &&
+      run.result?.verification_passed === true
+    )
+      return "复测通过";
     return "处理完成";
   }
   if (run.status === "queued") {
@@ -103,4 +107,22 @@ export function agentRunStatusLabel(run: AgentRun): string {
     );
   }
   return agentStatusLabel(run.status);
+}
+
+export function agentRunShortLabel(run: AgentRun): string {
+  if (["failed", "timed_out", "cancelled"].includes(run.status)) return "已中断";
+  if (run.status === "completed" || run.status === "succeeded") {
+    if (run.result?.verification_passed === true) {
+      if (run.result.repaired === true) return "已修复";
+      if (["verified", "verified_without_repair"].includes(run.result.outcome || "")) return "复核通过";
+    }
+    return "未解决";
+  }
+  if (["queued", "pending", "starting"].includes(run.status)) return "排队中";
+  if (run.status === "running")
+    return (
+      ({ inspect: "排查中", repair: "修复中", verify: "复测中" } as Record<string, string>)[run.queue?.stage || ""] ||
+      "排查中"
+    );
+  return "状态待确认";
 }

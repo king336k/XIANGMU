@@ -5,6 +5,8 @@ const colors: Record<string, string> = {
   cancelled: "border-subtle bg-layer-1 text-secondary",
   archived: "border-subtle bg-layer-1 text-secondary",
   open: "border-warning-subtle bg-warning-subtle text-warning-primary",
+  pending_tech: "border-warning-subtle bg-warning-subtle text-warning-primary",
+  needs_tech: "border-danger-subtle bg-danger-subtle text-danger-primary",
   in_progress: "border-accent-subtle-1 bg-accent-subtle text-accent-primary",
   resolved: "border-warning-subtle bg-warning-subtle text-warning-primary",
   passed: "border-success-subtle bg-success-subtle text-success-primary",

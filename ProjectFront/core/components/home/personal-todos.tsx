@@ -43,6 +43,8 @@ const stateNames: Record<string, string> = {
   review: "待审核",
   returned: "待复测",
   open: "待处理",
+  pending_tech: "待技术确认",
+  needs_tech: "待技术处理",
   in_progress: "处理中",
   resolved: "待验证",
 };

@@ -15,6 +15,7 @@ export const renderAdditionalAction = (notificationField: string, verb: string |
   const verbs: Record<string, string> = { created: "新建", updated: "更新", deleted: "删除" };
   const fields: Record<string, string> = {
     state: "状态",
+    status: "处理状态",
     priority: "优先级",
     name: "标题",
     description: "描述",
@@ -36,11 +37,22 @@ export const renderAdditionalValue = (
   newValue: string | undefined,
   _oldValue: string | undefined
 ) =>
-  _notificationField === "priority"
-    ? ({ urgent: "紧急", high: "高", medium: "中", low: "低", none: "未设置" } as Record<string, string>)[
-        newValue || "none"
-      ] || newValue
-    : newValue;
+  ["state", "status"].includes(_notificationField || "")
+    ? (
+        {
+          pending_tech: "待技术确认",
+          needs_tech: "待技术处理",
+          open: "待处理",
+          in_progress: "处理中",
+          resolved: "已修复，待回归",
+          closed: "已关闭",
+        } as Record<string, string>
+      )[newValue || ""] || newValue
+    : _notificationField === "priority"
+      ? ({ urgent: "紧急", high: "高", medium: "中", low: "低", none: "未设置" } as Record<string, string>)[
+          newValue || "none"
+        ] || newValue
+      : newValue;
 
 export const shouldShowConnector = (notificationField: string | undefined) =>
   !["comment", "archived_at", "None", "assignees", "labels", "start_date", "target_date", "parent"].includes(

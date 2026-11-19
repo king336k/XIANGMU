@@ -20,6 +20,7 @@ import { SolutionPanel } from "./solution-panel";
 import { DefectVerificationScope } from "./defect-verification-scope";
 import { VerificationAssignee } from "./verification-assignee";
 import { DefectComments } from "./defect-comments";
+import { AgentProcessingBadge } from "./agent-processing-badge";
 import { AgentFeedbackResults } from "./agent-feedback-results";
 import { can, severityNames } from "./types";
 import type { Context, Defect } from "./types";
@@ -160,17 +161,32 @@ export function DefectDetail({
                   编辑缺陷
                 </button>
               )}
+              <AgentProcessingBadge value={value.agent_processing} />
+              {value.agent_processing && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("diagnosis")}
+                  className="rounded-md border border-subtle px-3 py-1.5 text-12 font-medium text-accent-primary hover:bg-accent-subtle"
+                >
+                  查看处理
+                </button>
+              )}
               {activeTab !== "regression" && canEdit && (
                 <button
                   type="button"
+                  title={
+                    value.status === "resolved" ? "进入既有回归验收流程，满足验证门槛后关闭" : "核对当前结果并继续处理"
+                  }
                   onClick={updateStatus}
                   className="rounded-md border border-subtle px-3 py-1.5 text-12 font-medium text-accent-primary hover:bg-accent-subtle"
                 >
                   {value.status === "closed"
                     ? "重开缺陷"
                     : value.status === "resolved" && context.is_manager
-                      ? "回归验收"
-                      : "更新处理状态"}
+                      ? "确认关闭"
+                      : value.status === "resolved"
+                        ? "提交确认"
+                        : "继续处理"}
                 </button>
               )}
             </div>

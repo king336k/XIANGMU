@@ -32,7 +32,14 @@ function form(mode, onWrite, original = {}) {
     if (id === "./types")
       return {
         can: () => true,
-        statusNames: { open: "待处理", in_progress: "处理中" },
+        statusNames: {
+          open: "待处理",
+          in_progress: "处理中",
+          pending_tech: "待技术确认",
+          needs_tech: "待技术处理",
+          resolved: "待回归",
+          closed: "已关闭",
+        },
         severityNames: { major: "严重" },
       };
     if (id === "@/components/settings/management-paths") {
@@ -132,4 +139,21 @@ test("编辑缺陷可填写修复版本和首次指派，并保留状态不变",
   assert.equal(payload.fixed_build, "v2");
   assert.equal(payload.assignee_id, "tech");
   assert.ok(!("status" in payload));
+});
+
+const nodes = (tree) =>
+  !tree || typeof tree !== "object"
+    ? []
+    : Array.isArray(tree)
+      ? tree.flatMap(nodes)
+      : [tree, ...nodes(tree.props?.children)];
+test("技术跟进状态可继续处理或提交待回归，关闭选项仍被门槛禁用", () => {
+  for (const status of ["pending_tech", "needs_tech"]) {
+    const tree = form("workflow", () => {}, { status });
+    const select = nodes(tree).find((node) => node.type === "select" && node.props["aria-label"] === "处理状态");
+    const choices = nodes(select).filter((node) => node.type === "option");
+    assert.equal(choices.find((node) => node.props.value === "in_progress").props.disabled, false);
+    assert.equal(choices.find((node) => node.props.value === "resolved").props.disabled, false);
+    assert.equal(choices.find((node) => node.props.value === "closed").props.disabled, true);
+  }
 });

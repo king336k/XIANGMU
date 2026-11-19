@@ -233,7 +233,7 @@ export function CollaborationPanel({
       </details>
       {can(context, "claim_defect") &&
         (!value.assignee_id || value.assignee_id === context.user_id) &&
-        ["open", "in_progress"].includes(value.status) && (
+        ["open", "in_progress", "pending_tech", "needs_tech"].includes(value.status) && (
           <Button
             type="button"
             variant="neutral-primary"

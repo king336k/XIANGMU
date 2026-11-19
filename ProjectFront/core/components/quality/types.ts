@@ -146,7 +146,15 @@ export type RemoteProcess = {
   command_id?: string;
   details?: string;
 };
+export type AgentProcessing = {
+  state: "queued" | "inspect" | "repair" | "verify" | "repaired" | "verified" | "unresolved" | "interrupted";
+  label?: string;
+  run_id: string;
+  summary?: string;
+  updated_at?: string;
+};
 export type Defect = {
+  agent_processing?: AgentProcessing | null;
   module?: { key: string; name: string } | null;
   assignment_origin?: "manual" | "diagnostic" | "initial" | "triage" | "";
   assignment_reason?: string;
@@ -258,6 +266,8 @@ export const reasonNames: Record<string, string> = {
 };
 export const statusNames: Record<string, string> = {
   open: "待处理",
+  pending_tech: "待技术确认",
+  needs_tech: "待技术处理",
   in_progress: "处理中",
   resolved: "已修复，待回归",
   closed: "已关闭",

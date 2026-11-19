@@ -59,6 +59,8 @@ export function ownerStatisticsQuery(
 }
 export const ownerStatusNames: Record<string, string> = {
   open: "待处理",
+  pending_tech: "待技术确认",
+  needs_tech: "待技术处理",
   in_progress: "处理中",
   resolved: "待回归",
   closed: "已关闭",
@@ -105,6 +107,8 @@ export const ownerStatusNames: Record<string, string> = {
 };
 export const ownerStatusColors: Record<string, string> = {
   open: "text-warning-primary",
+  pending_tech: "text-warning-primary",
+  needs_tech: "text-danger-primary",
   in_progress: "text-accent-primary",
   resolved: "text-warning-primary",
   closed: "text-success-primary",

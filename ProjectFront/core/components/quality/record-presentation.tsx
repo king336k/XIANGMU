@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ReactNode } from "react";
+import { AgentProcessingBadge } from "./agent-processing-badge";
+import type { AgentProcessing } from "./types";
 import { Badge } from "./record-badge";
 import { ChevronDown } from "lucide-react";
 import { TableHeaderFilter } from "./table-header-filter";
@@ -12,6 +14,7 @@ type Row = {
   subtitle?: string;
   status: string;
   statusName: string;
+  agentProcessing?: AgentProcessing | null;
   severity?: string;
   values: string[];
 };
@@ -107,6 +110,7 @@ export function RecordPresentation({
         {row.subtitle && <p className="text-11 break-words text-secondary">{row.subtitle}</p>}
         <div className="flex flex-wrap items-center gap-2 text-11">
           {statusLabel(row)}
+          <AgentProcessingBadge value={row.agentProcessing} />
           {row.severity !== undefined && fieldLabel(row, "severity")}
           {row.severity !== undefined && fieldLabel(row, "assignee")}
           <span className="text-secondary">
@@ -210,7 +214,12 @@ export function RecordPresentation({
                   </button>
                   {row.subtitle && <p className="mt-1 text-11 text-secondary">{row.subtitle}</p>}
                 </td>
-                <td className="p-3 whitespace-nowrap">{statusLabel(row)}</td>
+                <td className="p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {statusLabel(row)}
+                    <AgentProcessingBadge value={row.agentProcessing} />
+                  </div>
+                </td>
                 {columns.map((column, index) => (
                   <td key={column} className="p-3">
                     {column === "严重程度" && row.severity !== undefined

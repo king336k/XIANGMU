@@ -1,3 +1,4 @@
+import { AgentProcessingBadge } from "./agent-processing-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -13,11 +14,13 @@ const code = ts.transpileModule(source, {
 const exports = {};
 new Function("require", "exports", code)(
   (id) =>
-    id === "./table-header-filter"
-      ? { TableHeaderFilter: ({ label }) => label }
-      : id === "./record-badge"
-        ? { Badge: ({ label, value }) => label || value }
-        : require(id),
+    id === "./agent-processing-badge"
+      ? { AgentProcessingBadge }
+      : id === "./table-header-filter"
+        ? { TableHeaderFilter: ({ label }) => label }
+        : id === "./record-badge"
+          ? { Badge: ({ label, value }) => label || value }
+          : require(id),
   exports
 );
 const { RecordPresentation } = exports;
@@ -25,6 +28,15 @@ const rows = [
   { id: "a", title: "DAQ-R-1 安全 <script>", status: "draft", statusName: "待完善", values: ["高", "v1"] },
   { id: "b", title: "DAQ-R-2 需求", status: "approved", statusName: "已确认", values: ["低", "v2"] },
 ];
+function visit(node) {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    node.forEach(visit);
+    return;
+  }
+  if (node.type === "button") node.props.onClick();
+  visit(node.props?.children);
+}
 test("列表、表格、看板保留同一组记录与转义", () => {
   for (const layout of ["list", "table", "board"]) {
     const html = renderToStaticMarkup(
@@ -45,15 +57,7 @@ test("布局切换只发起打开详情，不自行改变状态", () => {
     columns: ["优先级", "版本"],
     onOpen: (id) => clicked.push(id),
   });
-  function visit(node) {
-    if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) {
-      node.forEach(visit);
-      return;
-    }
-    if (node.type === "button") node.props.onClick();
-    visit(node.props?.children);
-  }
+
   visit(tree);
   assert.deepEqual(clicked, ["a", "b"]);
   assert.equal(rows[0].status, "draft");

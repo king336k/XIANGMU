@@ -3,18 +3,25 @@ import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { RotateCw } from "lucide-react";
 import { qualityApi, errorMessage } from "./api";
-import { agentRunStatusLabel, remoteDiagnosticsBase, runningAgentStatuses } from "../remote-diagnostics/types";
+import {
+  agentRunShortLabel,
+  agentRunStatusLabel,
+  remoteDiagnosticsBase,
+  runningAgentStatuses,
+} from "../remote-diagnostics/types";
 import type { AgentRun, RemoteDevice } from "../remote-diagnostics/types";
 
 export function AgentFeedbackActions({
   defectId,
   active,
   onCompleted,
+  onStarted,
   onHistory,
 }: {
   defectId: string;
   active: boolean;
   onCompleted: () => void;
+  onStarted?: () => void;
   onHistory: () => void;
 }) {
   const { data: targets, error: targetError } = useSWR(
@@ -65,6 +72,7 @@ export function AgentFeedbackActions({
       });
       setSubmittedRun(result);
       setRunId(result.id);
+      onStarted?.();
     } catch (cause) {
       submitting.current = false;
       setError(errorMessage(cause));
@@ -94,35 +102,39 @@ export function AgentFeedbackActions({
         <button
           type="button"
           disabled={busy || !selected?.online}
+          title="重新诊断（只读，不修改现场）"
           onClick={() => void start("diagnose")}
           className="rounded border border-subtle px-3 py-1.5 text-12 disabled:opacity-40"
         >
-          重新诊断（只读）
+          重新诊断
         </button>
         <button
           type="button"
           disabled={busy || !selected?.online}
+          title="诊断、授权修复、自动复测和原反馈回写"
           onClick={() => void start("repair")}
           className="rounded bg-accent-primary px-3 py-1.5 text-12 text-on-color disabled:opacity-40"
         >
-          诊断并修复
+          继续处理
         </button>
         <button
           type="button"
           disabled={busy || !selected?.online}
+          title="重新验证（只读，执行固定验证入口）"
           onClick={() => void start("verify")}
           className="rounded border border-subtle px-3 py-1.5 text-12 disabled:opacity-40"
         >
-          重新验证（只读）
+          重新验证
         </button>
         <button type="button" onClick={onHistory} className="px-2 py-1.5 text-12 text-accent-primary">
-          查看处理过程
+          查看处理
         </button>
         {(starting || run) && (
           <span
             role="status"
             aria-live="polite"
-            className={`rounded px-2 py-1 text-12 ${busy ? "bg-accent-subtle text-accent-primary" : run?.status === "failed" || run?.status === "timed_out" ? "bg-danger-subtle text-danger-primary" : run?.result?.verification_passed === true && (run.result.repaired === true || run.result.outcome === "verified") ? "bg-success-subtle text-success-primary" : "bg-surface-2 text-secondary"}`}
+            title={run ? agentRunStatusLabel(run) : "正在提交现场处理任务"}
+            className={`rounded px-2 py-1 text-12 ${busy ? "bg-accent-subtle text-accent-primary" : run?.status === "failed" || run?.status === "timed_out" ? "bg-danger-subtle text-danger-primary" : run?.result?.verification_passed === true && (run.result.repaired === true || ["verified", "verified_without_repair"].includes(run.result.outcome || "")) ? "bg-success-subtle text-success-primary" : "bg-surface-2 text-secondary"}`}
           >
             {busy && (
               <RotateCw
@@ -130,12 +142,12 @@ export function AgentFeedbackActions({
                 className="mr-1.5 inline-block size-3.5 animate-spin motion-reduce:animate-none"
               />
             )}
-            {starting ? "正在提交…" : run ? agentRunStatusLabel(run) : ""}
+            {starting ? "排队中" : run ? agentRunShortLabel(run) : ""}
           </span>
         )}
       </div>
       <p className="text-11 text-secondary">
-        诊断并修复：同一任务完成排查、授权修复、自动复测和原反馈回写；只读操作不修改现场。
+        {run && busy ? agentRunStatusLabel(run) : "同一任务完成排查、授权修复与复测；只读操作不修改现场。"}
       </p>
       {selected && (
         <p className="text-11 text-secondary">

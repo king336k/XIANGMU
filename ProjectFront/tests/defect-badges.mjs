@@ -1,3 +1,4 @@
+import { AgentProcessingBadge } from "./agent-processing-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -12,7 +13,10 @@ function load(name, overrides = {}) {
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }
   ).outputText;
   const exports = {};
-  new Function("require", "exports", code)((id) => overrides[id] || require(id), exports);
+  new Function("require", "exports", code)(
+    (id) => (id === "./agent-processing-badge" ? { AgentProcessingBadge } : overrides[id] || require(id)),
+    exports
+  );
   return exports;
 }
 const names = {

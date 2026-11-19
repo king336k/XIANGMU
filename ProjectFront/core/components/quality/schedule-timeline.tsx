@@ -79,6 +79,8 @@ export function ScheduleTimeline({ rows, projectUrl }: { rows: ScheduledRecord[]
                       (
                         {
                           open: "待处理",
+                          pending_tech: "待技术确认",
+                          needs_tech: "待技术处理",
                           completed: "已完成",
                           released: "已发布",
                           closed: "已关闭",

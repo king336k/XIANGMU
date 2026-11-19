@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { qualityApi, errorMessage } from "@/components/quality/api";
 import { fieldClass } from "@/components/quality/shared";
-import { agentRunStatusLabel, remoteDiagnosticsBase, runningAgentStatuses } from "./types";
+import { RotateCw } from "lucide-react";
+import { agentRunShortLabel, agentRunStatusLabel, remoteDiagnosticsBase, runningAgentStatuses } from "./types";
 import type { AgentRun, RemoteDevice } from "./types";
 import { FeedbackPicker } from "./feedback-picker";
 import type { FeedbackChoice } from "./feedback-picker";
@@ -50,7 +51,9 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
   const runId = run?.id;
   const runInProgress = !!(run && runningAgentStatuses.has(run.status));
   const verified =
-    run?.status === "completed" && run.result?.verification_passed === true && run.result?.outcome === "verified";
+    run?.status === "completed" &&
+    run.result?.verification_passed === true &&
+    ["verified", "verified_without_repair"].includes(run.result?.outcome || "");
   const repairedAndRetested = run?.result?.repaired === true && run.result.verification_passed === true;
 
   useEffect(() => {
@@ -180,16 +183,11 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
       <button
         type="button"
         disabled={busy || !device.online || !device.can_connect || !defectId || !problem.trim()}
+        title="同一任务完成诊断、授权修复、复测与反馈回写"
         onClick={() => void start()}
         className="rounded bg-accent-primary px-4 py-2 text-13 text-on-color disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {starting
-          ? "正在发起…"
-          : run?.status === "queued"
-            ? "排队中…"
-            : runInProgress
-              ? `${agentRunStatusLabel(run!)}…`
-              : "诊断并修复"}
+        {busy ? "处理中" : "开始处理"}
       </button>
       {error && (
         <p role="alert" className="text-13 text-danger-primary">
@@ -198,18 +196,21 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
       )}
       {run && (
         <div className="space-y-3 border-t border-subtle pt-4">
-          <p role="status" className="text-13 font-medium">
+          <p title={agentRunStatusLabel(run)} role="status" className="text-13 font-medium">
             <span
-              className={`inline-flex rounded px-2 py-1 text-12 ${runInProgress ? "bg-accent-subtle text-accent-primary" : run.status === "failed" ? "bg-surface-2 text-danger-primary" : repairedAndRetested || verified ? "bg-surface-2 text-success-primary" : "bg-surface-2 text-warning-primary"}`}
+              className={`inline-flex items-center rounded px-2 py-1 text-12 ${runInProgress ? "bg-accent-subtle text-accent-primary" : run.status === "failed" ? "bg-surface-2 text-danger-primary" : repairedAndRetested || verified ? "bg-surface-2 text-success-primary" : "bg-surface-2 text-warning-primary"}`}
             >
-              {agentRunStatusLabel(run)}
+              {runInProgress && (
+                <RotateCw aria-hidden="true" className="mr-1 size-3 animate-spin motion-reduce:animate-none" />
+              )}
+              {agentRunShortLabel(run)}
             </span>
             {run.status === "completed" && (
               <span className="font-normal ml-2 text-12 text-secondary">
                 {repairedAndRetested
                   ? "已执行修复并通过复测"
                   : verified
-                    ? "验证正常（只读，本轮未修复）"
+                    ? "复核通过，本轮未执行修复"
                     : "未确认解决，请查看原因与下一步"}
               </span>
             )}

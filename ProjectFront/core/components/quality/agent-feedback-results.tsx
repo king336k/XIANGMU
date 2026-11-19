@@ -60,6 +60,10 @@ export function AgentFeedbackResults({
         defectId={defectId}
         active={active}
         onHistory={onHistory || (() => {})}
+        onStarted={() => {
+          void mutate();
+          onCompleted?.();
+        }}
         onCompleted={() => {
           void mutate();
           onCompleted?.();

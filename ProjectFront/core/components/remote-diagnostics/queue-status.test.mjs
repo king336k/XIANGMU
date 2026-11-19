@@ -102,8 +102,7 @@ test("feedback actions display real queue, keep polling queued/running and stop 
   assert.match(JSON.stringify(tree), /animate-spin/);
   assert.ok(nodes(tree).some((node) => node.props?.role === "status" && node.props["aria-live"] === "polite"));
   for (const button of nodes(tree).filter(
-    (node) =>
-      node.type === "button" && ["重新诊断（只读）", "诊断并修复", "重新验证（只读）"].includes(node.props.children)
+    (node) => node.type === "button" && ["重新诊断", "继续处理", "重新验证"].includes(node.props.children)
   ))
     assert.equal(button.props.disabled, true);
   assert.equal(intervals[0](queued), 1500);
@@ -130,8 +129,7 @@ test("page refresh restores authoritative active run and polling without submitt
   assert.match(JSON.stringify(tree), /正在复测/);
   assert.match(JSON.stringify(tree), /animate-spin/);
   for (const button of nodes(tree).filter(
-    (node) =>
-      node.type === "button" && ["重新诊断（只读）", "诊断并修复", "重新验证（只读）"].includes(node.props.children)
+    (node) => node.type === "button" && ["重新诊断", "继续处理", "重新验证"].includes(node.props.children)
   ))
     assert.equal(button.props.disabled, true);
   assert.equal(writes, 0);
@@ -146,7 +144,7 @@ test("feedback actions prevent a second submit before React rerenders", async ()
       finish = resolve;
     });
   });
-  const button = nodes(tree).find((node) => node.type === "button" && node.props.children === "重新诊断（只读）");
+  const button = nodes(tree).find((node) => node.type === "button" && node.props.children === "重新诊断");
   button.props.onClick();
   button.props.onClick();
   assert.equal(count, 1);
@@ -159,9 +157,9 @@ test("feedback actions prevent a second submit before React rerenders", async ()
 test("repair starts one continuous task and readonly actions explicitly preserve their non-mutating modes", async () => {
   await Promise.all(
     [
-      ["诊断并修复", "repair"],
-      ["重新诊断（只读）", "diagnose"],
-      ["重新验证（只读）", "verify"],
+      ["继续处理", "repair"],
+      ["重新诊断", "diagnose"],
+      ["重新验证", "verify"],
     ].map(async ([label, mode]) => {
       const writes = [];
       const { tree } = actions(undefined, async (url, body) => {
@@ -253,7 +251,7 @@ test("device panel polls real queued stage through repair to completion and then
   const tree = api.AgentPanel({ device });
   assert.match(JSON.stringify(tree), /等待采集电脑空闲/);
   assert.equal(
-    nodes(tree).find((node) => node.type === "button" && node.props.children === "排队中…").props.disabled,
+    nodes(tree).find((node) => node.type === "button" && node.props.children === "处理中").props.disabled,
     true
   );
   assert.doesNotMatch(JSON.stringify(tree), /暂无结果|"摘要"|"下一步"|正在诊断…/);

@@ -109,7 +109,20 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
       ].includes(tab)
       ? `${base}${tab}/?${normalizedPageParams(params).toString()}`
       : null,
-    (url: string) => qualityApi.read<Page<TestCase | Plan | Execution | Defect | Suite | Release>>(url)
+    (url: string) => qualityApi.read<Page<TestCase | Plan | Execution | Defect | Suite | Release>>(url),
+    {
+      refreshInterval: (snapshot) =>
+        tab === "defects"
+          ? snapshot?.results.some(
+              (row) =>
+                "agent_processing" in row &&
+                ["queued", "inspect", "repair", "verify"].includes(row.agent_processing?.state || "")
+            )
+            ? 5000
+            : 30000
+          : 0,
+      refreshWhenHidden: false,
+    }
   );
   const {
     data: report,
@@ -142,7 +155,12 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
   }, [defectsOnly, params, setParams]);
   const { data: linkedDefect } = useSWR(
     defectsOnly && params.get("defect") ? `${base}defects/${params.get("defect")}/` : null,
-    (url: string) => qualityApi.read<Defect>(url)
+    (url: string) => qualityApi.read<Defect>(url),
+    {
+      refreshInterval: (snapshot) =>
+        ["queued", "inspect", "repair", "verify"].includes(snapshot?.agent_processing?.state || "") ? 5000 : 0,
+      refreshWhenHidden: false,
+    }
   );
   const [plan, setPlan] = useState<Plan | null>(null);
   const { data: linkedPlan } = useSWR(
@@ -203,6 +221,7 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
         subtitle: `${row.source_kind === "daq" ? "DAQ 上报" : row.source_kind === "test" ? "测试提报" : "平台新建"} · ${row.source_kind === "daq" ? "采集员" : "创建人"}：${(row.source_kind === "daq" ? row.reporter?.username : undefined) || row.created_by_name || "未记录"}${row.created_at ? " · " + renderNumericDateTime(row.created_at) : ""}`,
         status: row.status,
         statusName: statusNames[row.status] || row.status,
+        agentProcessing: row.agent_processing,
         severity: row.severity,
         values: [severityNames[row.severity], row.assignee_name || "未指派", row.affected_build || "未填写"],
       };

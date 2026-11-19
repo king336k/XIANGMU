@@ -74,7 +74,9 @@ export function DefectVerificationScope({
     !!round &&
     (retiredRound || (!!round.fixed_build && round.fixed_build !== value.fixed_build)) &&
     data?.defect_status === "resolved";
-  const repairRequired = ["open", "in_progress"].includes(data?.defect_status || value.status);
+  const repairRequired = ["open", "in_progress", "pending_tech", "needs_tech"].includes(
+    data?.defect_status || value.status
+  );
   const canRepairAndArrange =
     canSchedule(context) && (context.is_administrator || context.is_manager || value.assignee_id === context.user_id);
   const solutionBlocked = !!data?.solution_review?.blocked_reason;

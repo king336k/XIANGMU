@@ -51,7 +51,7 @@ export function defectFlowStep(value: Defect, context: Context, data: Verificati
     if (reviewer && can(context, "review")) action = { tab: "solution", label: "审核修复方案" };
   } else {
     stage = 3;
-    if (!round || ["open", "in_progress"].includes(data.defect_status)) {
+    if (!round || ["open", "in_progress", "pending_tech", "needs_tech"].includes(data.defect_status)) {
       message = data.can_configure
         ? "方案已通过，确认修复版本并指派测试员，交接后开始验证。"
         : `方案已通过，等待 ${ownerName} 完成修复并安排测试。`;

@@ -3,6 +3,8 @@ export const defectOwnerMetrics = [
   { key: "total", label: "全部缺陷" },
   { key: "unclosed", label: "未关闭" },
   { key: "open", label: "待处理" },
+  { key: "pending_tech", label: "待技术确认" },
+  { key: "needs_tech", label: "待技术处理" },
   { key: "in_progress", label: "处理中" },
   { key: "resolved", label: "待回归" },
   { key: "closed", label: "已关闭" },

@@ -13,6 +13,8 @@ import type { DefectStatisticsData } from "./defect-report";
 
 const statusColors: Record<string, string> = {
   open: "var(--text-color-warning-primary)",
+  pending_tech: "var(--text-color-warning-primary)",
+  needs_tech: "var(--text-color-danger-primary)",
   in_progress: "var(--text-color-accent-primary)",
   resolved: "var(--text-color-warning-primary)",
   closed: "var(--text-color-success-primary)",
@@ -83,7 +85,7 @@ export function DefectStatistics({
             {
               title: "未关闭",
               value: data.unclosed,
-              caption: "含待处理、处理中和待回归",
+              caption: "含待技术确认、待技术处理及其他未关闭状态",
               filters: { exclude_status: "closed" },
               count: data.unclosed,
             },

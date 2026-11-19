@@ -41,6 +41,14 @@ export function DefectForm({
   const [editing, setEditing] = useState<"details" | "workflow" | "create" | null>(
     value ? (initialMode ?? null) : "create"
   );
+  useSWR(current && !editing ? `${base}defects/${current.id}/` : null, (url: string) => qualityApi.read<Defect>(url), {
+    refreshInterval: (snapshot) =>
+      ["queued", "inspect", "repair", "verify"].includes(snapshot?.agent_processing?.state || "") ? 5000 : 0,
+    refreshWhenHidden: false,
+    onSuccess: (snapshot) => {
+      if (snapshot.id === current?.id && !editing) setCurrent(snapshot);
+    },
+  });
   const persistedId = useRef<string | undefined>(value?.id);
   const [files, setFiles] = useState<File[]>([]);
   const [caseId, setCaseId] = useState(value?.case_id ?? "");
@@ -50,6 +58,8 @@ export function DefectForm({
   const [verificationMethod, setVerificationMethod] = useState("regression");
   const transitions: Record<string, string[]> = {
     open: ["open", "in_progress", "resolved"],
+    pending_tech: ["pending_tech", "in_progress", "resolved"],
+    needs_tech: ["needs_tech", "in_progress", "resolved"],
     in_progress: ["open", "in_progress", "resolved"],
     resolved: ["resolved", "open"],
     closed: ["closed", "open"],
@@ -76,7 +86,7 @@ export function DefectForm({
       projectUrl={projectUrl}
       onClose={onClose}
       onEdit={(mode) => {
-        if (mode === "workflow" && current.status === "closed") setStatus("open");
+        if (mode === "workflow") setStatus(current.status === "closed" ? "open" : current.status);
         setEditing(mode);
       }}
       onChanged={async (changed) => {
