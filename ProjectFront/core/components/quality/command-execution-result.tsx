@@ -9,6 +9,24 @@ export type CommandExecutionStep = {
   timed_out?: boolean;
 };
 export type CommandExecution = CommandExecutionStep & { execution_steps?: CommandExecutionStep[] };
+function outputPreview(output: string) {
+  let formatted = output.replaceAll("\r\n", "\n").replace(/\n$/, "");
+  // JSON.parse would round long receipt sequence numbers; keep those bytes intact.
+  if (!/\d{16}/.test(formatted) && (formatted.trimStart().startsWith("{") || formatted.trimStart().startsWith("["))) {
+    try {
+      formatted = JSON.stringify(JSON.parse(formatted), null, 2);
+    } catch {
+      // Non-JSON output remains the exact received text.
+    }
+  }
+  const lines = formatted
+    .split("\n")
+    .slice(-12)
+    .map((line) => (line.length > 200 ? `${line.slice(0, 199)}…` : line));
+  while (lines.join("\n").length > 1000) lines.shift();
+  const preview = lines.join("\n");
+  return { preview, excerpt: preview !== formatted };
+}
 function executionResult({ command, target }: { command: CommandExecutionStep; target?: string }) {
   const hasExit = typeof command.exit_code === "number" && Number.isInteger(command.exit_code);
   const failed =
@@ -51,20 +69,20 @@ function executionResult({ command, target }: { command: CommandExecutionStep; t
           <p className="text-12">{resultText}</p>
           {hasExit && <p className="mt-1 text-11 text-secondary">退出码：{command.exit_code}</p>}
           {outputs.map(([label, value]) => {
-            const lines = value!.replaceAll("\r\n", "\n").replace(/\n$/, "").split("\n");
+            const { preview, excerpt } = outputPreview(value!);
             return (
               <div key={label} className="mt-2 space-y-1">
                 <p className="text-11 text-secondary">
                   {label}
-                  {lines.length > 12 ? " · 末尾12行" : ""}
+                  {excerpt ? " · 输出节选，原文见完整输出" : ""}
                 </p>
                 <pre
                   aria-label={`${label}摘要`}
                   className="font-mono overflow-auto text-12 leading-6 break-words whitespace-pre-wrap"
                 >
-                  {lines.slice(-12).join("\n")}
+                  {preview}
                 </pre>
-                {lines.length > 12 && (
+                {excerpt && (
                   <details className="text-11 text-tertiary">
                     <summary className="cursor-pointer">完整{label}</summary>
                     <pre className="font-mono mt-1 max-h-64 overflow-auto text-12 leading-6 break-words whitespace-pre-wrap">

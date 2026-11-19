@@ -161,3 +161,38 @@ test("empty steps fall back to the actual wrapper and nested untrusted steps are
   assert.doesNotMatch(text(tree), /not-an-actual-step/);
   assert.equal(nodes(tree).filter((node) => node.props?.["aria-label"] === "执行命令").length, 1);
 });
+
+test("long single-line outputs are bounded and the exact original stays collapsed", () => {
+  const output = "actual-output:" + "x".repeat(4096);
+  const tree = CommandExecutionResult({ command: { status: "done", exit_code: 0, stdout: output, stderr: output } });
+  for (const label of ["标准输出", "标准错误"]) {
+    assert.ok(text(region(tree, `${label}摘要`)).length <= 200);
+    const details = nodes(tree).find((node) => node.type === "details" && text(node).startsWith(`完整${label}`));
+    assert.ok(details && details.props.open === undefined);
+    assert.ok(nodes(details).some((node) => node.type === "pre" && node.props.children === output));
+  }
+  assert.match(text(tree), /输出节选/);
+});
+
+test("minified JSON is formatted before tailing and every summary stays within twelve lines and 1000 characters", () => {
+  const value = Object.fromEntries(
+    Array.from({ length: 30 }, (_, index) => [`field_${index}`, `actual-${index}:` + "z".repeat(220)])
+  );
+  const output = JSON.stringify(value);
+  const tree = CommandExecutionResult({ command: { status: "done", exit_code: 0, stdout: output } });
+  const preview = text(region(tree, "标准输出摘要"));
+  assert.ok(preview.split("\n").length <= 12);
+  assert.ok(preview.length <= 1000);
+  assert.ok(preview.split("\n").every((line) => line.length <= 200));
+  assert.match(preview, /field_29/);
+  assert.doesNotMatch(preview, /field_0"/);
+  assert.match(text(tree), /输出节选/);
+  const details = nodes(tree).find((node) => node.type === "details");
+  assert.ok(nodes(details).some((node) => node.type === "pre" && node.props.children === output));
+});
+
+test("large receipt sequence numbers remain exact rather than being rounded by JSON formatting", () => {
+  const output = '{"sequence":1795001199827232052,"verified":true}';
+  const tree = CommandExecutionResult({ command: { status: "done", exit_code: 0, stdout: output } });
+  assert.equal(text(region(tree, "标准输出摘要")), output);
+});
