@@ -497,6 +497,11 @@ class WorkstationAuthentication(BaseAuthentication):
 class RemoteExchange(BaseAPIView):
     authentication_classes = [WorkstationAuthentication]
 
+    def perform_authentication(self, request):
+        # WorkstationAuthentication checks the credential and current project permissions;
+        # high-frequency transport must not synchronize unrelated admin memberships.
+        request.user
+
     @transaction.atomic
     def post(self, request):
         station = RemoteWorkstation.objects.select_for_update(of=("self",)).select_related("agent__owner", "agent__project__workspace").get(pk=request.auth.pk)

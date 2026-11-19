@@ -99,3 +99,11 @@ def test_stream_closes_when_device_is_revoked(terminal):
         assert event['type']=='websocket.close' and event['code']==4403
         await stop(incoming,task)
     asyncio.run(scenario())
+
+
+def test_transport_heartbeat_does_not_repeat_unrelated_admin_membership_sync(remote):
+    from unittest.mock import patch
+    _,edge,_,_=remote
+    with patch('plane.quality.administrator_access.synchronize_administrator_access',side_effect=AssertionError('not part of transport authentication')):
+        response=heartbeat(edge)
+    assert response.status_code==200
