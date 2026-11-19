@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from platform_stress import (Http, ApiError, validate_manifest, wait_for_markers, mixed_overlap,
                              submit_diagnostic, submit_signed_feedback, job_lifecycle_summary, operation_statistics)
-from platform_stress import terminal_probe_summary
+from platform_stress import terminal_probe_summary, active_terminal_hold
 
 
 def fixture():
@@ -26,6 +26,28 @@ def fixture():
 
 
 class PlatformStressTests(unittest.TestCase):
+    def test_sustained_probe_executes_unique_roundtrips_until_deadline_without_slow_unit_test(self):
+        now=[100.0];seen=[];client=Mock()
+        def read(expected):
+            seen.append(expected);now[0]+=1
+            return True
+        result=active_terminal_hold(client,'/api/terminal/',3,100,read,clock=lambda:now[0],pause=lambda _:None)
+        self.assertEqual(result['verified_roundtrips'],3)
+        self.assertEqual(result['hold_seconds_observed'],3)
+        self.assertEqual(len(set(seen)),3)
+        self.assertEqual(client.request.call_count,3)
+        for call,expected in zip(client.request.call_args_list,seen):
+            raw=base64.b64decode(call.args[2]['data']).decode()
+            self.assertNotIn(expected,raw)
+            self.assertIn('printf',raw)
+        client.reset_mock()
+        nohold=active_terminal_hold(client,'/api/terminal/',0,100,read,clock=lambda:100,pause=lambda _:None)
+        self.assertEqual(nohold['verified_roundtrips'],0);client.request.assert_not_called()
+        manifest=fixture();manifest['terminal_probe_hold_seconds']=301
+        with self.assertRaises(ValueError):validate_manifest(manifest)
+        manifest['terminal_probe_hold_seconds']=-1
+        with self.assertRaises(ValueError):validate_manifest(manifest)
+
     def test_signing_material_stays_in_memory_and_is_signed_at_actual_submission_time(self):
         requests=[];issue_id=str(uuid.uuid4())
         class Handler(BaseHTTPRequestHandler):
@@ -81,6 +103,13 @@ class PlatformStressTests(unittest.TestCase):
         rows[2]['terminal_probe']['marker_verified']=False
         self.assertFalse(terminal_probe_summary(rows)['verified'])
         rows[2]['terminal_probe']['marker_verified']=True
+        for row in rows:
+            row['terminal_probe'].update(hold_seconds_requested=60,hold_started_at=2,hold_completed_at=62,
+                                          verified_roundtrips=55)
+        self.assertTrue(terminal_probe_summary(rows)['verified'])
+        rows[0]['terminal_probe']['hold_completed_at']=61.9
+        self.assertFalse(terminal_probe_summary(rows)['verified'])
+        rows[0]['terminal_probe']['hold_completed_at']=62
         rows[9]['terminal_probe'].update(opened_at=6,closed_at=7,probe_start=6,probe_end=7)
         self.assertFalse(terminal_probe_summary(rows)['verified'])
 

@@ -65,6 +65,9 @@ def validate_manifest(value):
         raise ValueError('full_job_lifecycle must be boolean')
     if type(value.get('terminal_concurrency_probe',False)) is not bool:
         raise ValueError('terminal_concurrency_probe must be boolean')
+    hold=value.get('terminal_probe_hold_seconds',0)
+    if type(hold) not in (int,float) or not math.isfinite(hold) or not 0<=hold<=300:
+        raise ValueError('terminal probe hold must be 0..300 seconds')
     capacity=value.get('expected_worker_concurrency')
     if capacity is not None and (type(capacity) is not int or not 1<=capacity<=16):
         raise ValueError('expected worker concurrency must be 1..16')
@@ -295,6 +298,22 @@ def job_lifecycle_summary(stations,capacity=None):
     return result
 
 
+def active_terminal_hold(client,path,seconds,started_at,read,clock=time.time,pause=time.sleep):
+    deadline=started_at+seconds;rounds=0
+    while seconds>0 and clock()<deadline:
+        nonce=uuid.uuid4().hex
+        expected='HOLD_PTY_'+nonce+'_R'+str(rounds+1)
+        command="printf 'HOLD_PTY_%s_R%d\\n' '"+nonce+"' "+str(rounds+1)+"\n"
+        client.request('POST',path,{'action':'input','data':base64.b64encode(command.encode()).decode()},operation='terminal_probe_hold_input')
+        if read(expected) is not True:raise AssertionError('sustained terminal marker roundtrip failed')
+        rounds+=1
+        remaining=deadline-clock()
+        if remaining>0:pause(min(1,remaining))
+    completed=clock()
+    return {'hold_seconds_requested':seconds,'hold_started_at':started_at,'hold_completed_at':completed,
+            'hold_seconds_observed':max(0,completed-started_at),'verified_roundtrips':rounds}
+
+
 def terminal_probe_summary(stations):
     probes=[row['terminal_probe'] for row in stations if row.get('terminal_probe')]
     # Only count intervals after actual PTY marker verification and before
@@ -309,12 +328,21 @@ def terminal_probe_summary(stations):
     overlap=common_end-common_start if common_start is not None and common_end is not None else None
     peak=max_overlap(intervals)
     count=len(stations)
+    requested=max((row.get('hold_seconds_requested',0) for row in probes),default=0)
+    hold_starts=[epoch(row.get('hold_started_at')) for row in probes]
+    hold_ends=[epoch(row.get('hold_completed_at')) for row in probes]
+    hold_overlap=(min(hold_ends)-max(hold_starts) if probes and all(value is not None for value in hold_starts+hold_ends) else None)
+    roundtrips={row.get('session_id'):row.get('verified_roundtrips',0) for row in probes}
+    hold_verified=(not requested or (hold_overlap is not None and hold_overlap>=requested and all(value>0 for value in roundtrips.values())))
     return {'requested_stations':count,'observed_probes':len(probes),'distinct_users':distinct_users,
             'distinct_sessions':distinct_sessions,'distinct_station_identities':distinct_identities,
             'max_concurrent_open':peak,
             'common_open_interval':{'started_at':common_start,'completed_at':common_end,'seconds':overlap},
             'interval_source':'client-observed real PTY marker verified through all-owner confirmation, before close',
+            'hold_seconds_requested':requested,'hold_seconds_observed':hold_overlap,
+            'verified_roundtrips_each':roundtrips,'min_overlap_seconds':overlap,
             'verified':bool(count and len(probes)==count and complete and peak==count and overlap and overlap>0
+                            and hold_verified
                             and distinct_users==count and distinct_sessions==count and distinct_identities==count
                             and all(row.get('marker_verified') is True for row in probes))}
 
@@ -447,7 +475,7 @@ def station_job(job):
             owner.request('POST',terminal_path,{'action':'input','data':base64.b64encode(
                 ("printf 'ALL_STATIONS_PTY_%s\\n' '"+suffix+"'\n").encode()).decode()},operation='terminal_probe_input')
             cursor=0;probe_output=bytearray()
-            def probe_read():
+            def probe_read(expected=marker):
                 nonlocal cursor
                 result=owner.request('GET',terminal_path+'?after='+str(cursor),operation='terminal_probe_read')
                 cursor=result['cursor'];terminal_probe['last_read_at']=time.time()
@@ -456,7 +484,7 @@ def station_job(job):
                 if result.get('identity'):terminal_probe['server_identity']=result['identity']
                 for field in ('created_at','last_read_at','expires_at'):
                     if result.get(field) is not None:terminal_probe['server_'+field]=result[field]
-                return marker.encode() in probe_output
+                return expected.encode() in probe_output
             poll(probe_read,bool,20)
             terminal_probe['marker_verified']=True;terminal_probe['probe_start']=time.time()
             terminal_probe['identity']={'username':operator['username'],'hostname':operator['hostname'],'boot_id':operator['boot_id']}
@@ -464,12 +492,19 @@ def station_job(job):
                 if identifier!=station['owner_user_id']:
                     user(identifier).request('GET',terminal_path,expected=(403,404),operation='terminal_probe_crossowner_expected_deny')
             all_ready=shared/'terminal-all-ready';all_ready.mkdir(exist_ok=True)
-            (all_ready/str(index)).write_text(sid)
+            marker_file=shared/('.terminal-ready-'+uuid.uuid4().hex)
+            marker_file.write_text(json.dumps({'session_id':sid,'ready_at':time.time()}))
+            marker_file.replace(all_ready/str(index))
             deadline=time.monotonic()+60
             while len(list(all_ready.iterdir()))<len(manifest['stations']):
                 probe_read()
                 if time.monotonic()>deadline:raise TimeoutError('not all real PTY markers became ready')
                 time.sleep(.05)
+            hold_started=max(json.loads(path.read_text())['ready_at'] for path in all_ready.iterdir())
+            def hold_read(expected):
+                return poll(lambda:probe_read(expected),bool,20)
+            terminal_probe.update(active_terminal_hold(owner,terminal_path,manifest.get('terminal_probe_hold_seconds',0),
+                                                       hold_started,hold_read))
             # A second barrier confirms every owner observed the all-open state.
             all_observed=shared/'terminal-all-observed';all_observed.mkdir(exist_ok=True)
             probe_read();(all_observed/str(index)).touch()
