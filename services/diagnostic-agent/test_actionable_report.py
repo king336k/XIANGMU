@@ -41,6 +41,29 @@ def report(actions=None, verification=None):
 
 
 class ActionableReportTests(unittest.TestCase):
+    def test_four_part_answer_and_optional_details_roundtrip_without_rewriting_facts(self):
+        answer="**问题**：上报时复位失败；本轮配置复查已通过，运动仍待验收。\n**原因**：已确认历史日志记录目标超限，当前修改回执对应配置恢复。\n**处理**：已按批准计划更正初值；本轮未执行运动。\n**验证**：配置语义检查通过；原复位业务需现场授权验证。"
+        def respond(messages,info):
+            value=report(['由现场人员在安全条件下执行原复位操作。'],['原复位完成且无同类错误才通过业务验收。'])
+            value.update(answer=answer,evidence_details='实际配置位置及改动保存在现场执行回执；知识机制见 KN-reporting-v1。',citations=['DESCRIPTION','KN-reporting-v1'])
+            return ModelResponse(parts=[ToolCallPart('final_result',value)])
+        data=payload();data['references']=[{'reference':'KN-reporting-v1','title':'配置与业务验收边界','content':'配置通过不等于业务恢复'}]
+        result=runner.create_agent(FunctionModel(respond),data).run_sync('分析本轮材料')
+        self.assertEqual(result.output.answer,answer)
+        self.assertIn('KN-reporting-v1',result.output.evidence_details)
+        self.assertLess(len(result.output.answer),400)
+
+    def test_details_cannot_hide_foreign_reference_or_bypass_its_length_bound(self):
+        calls=[]
+        def respond(messages,info):
+            calls.append(1);value=report(['只读核对现场配置。'],['按原失败操作确认结果。'])
+            value['evidence_details']='具体依据 KN-foreign-source'
+            return ModelResponse(parts=[ToolCallPart('final_result',value)])
+        with self.assertRaises(UnexpectedModelBehavior):runner.create_agent(FunctionModel(respond),payload()).run_sync('分析')
+        self.assertEqual(len(calls),2)
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):runner.Report.model_validate({**report(), 'evidence_details':'x'*10001})
+
     def test_schema_exposes_minimum_nonblank_steps_for_production(self):
         schema = runner.create_agent(None, payload()).output_type.model_json_schema()
         for key in ["suggested_actions", "verification_steps"]:

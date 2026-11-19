@@ -53,10 +53,10 @@ def finish(run_id, result, status="completed", error=""):
                       'verification_passed': configuration['verification_passed'],
                       'repair_locations': configuration['repair_locations']}
         fields = [
-            ("结论", "summary"),
-            ("原因与证据", "root_cause"),
-            ("已执行操作", "actions"),
-            ("复测", "verification"),
+            ("问题", "summary"),
+            ("原因", "root_cause"),
+            ("处理", "actions"),
+            ("验证", "verification"),
             ("后续方案", "solution"),
         ]
         from .agent_lifecycle import readonly_verified,handoff
@@ -79,6 +79,8 @@ def finish(run_id, result, status="completed", error=""):
             change=str(location.get("key") or location.get("symbol") or "")
             if "before" in location and "after" in location:change+=" "+str(location["before"])+" → "+str(location["after"])
             lines.append("修改位置："+redact(address+" · "+change)[:2000])
+        if isinstance(result.get('evidence_details'),str) and result['evidence_details'].strip():
+            lines.append('详细依据：'+redact(result['evidence_details'])[:6000])
         # Public replies are already displayed by the reporting DAQ client.
         comment = DefectComment.objects.create(
             project_id=run.defect.project_id,

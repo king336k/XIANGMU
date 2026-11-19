@@ -53,6 +53,7 @@ class Finding(BaseModel):
 
 class Report(BaseModel):
     summary: str = Field(max_length=5000)
+    evidence_details: str = Field(default="", max_length=10000)
     root_cause: str = Field(max_length=5000)
     actions: list[str] = Field(max_length=15)
     verification: list[str] = Field(max_length=15)
@@ -544,10 +545,11 @@ context.feedback 是关联原缺陷的标题/描述/编号，应结合它定位�
 报告区分已证实根因、假设、修复操作和待验证。只记录真实操作；只有真实修改且对应回归通过才 repaired=true。
 诊断项、修复项和验证项必须对应同一个对象与原失败操作；多问题按编号逐项对应。当前已恢复时明确本轮仅复核，不能继续按旧报告修改。
 结果使用中文，包含 summary/root_cause/actions/verification/solution/repaired。无法连接或证据不足时明确未修复及缺口。
-面向操作员写简洁、直接的处理结果，避免重复取证过程或反复声明未做某事。summary最多120个中文字符，只说当前状态、直接原因、实际处理和复测结果。
+面向操作员的展示按“问题、原因、处理、验证”四部分组织，保持旧summary/root_cause/actions/verification/solution结构。summary最多120个中文字符先说当前状态；root_cause最多2句区分已确认原因与推测，并在必要时一句区分历史故障和当前结果；actions仅列真实处理，verification只写实际检查及覆盖范围，solution列具体待办。
+不要默认堆叠VR未活动、Session未关联、平台材料收据或每项未验收边界；只有与本缺陷因果或避免误认恢复直接相关才写主段。必要详细来源、长路径、版本/hash、原始回执和次要不确定性放可选evidence_details（最多10000字符）；默认摘要不复制长路径UUID，不能删除或改写真实证据。
 root_cause先用1至2句写已确认原因，未确认就直接说明缺哪项证据；actions最多4条，每条描述实际业务操作，不重复框架名称或inspect_argv/purpose等内部术语。
 verification最多4条，先说原故障是否恢复及实际检查结果；哈希和各专家原始输出保留在详细证据，不反复复制。
-修复定位信息是必需内容，不能为了简短省略：actions写清目标机器、文件完整路径、实际读到的行号及配置项/函数，修改前后值；没有可靠行号则写配置键或函数，不猜行号。
+修复定位信息由真实repair_locations和变化明细完整保留，必要细节可放evidence_details；actions只简述目标、配置项/函数和实际处理，不反复复制完整路径或hash。没有可靠行号则用配置键或函数，不猜行号。
 repair_locations仅填现场工具已经返回的真实位置与变化，可包含target、path、line、key、before、after、backup；不能凭历史或模型猜测。
 actions和verification最终由工具执行回执生成，不接受模型自述为已执行事实；处理建议放solution，原因分析放root_cause。summary/root_cause/solution中的明确路径:行号必须实际出现在本轮读取或执行回执中，否则保留待定位，不编造地址。
 若缺配置文件，说明文件名、完整目标目录、模板来源和必要内容；若缺Python包/系统依赖，说明目标主机或容器、解释器/虚拟环境、包名版本、实际安装命令和校验结果；若是服务或调用链，说明调用方、目标服务、接口端口及失败证据。
@@ -834,7 +836,7 @@ async def analyze(payload, runtime=None):
                     reject('unknown_evidence_reference','findings只能引用get_diagnostic_state提供的uploaded:N或tool:N。')
                 if finding.kind=='observed' and not finding.evidence_refs:
                     reject('observed_evidence_required','已观察事实必须引用真实证据；无证据推断请标为predicted。')
-            claimed=set().union(*(path_lines(text) for text in (report.summary,report.root_cause,report.solution)))
+            claimed=set().union(*(path_lines(text) for text in (report.summary,report.root_cause,report.solution,report.evidence_details)))
             if claimed-gateway.observed_locations:
                 gateway.validation_mismatches=gateway.mismatch_handles(claimed-gateway.observed_locations)
                 reject('unobserved_location','以下位置是模型未核实声明（不是执行证据）：'
