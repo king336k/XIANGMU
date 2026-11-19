@@ -35,6 +35,7 @@ export type TerminalSnapshot = {
 export type AgentRun = {
   id: string;
   status: string;
+  mode?: "diagnose" | "repair" | "verify";
   queue?: {
     position?: number | null;
     reason?: "device_busy" | "worker_busy" | "terminal_open" | "transfer_active" | string;
@@ -74,6 +75,13 @@ export function agentStatusLabel(status: string) {
 }
 
 export function agentRunStatusLabel(run: AgentRun): string {
+  if (run.status === "failed") return "处理失败";
+  if (run.status === "timed_out") return "处理超时";
+  if (run.status === "completed") {
+    if (run.result?.repaired === true && run.result.verification_passed === true) return "已修复并复测";
+    if (run.result?.outcome === "verified" && run.result.verification_passed === true) return "复测通过";
+    return "处理完成";
+  }
   if (run.status === "queued") {
     const reasons: Record<string, string> = {
       device_busy: "等待采集电脑空闲",

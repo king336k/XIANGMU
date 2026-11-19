@@ -472,14 +472,14 @@ test("Agent diagnosis starts only after explicit action and includes the selecte
   });
   const tree = AgentPanel({ device });
   assert.equal(calls.length, 0);
-  const button = nodes(tree).find((node) => node.type === "button" && node.props.children === "开始诊断");
+  const button = nodes(tree).find((node) => node.type === "button" && node.props.children === "诊断并修复");
   assert.equal(button.props.disabled, false);
   button.props.onClick();
   await flush();
   assert.deepEqual(calls, [
     {
       url: "/api/quality-auth/remote-diagnostics/agent-runs/",
-      body: { device_id: "computer", defect_id: "feedback-1", problem: "采集无画面" },
+      body: { device_id: "computer", defect_id: "feedback-1", mode: "repair", problem: "采集无画面" },
     },
   ]);
 });
@@ -510,7 +510,7 @@ test("Agent diagnosis requires original feedback and does not submit without one
     "./remote-feedback-history": { RemoteFeedbackHistory: () => null },
   });
   const tree = AgentPanel({ device });
-  const button = nodes(tree).find((node) => node.type === "button" && node.props.children === "开始诊断");
+  const button = nodes(tree).find((node) => node.type === "button" && node.props.children === "诊断并修复");
   assert.equal(button.props.disabled, true);
   assert.equal(
     nodes(tree).some((node) => node.type === "select"),

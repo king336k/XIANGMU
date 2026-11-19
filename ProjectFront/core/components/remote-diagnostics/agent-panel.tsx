@@ -51,6 +51,7 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
   const runInProgress = !!(run && runningAgentStatuses.has(run.status));
   const verified =
     run?.status === "completed" && run.result?.verification_passed === true && run.result?.outcome === "verified";
+  const repairedAndRetested = run?.result?.repaired === true && run.result.verification_passed === true;
 
   useEffect(() => {
     if (runId && !runInProgress) submitting.current = false;
@@ -68,7 +69,7 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
         if (runningAgentStatuses.has(next.status)) timer = setTimeout(() => void poll(), 1500);
       } catch (cause) {
         if (!cancelled) {
-          setError(`诊断状态读取失败，正在重试：${errorMessage(cause)}`);
+          setError(`处理状态读取失败，正在重试：${errorMessage(cause)}`);
           timer = setTimeout(() => void poll(), 5000);
         }
       }
@@ -89,6 +90,7 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
       const next = await qualityApi.write<AgentRun>(`${remoteDiagnosticsBase}agent-runs/`, {
         device_id: device.id,
         defect_id: defectId,
+        mode: "repair",
         problem: problem.trim(),
       });
       if (mountedRef.current) setRun(next);
@@ -103,8 +105,8 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
   return (
     <section aria-label="Agent 诊断" className="space-y-4 rounded border border-subtle p-4 sm:p-5">
       <div>
-        <h2 className="text-14 font-medium">Agent 诊断</h2>
-        <p className="mt-1 text-13 text-secondary">关联原始反馈后开始排查，处理结果会回写到这条反馈。</p>
+        <h2 className="text-14 font-medium">Agent 现场处理</h2>
+        <p className="mt-1 text-13 text-secondary">同一任务依次排查、在授权范围内修复并自动复测，结果回写原始反馈。</p>
       </div>
       <FeedbackPicker
         device={device}
@@ -171,7 +173,7 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
           maxLength={8000}
           value={problem}
           disabled={busy}
-          placeholder="例如：采集开始后摄像头无画面，请定位原因并给出验证结果。"
+          placeholder="例如：采集开始后摄像头无画面，请排查原因、按授权修复并复测。"
           onChange={(event) => setProblem(event.target.value)}
         />
       </label>
@@ -187,7 +189,7 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
             ? "排队中…"
             : runInProgress
               ? `${agentRunStatusLabel(run!)}…`
-              : "开始诊断"}
+              : "诊断并修复"}
       </button>
       {error && (
         <p role="alert" className="text-13 text-danger-primary">
@@ -198,13 +200,17 @@ export function AgentPanel({ device }: { device: RemoteDevice }) {
         <div className="space-y-3 border-t border-subtle pt-4">
           <p role="status" className="text-13 font-medium">
             <span
-              className={`inline-flex rounded px-2 py-1 text-12 ${runInProgress ? "bg-accent-subtle text-accent-primary" : run.status === "failed" ? "bg-surface-2 text-danger-primary" : run.result?.repaired === true || verified ? "bg-surface-2 text-success-primary" : "bg-surface-2 text-warning-primary"}`}
+              className={`inline-flex rounded px-2 py-1 text-12 ${runInProgress ? "bg-accent-subtle text-accent-primary" : run.status === "failed" ? "bg-surface-2 text-danger-primary" : repairedAndRetested || verified ? "bg-surface-2 text-success-primary" : "bg-surface-2 text-warning-primary"}`}
             >
               {agentRunStatusLabel(run)}
             </span>
             {run.status === "completed" && (
               <span className="font-normal ml-2 text-12 text-secondary">
-                {run.result?.repaired === true ? "已修复" : verified ? "验证正常" : "未自动修复"}
+                {repairedAndRetested
+                  ? "已执行修复并通过复测"
+                  : verified
+                    ? "验证正常（只读，本轮未修复）"
+                    : "未确认解决，请查看原因与下一步"}
               </span>
             )}
           </p>

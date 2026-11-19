@@ -95,7 +95,7 @@ export function AgentFeedbackActions({
           onClick={() => void start("diagnose")}
           className="rounded border border-subtle px-3 py-1.5 text-12 disabled:opacity-40"
         >
-          重新诊断
+          重新诊断（只读）
         </button>
         <button
           type="button"
@@ -103,7 +103,7 @@ export function AgentFeedbackActions({
           onClick={() => void start("repair")}
           className="rounded bg-accent-primary px-3 py-1.5 text-12 text-on-color disabled:opacity-40"
         >
-          诊断并自动修复
+          诊断并修复
         </button>
         <button
           type="button"
@@ -111,7 +111,7 @@ export function AgentFeedbackActions({
           onClick={() => void start("verify")}
           className="rounded border border-subtle px-3 py-1.5 text-12 disabled:opacity-40"
         >
-          重新验证
+          重新验证（只读）
         </button>
         <button type="button" onClick={onHistory} className="px-2 py-1.5 text-12 text-accent-primary">
           查看处理过程
@@ -119,12 +119,15 @@ export function AgentFeedbackActions({
         {(starting || run) && (
           <span
             role="status"
-            className={`rounded px-2 py-1 text-12 ${busy ? "bg-accent-subtle text-accent-primary" : run?.status === "failed" || run?.status === "timed_out" ? "bg-danger-subtle text-danger-primary" : run?.result?.repaired === true || run?.result?.verification_passed === true ? "bg-success-subtle text-success-primary" : "bg-surface-2 text-secondary"}`}
+            className={`rounded px-2 py-1 text-12 ${busy ? "bg-accent-subtle text-accent-primary" : run?.status === "failed" || run?.status === "timed_out" ? "bg-danger-subtle text-danger-primary" : run?.result?.verification_passed === true && (run.result.repaired === true || run.result.outcome === "verified") ? "bg-success-subtle text-success-primary" : "bg-surface-2 text-secondary"}`}
           >
             {starting ? "正在提交…" : run ? agentRunStatusLabel(run) : ""}
           </span>
         )}
       </div>
+      <p className="text-11 text-secondary">
+        诊断并修复：同一任务完成排查、授权修复、自动复测和原反馈回写；只读操作不修改现场。
+      </p>
       {selected && (
         <p className="text-11 text-secondary">
           现场：{selected.username}@{selected.ip_address || "IP待确认"}

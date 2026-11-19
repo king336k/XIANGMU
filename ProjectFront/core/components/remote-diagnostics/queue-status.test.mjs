@@ -61,7 +61,7 @@ test("queue labels use real reason and positive position without inventing ETA o
     assert.equal(label({ status: "running", queue: { stage } }), expected);
   assert.equal(label({ status: "running" }), "正在处理");
   assert.equal(label({ status: "cancelled" }), "已取消");
-  assert.equal(label({ status: "timed_out" }), "诊断超时");
+  assert.equal(label({ status: "timed_out" }), "处理超时");
 });
 
 function actions(run, write = async () => ({ id: "run", status: "queued" })) {
@@ -95,7 +95,8 @@ test("feedback actions display real queue, keep polling queued/running and stop 
   const { tree, intervals } = actions(queued);
   assert.match(JSON.stringify(tree), /等待终端关闭 · 前方 2 个任务/);
   for (const button of nodes(tree).filter(
-    (node) => node.type === "button" && ["重新诊断", "诊断并自动修复", "重新验证"].includes(node.props.children)
+    (node) =>
+      node.type === "button" && ["重新诊断（只读）", "诊断并修复", "重新验证（只读）"].includes(node.props.children)
   ))
     assert.equal(button.props.disabled, true);
   assert.equal(intervals[0](queued), 1500);
@@ -116,7 +117,7 @@ test("feedback actions prevent a second submit before React rerenders", async ()
       finish = resolve;
     });
   });
-  const button = nodes(tree).find((node) => node.type === "button" && node.props.children === "重新诊断");
+  const button = nodes(tree).find((node) => node.type === "button" && node.props.children === "重新诊断（只读）");
   button.props.onClick();
   button.props.onClick();
   assert.equal(count, 1);
@@ -124,6 +125,52 @@ test("feedback actions prevent a second submit before React rerenders", async ()
   await new Promise((resolve) => setImmediate(resolve));
   button.props.onClick();
   assert.equal(count, 1, "accepted task stays guarded before the first polling snapshot arrives");
+});
+
+test("repair starts one continuous task and readonly actions explicitly preserve their non-mutating modes", async () => {
+  await Promise.all(
+    [
+      ["诊断并修复", "repair"],
+      ["重新诊断（只读）", "diagnose"],
+      ["重新验证（只读）", "verify"],
+    ].map(async ([label, mode]) => {
+      const writes = [];
+      const { tree } = actions(undefined, async (url, body) => {
+        writes.push(body);
+        return { id: "one-task", status: "queued" };
+      });
+      const button = nodes(tree).find((node) => node.type === "button" && node.props.children === label);
+      assert.ok(button, label);
+      button.props.onClick();
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(writes.length, 1);
+      assert.equal(writes[0].mode, mode);
+      assert.match(JSON.stringify(tree), /同一任务|自动复测/);
+      if (mode !== "repair") assert.match(writes[0].problem, /禁止修改/);
+    })
+  );
+});
+
+test("completion label claims repair and retest only when both actual evidence flags are present", () => {
+  assert.equal(
+    types.agentRunStatusLabel({
+      status: "completed",
+      result: { repaired: true, verification_passed: true, outcome: "repaired" },
+    }),
+    "已修复并复测"
+  );
+  assert.equal(
+    types.agentRunStatusLabel({
+      status: "completed",
+      result: { repaired: false, verification_passed: true, outcome: "verified" },
+    }),
+    "复测通过"
+  );
+  assert.equal(
+    types.agentRunStatusLabel({ status: "completed", result: { repaired: false, outcome: "unresolved" } }),
+    "处理完成"
+  );
+  assert.equal(types.agentRunStatusLabel({ status: "completed", result: { repaired: true } }), "处理完成");
 });
 
 test("device panel polls real queued stage through repair to completion and then stops", async () => {
