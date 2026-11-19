@@ -640,3 +640,52 @@ test("live stream sends ordered input with acknowledgements and no HTTP polling 
     globalThis.WebSocket = originalSocket;
   }
 });
+
+test("WebSocket input does not wait one network round trip per keystroke", async () => {
+  const oldWindow = globalThis.window,
+    oldSocket = globalThis.WebSocket,
+    sockets = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    bufferedAmount = 0;
+    messages = [];
+    constructor() {
+      sockets.push(this);
+      setImmediate(() => this.onopen?.());
+    }
+    addEventListener(name, fn) {
+      this["on" + name] = fn;
+    }
+    send(raw) {
+      this.messages.push(JSON.parse(raw));
+    }
+    close() {
+      this.onclose?.();
+    }
+  }
+  globalThis.window = { location: { origin: "http://platform.test" } };
+  globalThis.WebSocket = Socket;
+  try {
+    const c = new TerminalConnection(
+      { read: () => new Promise(() => {}), write: async () => ({ id: "pipeline", status: "open" }) },
+      "/remote/",
+      () => {},
+      () => {}
+    );
+    await c.open("computer", 80, 24);
+    c.input("c");
+    await flushInputFrame();
+    c.input("d");
+    await flushInputFrame();
+    assert.equal(sockets[0].messages.length, 2, "second input must leave before first ACK");
+    assert.deepEqual(
+      sockets[0].messages.map((m) => m.seq),
+      [1, 2]
+    );
+    c.dispose();
+  } finally {
+    globalThis.window = oldWindow;
+    globalThis.WebSocket = oldSocket;
+  }
+});
