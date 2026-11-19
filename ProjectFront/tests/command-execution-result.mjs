@@ -196,3 +196,29 @@ test("large receipt sequence numbers remain exact rather than being rounded by J
   const tree = CommandExecutionResult({ command: { status: "done", exit_code: 0, stdout: output } });
   assert.equal(text(region(tree, "标准输出摘要")), output);
 });
+
+test("command and output are one closed target disclosure with the actual aggregate status", () => {
+  const target = "机器人：engram@10.10.10.177";
+  const command = { argv: ["systemctl", "restart", "test"], status: "done", exit_code: 0 };
+  const tree = CommandExecutionResult({ command, target });
+  assert.equal(tree.type, "details");
+  assert.equal(tree.props.open, undefined);
+  assert.equal(text(nodes(tree).find((node) => node.type === "summary")), `${target} · 成功`);
+  assert.equal(text(tree).split(target).length - 1, 1);
+  assert.ok(region(tree, "执行命令") && region(tree, "执行结果"));
+
+  for (const [execution_steps, status] of [
+    [[command, { ...command, exit_code: 1 }], "失败"],
+    [[command, { argv: ["waiting"], status: "delivered" }], "待确认"],
+    [[command, { ...command, timed_out: true }], "失败"],
+    [[command, command], "成功"],
+  ]) {
+    const grouped = CommandExecutionResult({ command: { execution_steps }, target });
+    assert.equal(grouped.type, "details");
+    assert.equal(grouped.props.open, undefined);
+    assert.equal(text(nodes(grouped).find((node) => node.type === "summary")), `${target} · ${status}`);
+    assert.equal(text(grouped).split(target).length - 1, 1);
+  }
+  const fallback = CommandExecutionResult({ command: {} });
+  assert.equal(text(nodes(fallback).find((node) => node.type === "summary")), "命令与执行结果 · 待确认");
+});

@@ -27,13 +27,20 @@ function outputPreview(output: string) {
   const preview = lines.join("\n");
   return { preview, excerpt: preview !== formatted };
 }
-function executionResult({ command, target }: { command: CommandExecutionStep; target?: string }) {
+function executionStatus(command: CommandExecutionStep) {
   const hasExit = typeof command.exit_code === "number" && Number.isInteger(command.exit_code);
   const failed =
     command.timed_out === true ||
     (hasExit && command.exit_code !== 0) ||
     (command.status === "done" && command.ok === false);
   const completed = !failed && command.status === "done" && hasExit && command.exit_code === 0;
+  return failed ? "失败" : completed ? "成功" : "待确认";
+}
+function executionResult(command: CommandExecutionStep) {
+  const hasExit = typeof command.exit_code === "number" && Number.isInteger(command.exit_code);
+  const status = executionStatus(command);
+  const failed = status === "失败";
+  const completed = status === "成功";
   const resultClass = failed ? "bg-danger-subtle" : completed ? "bg-success-subtle" : "bg-surface-2";
   const resultText = command.timed_out
     ? "命令执行超时"
@@ -52,8 +59,7 @@ function executionResult({ command, target }: { command: CommandExecutionStep; t
     ] as const
   ).filter(([, value]) => typeof value === "string" && value.length > 0);
   return (
-    <section aria-label="命令执行记录" className="overflow-hidden rounded border border-subtle">
-      {target && <p className="border-b border-subtle bg-surface-2 px-3 py-2 text-12 break-all">{target}</p>}
+    <section aria-label="命令执行记录" className="overflow-hidden">
       <div className="grid sm:grid-cols-2">
         <div aria-label="执行命令" className="min-w-0 bg-danger-subtle px-3 py-2">
           <h5 className="mb-1 text-11 text-secondary">执行命令</h5>
@@ -101,17 +107,25 @@ function executionResult({ command, target }: { command: CommandExecutionStep; t
 }
 
 export function CommandExecutionResult({ command, target }: { command: CommandExecution; target?: string }) {
-  if (!command.execution_steps?.length) return executionResult({ command, target });
+  const steps = command.execution_steps?.length ? command.execution_steps : [command];
+  const statuses = steps.map(executionStatus);
+  const status = statuses.includes("失败") ? "失败" : statuses.every((value) => value === "成功") ? "成功" : "待确认";
   const occurrences = new Map<string, number>();
   return (
-    <div aria-label="实际执行步骤" className="space-y-3">
-      {target && <p className="text-12 break-all text-secondary">{target}</p>}
-      {command.execution_steps.map((step) => {
-        const signature = JSON.stringify(step);
-        const occurrence = (occurrences.get(signature) || 0) + 1;
-        occurrences.set(signature, occurrence);
-        return <div key={`${signature}:${occurrence}`}>{executionResult({ command: step })}</div>;
-      })}
-    </div>
+    <details className="overflow-hidden rounded border border-subtle">
+      <summary
+        className={`cursor-pointer bg-surface-2 px-3 py-2 text-12 break-all ${status === "失败" ? "text-danger-primary" : "text-secondary"}`}
+      >
+        {target || "命令与执行结果"} · {status}
+      </summary>
+      <div aria-label="实际执行步骤" className="space-y-3 border-t border-subtle">
+        {steps.map((step) => {
+          const signature = JSON.stringify(step);
+          const occurrence = (occurrences.get(signature) || 0) + 1;
+          occurrences.set(signature, occurrence);
+          return <div key={`${signature}:${occurrence}`}>{executionResult(step)}</div>;
+        })}
+      </div>
+    </details>
   );
 }
