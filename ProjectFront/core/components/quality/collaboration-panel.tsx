@@ -3,6 +3,7 @@ import { renderNumericDateTime } from "@plane/utils";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { can, statusNames, resultNames } from "./types";
 import { useState } from "react";
+import { ConfigurationChangeDiff } from "./configuration-change-diff";
 import useSWR from "swr";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
@@ -19,12 +20,6 @@ function processSummary(summary: string, codes: (string | undefined)[]) {
   );
   return code ? summary.slice(code.length).replace(/^[\s·：:]+/, "") || summary : summary;
 }
-function changeValue(value: unknown, exists: boolean | undefined, recorded: boolean) {
-  if (exists === false) return "不存在";
-  return recorded && value !== undefined ? JSON.stringify(value) : "未记录";
-}
-const actualLine = (value: number | null | undefined) =>
-  typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 
 type Source = {
   id: string;
@@ -292,8 +287,11 @@ export function CollaborationPanel({
                             <div>
                               <dt className="text-tertiary">任务</dt>
                               <dd>
-                                {row.process.defect_code || value.code}
-                                {row.process.round ? ` · 第${row.process.round}轮` : ""}
+                                {
+                                  processSummary(row.process.summary, [row.process.defect_code, value.code]).split(
+                                    " · "
+                                  )[0]
+                                }
                               </dd>
                             </div>
                           )}
@@ -316,7 +314,7 @@ export function CollaborationPanel({
                               </dd>
                             </div>
                           )}
-                          {row.process?.command?.path && (
+                          {row.process?.command?.path && !row.process.command.changes?.length && (
                             <div>
                               <dt className="text-tertiary">文件位置</dt>
                               <dd className="break-all">{row.process.command.path}</dd>
@@ -324,70 +322,9 @@ export function CollaborationPanel({
                           )}
                           {!!row.process?.command?.changes?.length && (
                             <div>
-                              <dt className="text-tertiary">配置字段变更</dt>
-                              <dd className="mt-2 space-y-3">
-                                {row.process.command.changes.map((change) => {
-                                  const before = changeValue(
-                                    change.before,
-                                    change.before_exists,
-                                    Object.hasOwn(change, "before")
-                                  );
-                                  const after = changeValue(
-                                    change.after,
-                                    change.after_exists,
-                                    Object.hasOwn(change, "after")
-                                  );
-                                  const line =
-                                    actualLine(change.after_line) ||
-                                    actualLine(change.line) ||
-                                    actualLine(change.before_line);
-                                  const path = change.path || row.process?.command?.path;
-                                  return (
-                                    <div
-                                      key={JSON.stringify([
-                                        change.key,
-                                        change.path,
-                                        change.before,
-                                        change.after,
-                                        change.before_exists,
-                                        change.after_exists,
-                                      ])}
-                                      className="space-y-1 rounded border border-subtle p-2"
-                                    >
-                                      <p className="font-medium">{`${change.before_exists === false ? "新增配置字段" : change.after_exists === false ? "删除配置字段" : "配置字段"} ${change.key}`}</p>
-                                      <p className="break-words whitespace-pre-wrap">{`${before} → ${after}`}</p>
-                                      <p className="text-11 break-all text-tertiary">
-                                        {path
-                                          ? `${path}${line ? `:${line}` : " · 行号未记录"}`
-                                          : line
-                                            ? `第${line}行（路径未记录）`
-                                            : "行号未记录"}
-                                      </p>
-                                      {(actualLine(change.before_line) || actualLine(change.after_line)) && (
-                                        <p className="text-11 text-tertiary">
-                                          修改前：
-                                          {actualLine(change.before_line)
-                                            ? `第${change.before_line}行`
-                                            : "行号未记录"}{" "}
-                                          · 修改后：
-                                          {actualLine(change.after_line) ? `第${change.after_line}行` : "行号未记录"}
-                                        </p>
-                                      )}
-                                      {(change.backup || change.before_sha256 || change.after_sha256) && (
-                                        <details className="text-11 text-tertiary">
-                                          <summary className="cursor-pointer">备份与校验信息</summary>
-                                          {change.backup && <p className="mt-1 break-all">{change.backup}</p>}
-                                          {change.before_sha256 && (
-                                            <p className="mt-1 break-all">{change.before_sha256}</p>
-                                          )}
-                                          {change.after_sha256 && (
-                                            <p className="mt-1 break-all">{change.after_sha256}</p>
-                                          )}
-                                        </details>
-                                      )}
-                                    </div>
-                                  );
-                                })}
+                              <dt className="text-tertiary">配置差异</dt>
+                              <dd className="mt-2">
+                                <ConfigurationChangeDiff command={row.process.command} />
                               </dd>
                             </div>
                           )}
@@ -399,9 +336,17 @@ export function CollaborationPanel({
                               <dd className="space-y-1 text-11 break-all">
                                 {row.process.command.backup && <p>备份：{row.process.command.backup}</p>}
                                 {row.process.command.expected_sha256 && (
-                                  <p>修改前：{row.process.command.expected_sha256}</p>
+                                  <p>
+                                    {row.process.command.kind === "patch_file" ? "修改前：" : "预期校验值："}
+                                    {row.process.command.expected_sha256}
+                                  </p>
                                 )}
-                                {row.process.command.sha256 && <p>修改后：{row.process.command.sha256}</p>}
+                                {row.process.command.sha256 && (
+                                  <p>
+                                    {row.process.command.kind === "patch_file" ? "修改后：" : "文件校验值："}
+                                    {row.process.command.sha256}
+                                  </p>
+                                )}
                               </dd>
                             </div>
                           )}
@@ -417,18 +362,28 @@ export function CollaborationPanel({
                               <dd className="break-words whitespace-pre-wrap">{row.process.details}</dd>
                             </div>
                           )}
-                          {row.rawDetails && (
-                            <div>
-                              <dt className="text-tertiary">原始记录</dt>
-                              <dd className="break-words whitespace-pre-wrap">{row.rawDetails}</dd>
-                            </div>
-                          )}
-                          {(row.process?.run_id || row.process?.command_id) && (
-                            <div className="space-y-1 border-t border-subtle pt-2 text-11 text-tertiary">
-                              {row.process.run_id && <p className="break-all">任务ID：{row.process.run_id}</p>}
-                              {row.process.command_id && <p className="break-all">命令ID：{row.process.command_id}</p>}
-                            </div>
-                          )}
+                          <div>
+                            <details>
+                              <summary className="cursor-pointer text-11 text-tertiary">技术记录</summary>
+                              <div className="mt-2 space-y-2 text-11 text-tertiary">
+                                <p>{row.process?.defect_code || value.code}</p>{" "}
+                                {row.rawDetails && (
+                                  <div>
+                                    <dt className="text-tertiary">原始记录</dt>
+                                    <dd className="break-words whitespace-pre-wrap">{row.rawDetails}</dd>
+                                  </div>
+                                )}
+                                {(row.process?.run_id || row.process?.command_id) && (
+                                  <div className="space-y-1 border-t border-subtle pt-2 text-11 text-tertiary">
+                                    {row.process.run_id && <p className="break-all">任务ID：{row.process.run_id}</p>}
+                                    {row.process.command_id && (
+                                      <p className="break-all">命令ID：{row.process.command_id}</p>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </details>
+                          </div>
                         </dl>
                       </details>
                     )}

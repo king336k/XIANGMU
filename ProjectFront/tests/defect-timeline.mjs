@@ -1,3 +1,4 @@
+import { ConfigurationChangeDiff } from "./configuration-diff-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -5,11 +6,25 @@ import test from "node:test";
 const require = createRequire(new URL("../package.json", import.meta.url));
 const ts = require("typescript");
 const nodes = (tree) =>
-  !tree || typeof tree !== "object"
-    ? []
-    : Array.isArray(tree)
-      ? tree.flatMap(nodes)
-      : [tree, ...nodes(tree.props?.children)];
+  tree?.type === ConfigurationChangeDiff
+    ? nodes(ConfigurationChangeDiff(tree.props))
+    : !tree || typeof tree !== "object"
+      ? []
+      : Array.isArray(tree)
+        ? tree.flatMap(nodes)
+        : [tree, ...nodes(tree.props?.children)];
+function primaryText(tree) {
+  if (tree === null || tree === undefined || tree === false) return "";
+  if (typeof tree !== "object") return String(tree);
+  if (Array.isArray(tree)) return tree.map(primaryText).join("");
+  if (
+    tree.type === "details" &&
+    [tree.props.children].flat().some((child) => child?.type === "summary" && child.props.children === "技术记录")
+  )
+    return "";
+  return primaryText(tree.props?.children);
+}
+
 function render(events, comments, value = {}) {
   const exports = {};
   new Function(
@@ -20,6 +35,7 @@ function render(events, comments, value = {}) {
       { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }
     ).outputText
   )((id) => {
+    if (id === "./configuration-change-diff") return { ConfigurationChangeDiff };
     if (id === "react/jsx-runtime") return require(id);
     if (id === "react") return { useState: (v) => [v, () => {}] };
     if (id === "lodash-es") return { sortBy: (rows, key) => rows.toSorted((a, b) => key(a) - key(b)) };
@@ -211,11 +227,7 @@ test("Agent操作正文展示业务摘要，真实目标命令退出码与UUID�
   );
   const list = nodes(tree).find((node) => node.props?.["aria-label"] === "处理时间线");
   const row = nodes(list).find((node) => node.type === "li");
-  const expandedBody = nodes(row)
-    .filter((node) => node.type === "p")
-    .map((node) => node.props.children)
-    .filter((value) => typeof value === "string")
-    .join(" ");
+  const expandedBody = primaryText(row);
   assert.match(expandedBody, /第1轮检查机器人配置完成/);
   assert.ok(!expandedBody.includes("D475"));
   const details = nodes(row).find((node) => node.type === "details");
@@ -325,15 +337,18 @@ test("配置字段详情区分修改新增删除和null，行号只显示实际�
     .filter((value) => typeof value === "string" || typeof value === "number")
     .join("");
   for (const value of [
-    "配置字段 robot_port",
-    "18778 → 18777",
-    "新增配置字段 new_flag",
-    "不存在 → false",
-    "删除配置字段 old_flag",
-    "null → 不存在",
-    'null → "ready"',
-    "未记录 → 未记录",
-    "/home/robot/config.json:42",
+    '"robot_port": 18778',
+    '"robot_port": 18777',
+    "新增字段",
+    '"new_flag": false',
+    "字段不存在",
+    "删除字段",
+    '"old_flag": null',
+    '"nullable": null',
+    '"nullable": "ready"',
+    "字段值未记录",
+    "/home/robot/config.json",
+    "第42行",
     "行号未记录",
     "config.json.bak",
     "a".repeat(64),
@@ -341,4 +356,43 @@ test("配置字段详情区分修改新增删除和null，行号只显示实际�
   ])
     assert.ok(text.includes(value), value);
   assert.equal(details.props.open, undefined);
+});
+
+test("读取配置详情的任务不重复缺陷编号，校验值不误称修改且技术记录二级折叠", () => {
+  const note = "Agent 读取配置：工具执行完成；任务 95f89e89-3d92-4f6c-a6aa-9b95fddfcd88";
+  const tree = render(
+    [
+      {
+        ...events[0],
+        note,
+        remote_process: {
+          summary: "BASEKNOW-D-481 第1轮诊断修复 · 读取配置：完成",
+          defect_code: "BASEKNOW-D-481",
+          round: 1,
+          command: { kind: "read_file", path: "/home/robot/config.json", sha256: "a".repeat(64) },
+          run_id: "95f89e89-3d92-4f6c-a6aa-9b95fddfcd88",
+        },
+      },
+    ],
+    [],
+    { code: "BASEKNOW-D-481" }
+  );
+  const details = nodes(tree).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children].flat().some((child) => child?.type === "summary" && child.props.children === "查看操作详情")
+  );
+  const technical = nodes(details).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children].flat().some((child) => child?.type === "summary" && child.props.children === "技术记录")
+  );
+  assert.ok(technical);
+  assert.equal(technical.props.open, undefined);
+  const text = primaryText(details);
+  assert.match(text, /第1轮诊断修复/);
+  assert.match(text, /文件校验值/);
+  assert.doesNotMatch(text, /修改后|BASEKNOW-D-481|95f89e89/);
+  assert.match(JSON.stringify(technical), /BASEKNOW-D-481/);
+  assert.match(JSON.stringify(technical), /工具执行完成/);
 });

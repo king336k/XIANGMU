@@ -1,3 +1,4 @@
+import { ConfigurationChangeDiff } from "./configuration-diff-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -5,7 +6,13 @@ import test from "node:test";
 const require = createRequire(new URL("../package.json", import.meta.url)),
   ts = require("typescript");
 const nodes = (t) =>
-  !t || typeof t !== "object" ? [] : Array.isArray(t) ? t.flatMap(nodes) : [t, ...nodes(t.props?.children)];
+  t?.type === ConfigurationChangeDiff
+    ? nodes(ConfigurationChangeDiff(t.props))
+    : !t || typeof t !== "object"
+      ? []
+      : Array.isArray(t)
+        ? t.flatMap(nodes)
+        : [t, ...nodes(t.props?.children)];
 const Menu = () => null,
   Item = () => null,
   Modal = () => null,
@@ -38,6 +45,18 @@ const data = {
     },
   ],
 };
+function primaryText(tree) {
+  if (tree === null || tree === undefined || tree === false) return "";
+  if (typeof tree !== "object") return String(tree);
+  if (Array.isArray(tree)) return tree.map(primaryText).join("");
+  if (
+    tree.type === "details" &&
+    [tree.props.children].flat().some((child) => child?.type === "summary" && child.props.children === "技术记录")
+  )
+    return "";
+  return primaryText(tree.props?.children);
+}
+
 function component(
   initial,
   sourceData = data,
@@ -63,6 +82,7 @@ function component(
       { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }
     ).outputText
   )((id) => {
+    if (id === "./configuration-change-diff") return { ConfigurationChangeDiff };
     if (id === "react/jsx-runtime") return require(id);
     if (id === "lodash-es") return { sortBy: (rows, key) => rows.toSorted((a, b) => key(a) - key(b)) };
     if (id === "react")
@@ -335,8 +355,25 @@ test("处理历程正文使用精确去编号的任务摘要，原记录和配�
   assert.doesNotMatch(JSON.stringify(visible), /BASEKNOW-D-477|95f89e89/);
   const details = nodes(row).find((node) => node.type === "details");
   assert.equal(details.props.open, undefined);
-  for (const text of [raw, "BASEKNOW-D-477", "robot", "10.0.0.177", "robot_port", "18778 → 18777", "config.json:42"])
-    assert.ok(JSON.stringify(details).includes(text), text);
+  for (const text of [
+    raw,
+    "BASEKNOW-D-477",
+    "robot",
+    "10.0.0.177",
+    "robot_port",
+    '"robot_port": 18778',
+    '"robot_port": 18777',
+    "config.json",
+    "第42行",
+  ])
+    assert.ok(
+      nodes(details)
+        .flatMap((node) => [node.props?.children].flat())
+        .filter((value) => typeof value === "string")
+        .join("")
+        .includes(text),
+      text
+    );
 });
 
 test("旧处理历程没有元数据的UUID说明默认收起但完整原文仍可查", () => {
@@ -350,4 +387,43 @@ test("旧处理历程没有元数据的UUID说明默认收起但完整原文仍�
   assert.ok(details);
   assert.equal(details.props.open, undefined);
   assert.match(JSON.stringify(details), /95f89e89/);
+});
+
+test("处理历程只读校验使用文件校验值并把编号原文放二级技术记录", () => {
+  const note = "Agent 读取配置：工具执行完成；任务 95f89e89-3d92-4f6c-a6aa-9b95fddfcd88";
+  const process = {
+    summary: "BASEKNOW-D-481 第1轮只读诊断 · 读取配置：完成",
+    defect_code: "BASEKNOW-D-481",
+    round: 1,
+    command: { kind: "read_file", path: "/home/robot/config.json", sha256: "a".repeat(64) },
+    run_id: "95f89e89-3d92-4f6c-a6aa-9b95fddfcd88",
+  };
+  const tree = component("timeline", {
+    ...data,
+    events: [
+      {
+        id: "read",
+        label: "读取配置",
+        actor: "成员",
+        date: "2026-11-19T10:00:00Z",
+        note: process.summary,
+        details: note,
+        remote_process: process,
+      },
+    ],
+  }).render();
+  const row = nodes(tree).find((node) => node.type === "li");
+  const details = nodes(row).find((node) => node.type === "details");
+  const technical = nodes(details).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children].flat().some((child) => child?.type === "summary" && child.props.children === "技术记录")
+  );
+  assert.ok(technical);
+  assert.equal(technical.props.open, undefined);
+  const primary = primaryText(details);
+  assert.match(primary, /第1轮只读诊断/);
+  assert.match(primary, /文件校验值/);
+  assert.doesNotMatch(primary, /修改后|BASEKNOW-D-481|95f89e89/);
+  assert.match(JSON.stringify(technical), /BASEKNOW-D-481/);
 });

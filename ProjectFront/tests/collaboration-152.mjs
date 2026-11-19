@@ -1,3 +1,4 @@
+import { ConfigurationChangeDiff } from "./configuration-diff-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -16,6 +17,7 @@ function component(file, name, access, config) {
       compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
     }).outputText
   )((id) => {
+    if (id === "./configuration-change-diff") return { ConfigurationChangeDiff };
     if (id === "react") return React;
     if (id === "swr")
       return {

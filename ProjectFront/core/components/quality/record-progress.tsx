@@ -1,6 +1,7 @@
 import { ProjectRouteLink as Link } from "@/components/common/project-route-link";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useState } from "react";
+import { ConfigurationChangeDiff } from "./configuration-change-diff";
 import { sortBy } from "lodash-es";
 import useSWR from "swr";
 import { CustomMenu } from "@plane/ui";
@@ -32,11 +33,7 @@ function eventSummary(event: Event, currentCode?: string) {
   );
   return code ? summary.slice(code.length).replace(/^[\s·：:]+/, "") || summary : summary;
 }
-function fieldValue(value: unknown, exists: boolean | undefined) {
-  return exists === false ? "不存在" : value === undefined ? "未记录" : JSON.stringify(value);
-}
-const sourceLine = (value: number | null | undefined) =>
-  typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+
 type Data = {
   schedule: { id: string; name: string; start: string | null; target: string | null; status: string; path: string }[];
   stages: { key: string; name: string; state?: "current" | "completed" | "pending" | "skipped" }[];
@@ -254,10 +251,7 @@ export function RecordProgress({
                               {item.remote_process?.defect_code && (
                                 <div>
                                   <dt className="text-tertiary">任务</dt>
-                                  <dd>
-                                    {item.remote_process.defect_code}
-                                    {item.remote_process.round ? ` · 第${item.remote_process.round}轮` : ""}
-                                  </dd>
+                                  <dd>{eventSummary(item, defectFlow?.value.code).split(" · ")[0]}</dd>
                                 </div>
                               )}
                               {item.remote_process?.target && (
@@ -280,7 +274,7 @@ export function RecordProgress({
                                   </dd>
                                 </div>
                               )}
-                              {item.remote_process?.command?.path && (
+                              {item.remote_process?.command?.path && !item.remote_process.command.changes?.length && (
                                 <div>
                                   <dt className="text-tertiary">文件位置</dt>
                                   <dd className="break-all">{item.remote_process.command.path}</dd>
@@ -288,28 +282,9 @@ export function RecordProgress({
                               )}
                               {!!item.remote_process?.command?.changes?.length && (
                                 <div>
-                                  <dt className="text-tertiary">配置字段变更</dt>
-                                  <dd className="mt-2 space-y-2">
-                                    {item.remote_process.command.changes.map((change) => {
-                                      const line =
-                                        sourceLine(change.after_line) ||
-                                        sourceLine(change.line) ||
-                                        sourceLine(change.before_line);
-                                      const path = change.path || item.remote_process?.command?.path;
-                                      return (
-                                        <div
-                                          key={JSON.stringify([change.key, path, change.before, change.after])}
-                                          className="space-y-1 rounded border border-subtle p-2"
-                                        >
-                                          <p>{`${change.before_exists === false ? "新增配置字段" : change.after_exists === false ? "删除配置字段" : "配置字段"} ${change.key}`}</p>
-                                          <p>{`${fieldValue(change.before, change.before_exists)} → ${fieldValue(change.after, change.after_exists)}`}</p>
-                                          <p className="text-11 break-all text-tertiary">
-                                            {path ? `${path}${line ? `:${line}` : " · 行号未记录"}` : "路径未记录"}
-                                          </p>
-                                          {change.backup && <p className="text-11 break-all">备份：{change.backup}</p>}
-                                        </div>
-                                      );
-                                    })}
+                                  <dt className="text-tertiary">配置差异</dt>
+                                  <dd className="mt-2">
+                                    <ConfigurationChangeDiff command={item.remote_process.command} />
                                   </dd>
                                 </div>
                               )}
@@ -326,14 +301,6 @@ export function RecordProgress({
                                   <dd className="break-words whitespace-pre-wrap">{item.remote_process.details}</dd>
                                 </div>
                               )}
-                              <div>
-                                <dt className="text-tertiary">原始记录</dt>
-                                <dd className="break-words whitespace-pre-wrap">
-                                  {Array.from(
-                                    new Set([item.details, item.note, item.remote_process?.summary].filter(Boolean))
-                                  ).join("\n")}
-                                </dd>
-                              </div>
                               {(item.remote_process?.command?.expected_sha256 ||
                                 item.remote_process?.command?.sha256 ||
                                 item.remote_process?.command?.backup) && (
@@ -342,19 +309,49 @@ export function RecordProgress({
                                     <p>备份：{item.remote_process.command.backup}</p>
                                   )}
                                   {item.remote_process.command.expected_sha256 && (
-                                    <p>修改前校验：{item.remote_process.command.expected_sha256}</p>
+                                    <p>
+                                      {item.remote_process.command.kind === "patch_file"
+                                        ? "修改前校验："
+                                        : "预期校验值："}
+                                      {item.remote_process.command.expected_sha256}
+                                    </p>
                                   )}
                                   {item.remote_process.command.sha256 && (
-                                    <p>修改后校验：{item.remote_process.command.sha256}</p>
+                                    <p>
+                                      {item.remote_process.command.kind === "patch_file"
+                                        ? "修改后校验："
+                                        : "文件校验值："}
+                                      {item.remote_process.command.sha256}
+                                    </p>
                                   )}
                                 </div>
                               )}
-                              {(item.remote_process?.run_id || item.remote_process?.command_id) && (
-                                <div className="border-t border-subtle pt-2 text-11 break-all text-tertiary">
-                                  {item.remote_process.run_id && <p>任务ID：{item.remote_process.run_id}</p>}
-                                  {item.remote_process.command_id && <p>命令ID：{item.remote_process.command_id}</p>}
-                                </div>
-                              )}
+                              <div>
+                                <details>
+                                  <summary className="cursor-pointer text-11 text-tertiary">技术记录</summary>
+                                  <div className="mt-2 space-y-2 text-11 text-tertiary">
+                                    <p>{item.remote_process?.defect_code}</p>{" "}
+                                    <div>
+                                      <dt className="text-tertiary">原始记录</dt>
+                                      <dd className="break-words whitespace-pre-wrap">
+                                        {Array.from(
+                                          new Set(
+                                            [item.details, item.note, item.remote_process?.summary].filter(Boolean)
+                                          )
+                                        ).join("\n")}
+                                      </dd>
+                                    </div>
+                                    {(item.remote_process?.run_id || item.remote_process?.command_id) && (
+                                      <div className="border-t border-subtle pt-2 text-11 break-all text-tertiary">
+                                        {item.remote_process.run_id && <p>任务ID：{item.remote_process.run_id}</p>}
+                                        {item.remote_process.command_id && (
+                                          <p>命令ID：{item.remote_process.command_id}</p>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </details>
+                              </div>
                             </dl>
                           </details>
                         )}
