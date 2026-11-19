@@ -94,3 +94,53 @@ def test_fixed_robot_repair_uses_actual_stdout_identity_and_changes(remote):
     command.payload={'kind':'run','argv':['unrelated','command']};command.save()
     ignored=EventSerializer(event,context={}).data['remote_process']
     assert ignored['command']['changes']==[] and ignored['target']['label'].startswith('采集电脑')
+
+
+def test_frozen_display_policy_survives_registration_changes(remote):
+    import json
+    _,edge,device,project=remote;heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device)
+    station.capabilities={'agent_context':{'repair_argv':['replacement','repair']}};station.save()
+    defect=Defect.objects.create(project=project,title='historical robot receipt',description='historical robot receipt')
+    run=RemoteAgentRun.objects.create(workstation=station,defect=defect,owner=station.agent.owner,
+        result={'display_policy_snapshot':{'repair_argv':['fixed','repair']}},expires_at=timezone.now()+timedelta(minutes=5))
+    change={'target_kind':'robot','target_username':'robot-old','target_ip':'10.10.10.177','path':'/robot/config.json','key':'telemetry_enabled','before':False,'after':True,'after_line':4}
+    command=RemoteCommand.objects.create(workstation=station,run=run,payload={'kind':'run','argv':['fixed','repair']},
+        result={'ok':True,'exit_code':0,'stdout':json.dumps({'simulation':True,'changes':[change]})},status='done',expires_at=run.expires_at)
+    event=DefectEvent.objects.create(project=project,defect=defect,created_by=station.agent.owner,status=defect.status,previous_status=defect.status,note=f'Agent 现场修复：任务 {run.id}；命令 {command.id}。')
+    value=EventSerializer(event,context={}).data['remote_process']
+    assert value['target']['host']=='10.10.10.177' and value['command']['changes'][0]['after_line']==4
+    assert value['policy_source']=='execution_snapshot'
+    run.result={};run.save(update_fields=['result'])
+    legacy=EventSerializer(event,context={}).data['remote_process']
+    assert legacy['policy_source']=='current_registration' and legacy['policy_label']=='当前登记上下文'
+
+
+def test_worker_freezes_only_safe_display_policy_and_finish_preserves_it(remote):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from plane.quality.remote_tasks import remote_repair
+    _,edge,device,project=remote;heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device)
+    station.capabilities={'agent_context':{'inspect_argv':['fixed','inspect'],'verify_argv':['fixed','verify'],
+        'repair_argv':['fixed','repair','--token','synthetic-policy-secret'],'verification_scope':'read_only_connectivity',
+        'unrelated_token':'synthetic-unrelated-secret'}};station.save()
+    defect=Defect.objects.create(project=project,title='frozen safe policy',description='frozen safe policy')
+    run=RemoteAgentRun.objects.create(workstation=station,defect=defect,owner=station.agent.owner,identity_key=identity_key(station),expires_at=timezone.now()+timedelta(minutes=5))
+    with patch('plane.quality.remote_tasks.provider_config',return_value={'configured':True}),patch('plane.quality.remote_tasks.subprocess.run',return_value=SimpleNamespace(returncode=0,stdout=json.dumps({'summary':'finished','repaired':False}))):
+        remote_repair.run(str(run.id))
+    run.refresh_from_db()
+    snapshot=run.result['display_policy_snapshot']
+    assert set(snapshot)=={'inspect_argv','verify_argv','repair_argv','verification_scope'}
+    assert snapshot['inspect_argv']==['fixed','inspect'] and snapshot['verify_argv']==['fixed','verify']
+    assert snapshot['verification_scope']=='read_only_connectivity'
+    assert 'synthetic-policy-secret' not in str(snapshot) and 'synthetic-unrelated-secret' not in str(snapshot)
+    station.capabilities={'agent_context':{'repair_argv':['replacement','repair']}};station.save()
+    command=RemoteCommand.objects.create(workstation=station,run=run,
+        payload={'kind':'run','argv':['fixed','repair','--token','synthetic-policy-secret']},status='done',expires_at=run.expires_at,
+        result={'ok':True,'exit_code':0,'stdout':json.dumps({'simulation':True,'changes':[{'target_kind':'robot','target_username':'robot','target_ip':'10.10.10.177','key':'enabled','after':True,'after_line':4}]})})
+    event=DefectEvent.objects.create(project=project,defect=defect,created_by=station.agent.owner,status=defect.status,previous_status=defect.status,note=f'Agent 现场修复：任务 {run.id}；命令 {command.id}。')
+    display=EventSerializer(event,context={}).data['remote_process']
+    assert display['target']['host']=='10.10.10.177' and display['command']['changes'][0]['after_line']==4
+    assert 'synthetic-policy-secret' not in str(display)

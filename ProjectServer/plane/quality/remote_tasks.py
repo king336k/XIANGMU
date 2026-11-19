@@ -37,7 +37,8 @@ def finish(run_id, result, status="completed", error=""):
             result={"summary":"现场身份或授权已变化，本轮结果不能确认恢复。","repaired":False}
             status="failed";error="现场身份或授权已变化"
         run.completed_at=timezone.now()
-        result={**result,'target_snapshot':run.result.get('target_snapshot',{}),'queued_at':run.created_at.timestamp(),
+        result={**result,'target_snapshot':run.result.get('target_snapshot',{}),
+            'display_policy_snapshot':run.result.get('display_policy_snapshot'),'queued_at':run.created_at.timestamp(),
             'worker_started_at':run.started_at.timestamp() if run.started_at else None,
             'worker_completed_at':run.completed_at.timestamp(),'worker_queue':'field-repairs'}
         fields = [
@@ -111,10 +112,16 @@ def remote_repair(self, run_id):
             payload__kind__in=["run", "read_file", "patch_file", "file_browser", "terminal_close"],
         ).exists()
         if not busy:
+            from .remote_event_display import safe_argv
+            display_context=run.workstation.capabilities.get('agent_context',{})
+            display_policy={key:safe_argv(display_context[key]) for key in ['inspect_argv','verify_argv','repair_argv']
+                if isinstance(display_context.get(key),list)}
+            if isinstance(display_context.get('verification_scope'),str):
+                display_policy['verification_scope']='read_only_connectivity' if display_context['verification_scope']=='read_only_connectivity' else ''
             raw = "rr_" + secrets.token_urlsafe(36)
             run.tool_credential_hash = hashlib.sha256(raw.encode()).hexdigest()
             run.status = "running"
-            run.result={**run.result,'target_snapshot':{
+            run.result={**run.result,'display_policy_snapshot':display_policy,'target_snapshot':{
                 'collector':{'username':run.workstation.username,'host':run.workstation.capabilities.get('network',{}).get('ip_address','')},
                 'robot':{key:run.workstation.capabilities.get('robot',{}).get(key) for key in ['username','host','target_revision']}}}
             run.started_at=timezone.now()

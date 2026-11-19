@@ -78,6 +78,9 @@ def event_process(event,context):
     defect_code=cache[code_key]
     task=f'{defect_code} 第{round_no}轮{mode}'
     snapshot=run.result.get('target_snapshot',{}) if isinstance(run.result,dict) else {}
+    policy_snapshot=run.result.get('display_policy_snapshot') if isinstance(run.result,dict) else None
+    policy_frozen=isinstance(policy_snapshot,dict)
+    context_policy=policy_snapshot if policy_frozen else station.capabilities.get('agent_context',{})
     collector=snapshot.get('collector',{}) if isinstance(snapshot,dict) else {}
     frozen=bool(collector.get('username') and collector.get('host'))
     target={'label':'采集电脑' if frozen else '采集电脑（当前登记信息）',
@@ -85,21 +88,25 @@ def event_process(event,context):
         'host':collector.get('host') or station.capabilities.get('network',{}).get('ip_address',''),
         'identity_source':'execution_snapshot' if frozen else 'current_registration'}
     value={'summary':task,'stage':'queued','defect_code':defect_code,'round':round_no,
-        'target':target,'run_id':str(run.id),'command_id':None,'details':'','task':task}
+        'target':target,'run_id':str(run.id),'command_id':None,'details':'','task':task,
+        'policy_source':'execution_snapshot' if policy_frozen else 'current_registration',
+        'policy_label':'执行时登记上下文' if policy_frozen else '当前登记上下文'}
     row=next((commands[item]for item in ids if item in commands and commands[item].run_id==run.id),None)
     if row:
-        argv=row.payload.get('argv');kind=row.payload.get('kind');context_policy=station.capabilities.get('agent_context',{})
+        argv=row.payload.get('argv');kind=row.payload.get('kind');display_argv=safe_argv(argv)
+        # Frozen policy argv is sanitized before storage; compare the same safe representation.
+        match_argv=display_argv if policy_frozen else argv
         label='检查现场状态';stage='inspect';path=row.result.get('resolved_path') or row.payload.get('path')
         if kind=='read_file':label='读取配置'+('：'+str(path)if path else '')
         elif kind=='patch_file':label='修改配置'+('：'+str(path)if path else '');stage='repair'
-        elif argv and argv==context_policy.get('verify_argv'):
+        elif argv and match_argv==context_policy.get('verify_argv'):
             label='只读复核连接与服务状态' if context_policy.get('verification_scope')=='read_only_connectivity' else '执行本轮固定复测'
             stage='verify'
-        elif context_policy.get('repair_argv') and isinstance(argv,list) and argv[:len(context_policy['repair_argv'])]==context_policy['repair_argv']:
+        elif context_policy.get('repair_argv') and isinstance(match_argv,list) and match_argv[:len(context_policy['repair_argv'])]==context_policy['repair_argv']:
             label='修复已登记的机器人配置';stage='repair'
         elif isinstance(argv,list) and len(argv)>=2 and argv[-2] in {'rosa','rai'}:
             label=argv[-2].upper()+('健康检查'if argv[-1]=='health'else'只读检查')
-        elif argv and argv==context_policy.get('inspect_argv'):label='检查采集电脑与机器人当前配置和连接'
+        elif argv and match_argv==context_policy.get('inspect_argv'):label='检查采集电脑与机器人当前配置和连接'
         success=row.result.get('ok')is True and row.result.get('exit_code',0)==0
         receipt=row.result
         # Only the registered fixed repair command returns this structured robot receipt.
