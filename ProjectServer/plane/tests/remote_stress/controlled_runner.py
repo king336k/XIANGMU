@@ -24,6 +24,10 @@ def main():
     if context['operation_mode']=='repair':
         actual['fixed']=True
         tool('patch_file',path='config.json',content=json.dumps(actual),expected_sha256=before['sha256'])
+        current=tool('read_file',path='config.json')
+        # Repeat an actual verification read to exercise complete worker lifetime,
+        # not independent diagnose/repair queue submissions.
+        assert json.loads(current['content'])==actual
         repaired=True
     after=tool('read_file',path='config.json')
     verified=json.loads(after['content'])==actual

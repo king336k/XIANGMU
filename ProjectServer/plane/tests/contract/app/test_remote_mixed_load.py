@@ -49,7 +49,9 @@ def test_isolated_mixed_http(station_count, settings, isolated_server, monkeypat
     InstanceConfiguration.objects.create(key='QUALITY_DAQ_PROJECT_GRANTS',value=json.dumps({'projects':[str(project.id)],'revision':1}))
     instance=Instance.objects.create(instance_name='stress',instance_id=str(uuid4()),current_version='test',last_checked_at=timezone.now())
     users=[]
-    for index in range(4):
+    user_count=int(os.environ.get('REMOTE_STRESS_USERS','4'))
+    full_job=os.environ.get('REMOTE_STRESS_FULL_JOB','0')=='1'
+    for index in range(user_count):
         user=User.objects.create(username='stress-'+str(index)+'-'+isolation,email=str(index)+isolation+'@invalid.test')
         WorkspaceMember.objects.create(workspace=workspace,member=user,role=20)
         ProjectMember.objects.create(project=project,member=user,role=20)
@@ -82,17 +84,20 @@ def test_isolated_mixed_http(station_count, settings, isolated_server, monkeypat
             path='/api/quality-auth/daq-reports/'
             payload={'hubProjectId':str(project.id),'eventId':str(uuid4()),'kind':'startup_failure','occurredAt':timezone.now().isoformat(),'title':f'混合并发反馈 {index}-{ordinal}','description':'同时传输与诊断期间的签名异常反馈','device':str(station.id)}
             headers={key[5:].replace('_','-'):value for key,value in signature(path,json.dumps(payload)).items()}
-            signed_requests.append({'path':path,'payload':payload,'headers':headers})
-        stations.append({'device_id':str(station.id),'token':raw,'owner_user_id':str(owner.id),'allowed_user_ids':[u['id'] for u in users],
+            signed_requests.append({'path':path,'payload':payload,'headers':headers,'signing':{'key_id':'test-incidents','audience':'plane-quality','secret':'synthetic-incidents-only','principal':{'id':16,'username':'test-collector'}}})
+        stations.append({'device_id':str(station.id),'token':raw,'owner_user_id':str(owner.id),'allowed_user_ids':([str(owner.id)] if full_job else [u['id'] for u in users]),
             'defect_ids':ids,'signed_feedback_requests':signed_requests,'diagnostic_paths':paths,'diagnostic_create_paths':[f'/api/workspaces/{workspace.slug}/projects/{project.id}/quality/defects/{ids[0]}/diagnostics/'],'initial_config':{'station':str(station.id),'fixed':False},'expected_repair_config':{'station':str(station.id),'fixed':True}})
     monkeypatch.setattr('plane.quality.remote_tasks.provider_config',lambda _: {'configured':True})
     monkeypatch.setenv('REMOTE_TOOL_ORIGIN',server_url)
     monkeypatch.setenv('REMOTE_AGENT_SCRIPT','/code/plane/tests/remote_stress/controlled_runner.py')
     monkeypatch.setenv('DIAGNOSTIC_AGENT_PYTHON',sys.executable)
     app.conf.update(broker_url=os.environ['REMOTE_STRESS_BROKER'],worker_prefetch_multiplier=1,task_default_queue='diagnostics')
-    manifest={'test_environment':True,'isolation_id':isolation,'base_url':server_url,'model_mode':'controlled_stub','users':users,'stations':stations}
+    manifest={'test_environment':True,'isolation_id':isolation,'base_url':server_url,'model_mode':'controlled_stub','users':users,'stations':stations,'full_job_lifecycle':full_job,'terminal_concurrency_probe':full_job,**({'expected_worker_concurrency':4} if full_job else {})}
     close_old_connections()
-    with start_worker(app,pool='threads',concurrency=4,queues=['diagnostics'],perform_ping_check=False,shutdown_timeout=30,loglevel='ERROR'):
+    from contextlib import ExitStack
+    with ExitStack() as workers:
+        workers.enter_context(start_worker(app,pool='threads',concurrency=4,queues=['field-repairs'],perform_ping_check=False,shutdown_timeout=30,loglevel='ERROR'))
+        workers.enter_context(start_worker(app,pool='threads',concurrency=2,queues=['diagnostics'],perform_ping_check=False,shutdown_timeout=30,loglevel='ERROR'))
         result=subprocess.run([sys.executable,'/repo/services/field-remote/platform_stress.py','--manifest','-','--output',str(output)],input=json.dumps(manifest),text=True,capture_output=True,timeout=720)
     # Credential payload is never included in an assertion or report.
     assert result.returncode==0, f'isolated client failed; inspect {output}'
@@ -102,7 +107,7 @@ def test_isolated_mixed_http(station_count, settings, isolated_server, monkeypat
     assert all(row.get('signed_feedback_count')==2 for row in report['stations'])
     assert sum(len(row.get('new_rules_diagnostics',[])) for row in report['stations'])==station_count
     assert report['mixed_overlap']['cross_station_file_http_model_execution_overlap'] is True
-    assert RemoteAgentRun.objects.filter(workstation_id__in=[row['device_id'] for row in stations],status='completed').count()==station_count*2
+    assert RemoteAgentRun.objects.filter(workstation_id__in=[row['device_id'] for row in stations],status='completed').count()==station_count*(1 if full_job else 2)
     assert not RemoteAgentRun.objects.filter(workstation_id__in=[row['device_id'] for row in stations],status__in=['queued','running']).exists()
     os.chown(output,1000,1000)
     print(json.dumps({'report':str(output),'operations':report['operation_count'],'p95_ms':report['p95_ms']}))
