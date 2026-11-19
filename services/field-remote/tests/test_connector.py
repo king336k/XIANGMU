@@ -44,6 +44,18 @@ class ConnectorTests(unittest.TestCase):
         return {'id': str(time.monotonic_ns()), 'expires_at': time.time() + 30,
                 'kind': kind, **kwargs}
 
+    def test_terminal_pump_drains_ready_chunks_without_waiting_another_exchange(self):
+        import errno
+        terminal=Mock(master=123,active=time.monotonic(),created=time.monotonic())
+        self.engine.terminals['stream']=terminal
+        try:
+            with patch('connector.os.read',side_effect=[b'a'*8192,b'b'*8192,OSError(errno.EAGAIN,'not ready')]):
+                self.engine.pump()
+            data=b''.join(base64.b64decode(row['data'])for row in self.engine.outputs)
+            self.assertEqual(data,b'a'*8192+b'b'*8192)
+        finally:
+            self.engine.terminals.clear()
+
     def test_expiry_and_dedup_do_not_execute(self):
         target = self.root / 'config.json'
         target.write_text('old')

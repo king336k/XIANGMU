@@ -576,12 +576,24 @@ class Engine:
                         terminal.close();del self.terminals[sid];self.closed_sessions.add(sid)
                         self.output({'session_id':sid,'kind':'exit','code':-signal.SIGKILL})
                     continue
-                try:
-                    data = os.read(terminal.master, min(8192, MAX_PENDING - pending))
-                except OSError as exc:
-                    if exc.errno not in (errno.EAGAIN, errno.EIO):
-                        raise
-                    data = None if exc.errno == errno.EAGAIN else b''
+                chunks = []
+                remaining = min(65536, (MAX_PENDING - pending) * 3 // 4)
+                eof = False
+                while remaining > 0:
+                    try:
+                        chunk = os.read(terminal.master, min(8192, remaining))
+                    except OSError as exc:
+                        if exc.errno not in (errno.EAGAIN, errno.EIO):
+                            raise
+                        eof = exc.errno == errno.EIO
+                        break
+                    if not chunk:
+                        eof = True
+                        break
+                    chunks.append(chunk)
+                    remaining -= len(chunk)
+                data = b''.join(chunks) if chunks else b'' if eof else None
+
                 if data:
                     encoded = base64.b64encode(data).decode()
                     self.output({'session_id': sid, 'kind': 'data', 'data': encoded})
@@ -727,12 +739,17 @@ def main():
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
     next_robot_refresh=0.0
+    robot_refresh = None
+    status_executor = ThreadPoolExecutor(max_workers=1)
     try:
         while True:
-            if time.monotonic()>=next_robot_refresh:
+            if robot_refresh is not None and robot_refresh.done():
+                operator['capabilities']['robot'] = robot_refresh.result()
+                robot_refresh = None
+            if policy.daq_local_api is not None and robot_refresh is None and time.monotonic() >= next_robot_refresh:
                 from file_browser import robot_status
-                if policy.daq_local_api is not None:operator['capabilities']['robot']=robot_status(policy.daq_local_api)
-                next_robot_refresh=time.monotonic()+3
+                robot_refresh = status_executor.submit(robot_status, policy.daq_local_api)
+                next_robot_refresh = time.monotonic() + 3
             engine.pump()
             outputs, results = engine.outputs[:100], engine.results[:100]
             try:
@@ -746,10 +763,12 @@ def main():
             except (urllib.error.URLError, OSError, ValueError):
                 # Never print payloads, token, terminal bytes, or server error bodies.
                 pass
-            time.sleep(0.15)
+            # Flush ready output immediately; active PTYs use a shorter idle interval.
+            time.sleep(0 if engine.outputs or engine.results else 0.05 if engine.terminals else 0.15)
     except KeyboardInterrupt:
         pass
     finally:
+        status_executor.shutdown(wait=False, cancel_futures=True)
         engine.close()
 
 
