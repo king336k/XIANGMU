@@ -53,6 +53,48 @@ def has_output(pk, after):
     return RemoteTerminalEvent.objects.filter(session_id=pk, id__gt=after).exists()
 
 
+@database_sync_to_async
+def fast_output(pk):
+    from django_redis import get_redis_connection
+    try:
+        return sorted([json.loads(row) for row in get_redis_connection('default').lrange('remote:terminal-output:'+str(pk),-8,-1)],key=lambda row:row.get('fast_seq',0))
+    except Exception:
+        return []
+
+
+@database_sync_to_async
+def publish_fast_output(station_id, outputs):
+    from django_redis import get_redis_connection
+    from .remote_models import RemoteTerminal
+    from .remote_diagnostics import permitted, terminal_target_valid
+    from django.utils import timezone
+    import base64
+    if not isinstance(outputs,list)or len(outputs)>100:return
+    try:client=get_redis_connection('default')
+    except Exception:return
+    sessions={str(row.id):row for row in RemoteTerminal.objects.filter(workstation_id=station_id,status='open',expires_at__gt=timezone.now()).select_related('owner','workstation__agent__project__workspace')}
+    valid=[]
+    for event in outputs:
+        if not isinstance(event,dict):return
+        session=sessions.get(str(event.get('session_id')))
+        if not session or event.get('kind')!='data':continue
+        if not permitted(session.owner,session.workstation)or not terminal_target_valid(session,session.workstation):continue
+        try:raw=base64.b64decode(event.get('data',''),validate=True)
+        except Exception:continue
+        source=event.get('id')
+        if len(raw)>65536 or not isinstance(source,str)or not 1<=len(source)<=80:continue
+        valid.append((str(session.id),{'source_id':source,'data':event['data']}))
+    try:
+        with client.pipeline()as pipe:
+            for sid,event in valid:
+                key='remote:terminal-output:'+sid
+                event['fast_seq']=client.incr(key+':seq')
+                pipe.expire(key+':seq',120)
+                pipe.rpush(key,json.dumps(event));pipe.ltrim(key,-8,-1);pipe.expire(key,60)
+            pipe.execute()
+    except Exception:pass
+
+
 class TerminalConsumer(AsyncJsonWebsocketConsumer):
     @classmethod
     async def encode_json(cls, content):
@@ -72,6 +114,9 @@ class TerminalConsumer(AsyncJsonWebsocketConsumer):
         self.user = user
         self.session_key = getattr(self.scope.get("session"), "session_key", None)
         self.cursor = 0
+        self.fast_seen = set()
+        self.fast_sequence = 0
+        self.fast_disabled = False
         self.last_seq = 0
         status, snapshot = await session_request(user, self.pk, session_key=self.session_key)
         if status != 200 or snapshot.get("status") != "open":
@@ -122,6 +167,21 @@ class TerminalConsumer(AsyncJsonWebsocketConsumer):
             while True:
                 await asyncio.sleep(0.05)
                 now = asyncio.get_running_loop().time()
+                immediate=[]
+                if not self.fast_disabled:
+                    for event in await fast_output(self.pk):
+                        if event.get('fast_seq',0)<=self.fast_sequence:continue
+                        if event.get('fast_seq')!=self.fast_sequence+1:
+                            self.fast_disabled=True;break
+                        self.fast_sequence=event['fast_seq']
+                        if event['source_id']not in self.fast_seen:immediate.append(event)
+                if immediate:
+                    status,current=await session_request(self.user,self.pk,after=self.cursor,session_key=self.session_key)
+                    if status!=200 or current.get('status')!='open':
+                        await self.close(code=4403);return
+                    self.fast_seen.update(event['source_id']for event in immediate)
+                    if len(self.fast_seen)>512:self.fast_seen={event['source_id']for event in immediate}
+                    await self.send_json({'type':'fast_output','events':immediate})
                 if now - last_check < 1 and not await has_output(self.pk, self.cursor):
                     continue
                 status, snapshot = await session_request(self.user, self.pk, after=self.cursor, session_key=self.session_key)
@@ -144,3 +204,108 @@ class TerminalConsumer(AsyncJsonWebsocketConsumer):
         if self.output_task:
             await session_request(self.user, self.pk, {"action": "close"}, session_key=self.session_key)
         # Rejected upgrades leave the REST fallback session available.
+
+
+@database_sync_to_async
+def station_exchange(raw, payload):
+    from .remote_diagnostics import RemoteExchange
+    data = json.dumps(payload).encode()
+    request = WSGIRequest({"REQUEST_METHOD":"POST","PATH_INFO":"/","QUERY_STRING":"",
+        "CONTENT_TYPE":"application/json","CONTENT_LENGTH":str(len(data)),
+        "HTTP_AUTHORIZATION":"Bearer "+raw,"SERVER_NAME":"localhost","SERVER_PORT":"80",
+        "wsgi.url_scheme":"http","wsgi.input":BytesIO(data)})
+    response = RemoteExchange.as_view()(request)
+    return response.status_code, response.data
+
+
+@database_sync_to_async
+def pending_station_commands(station_id):
+    from .remote_models import RemoteCommand
+    from django.utils import timezone
+    return RemoteCommand.objects.filter(workstation_id=station_id,status="pending",expires_at__gt=timezone.now()).exists()
+
+
+@database_sync_to_async
+def station_identity(raw):
+    from .remote_diagnostics import WorkstationAuthentication
+    from rest_framework.request import Request
+    request = WSGIRequest({"REQUEST_METHOD":"GET","PATH_INFO":"/","QUERY_STRING":"",
+        "HTTP_AUTHORIZATION":"Bearer "+raw,"SERVER_NAME":"localhost","SERVER_PORT":"80",
+        "wsgi.url_scheme":"http","wsgi.input":BytesIO()})
+    try:
+        _, station = WorkstationAuthentication().authenticate(Request(request))
+        return str(station.id)
+    except APIException:
+        return None
+
+
+class StationConsumer(AsyncJsonWebsocketConsumer):
+    @classmethod
+    async def encode_json(cls, content):
+        return json.dumps(content, cls=DjangoJSONEncoder)
+
+    async def connect(self):
+        self.task = None
+        self.lock = asyncio.Lock()
+        self.identity = None
+        self.seq = 0
+        self.sent_commands = set()
+        headers = dict(self.scope.get("headers", []))
+        credential = headers.get(b"authorization", b"").decode()
+        if headers.get(b"origin") or not credential.startswith("Bearer rw_") or len(credential)>128:
+            await self.close(code=4403); return
+        self.raw = credential.removeprefix("Bearer ")
+        self.station_id = await station_identity(self.raw)
+        if self.station_id is None:
+            await self.close(code=4403); return
+        await self.accept()
+        await self.send_json({"type":"ready"})
+        self.task = asyncio.create_task(self.push_commands())
+
+    async def receive(self, text_data=None, bytes_data=None, **kwargs):
+        if bytes_data is not None or not text_data or len(text_data)>1500000:
+            await self.close(code=4400, reason="frame_limit"); return
+        try: await super().receive(text_data=text_data, **kwargs)
+        except (ValueError,TypeError,KeyError): await self.close(code=4400,reason="invalid_json")
+
+    async def receive_json(self, content, **kwargs):
+        if (not isinstance(content,dict) or type(content.get("seq")) is not int
+                or content.get("seq")!=self.seq+1 or not isinstance(content.get("payload"),dict)):
+            await self.close(code=4400,reason="invalid_sequence"); return
+        async with self.lock:
+            await publish_fast_output(self.station_id,content["payload"].get("outputs",[]))
+            status, result = await station_exchange(self.raw,content["payload"])
+            if status!=200:
+                await self.close(code=4403,reason="exchange_rejected"); return
+            self.seq = content["seq"]
+            self.identity = content["payload"].get("identity")
+            self.sent_commands.update(row["id"] for row in result.get("commands",[]))
+            await self.send_json({"type":"exchange","seq":self.seq,**result})
+
+    async def push_commands(self):
+        last_check = asyncio.get_running_loop().time()
+        try:
+            while True:
+                await asyncio.sleep(.03)
+                now=asyncio.get_running_loop().time()
+                if now-last_check>5 and await station_identity(self.raw) is None:
+                    await self.close(code=4403); return
+                if now-last_check>5:last_check=now
+                if self.identity is None or not await pending_station_commands(self.station_id):continue
+                async with self.lock:
+                    status,result=await station_exchange(self.raw,{"identity":self.identity,"outputs":[],"results":[]})
+                    if status!=200:
+                        await self.close(code=4403);return
+                    fresh=[row for row in result.get("commands",[])if row["id"]not in self.sent_commands]
+                    self.sent_commands.update(row["id"]for row in fresh)
+                    if fresh:await self.send_json({"type":"commands","commands":fresh})
+
+        except asyncio.CancelledError:pass
+        except Exception as error:
+            import logging
+            logging.getLogger(__name__).warning("station command stream stopped: %s", type(error).__name__)
+            await self.close(code=1011)
+
+    async def disconnect(self, code):
+        if self.task:
+            self.task.cancel(); await self.task

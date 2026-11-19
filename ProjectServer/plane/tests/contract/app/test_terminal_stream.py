@@ -131,3 +131,33 @@ def test_stream_detects_logout_within_next_authorization_check(terminal):
         assert event['type']=='websocket.close'
         await stop(incoming,task)
     asyncio.run(scenario())
+
+
+def test_fast_output_only_accepts_authorized_actual_terminal_bytes(terminal):
+    from plane.quality.terminal_stream import publish_fast_output,fast_output
+    import base64
+    row,user=terminal
+    async def scenario():
+        data=base64.b64encode(b'actual bytes').decode()
+        await publish_fast_output(row.workstation_id,[{'session_id':str(row.id),'kind':'data','id':'fast-real','data':data}])
+        events=await fast_output(row.id)
+        assert events[-1]['source_id']=='fast-real' and events[-1]['data']==data and events[-1]['fast_seq']>=1
+        await publish_fast_output(row.workstation_id,[{'session_id':str(row.id),'kind':'data','id':'bad','data':'not base64'}])
+        assert not any(event['source_id']=='bad'for event in await fast_output(row.id))
+        await sync_to_async(lambda:type(row.workstation).objects.filter(pk=row.workstation_id).update(enabled=False))()
+        await publish_fast_output(row.workstation_id,[{'session_id':str(row.id),'kind':'data','id':'revoked','data':data}])
+        assert not any(event['source_id']=='revoked'for event in await fast_output(row.id))
+    asyncio.run(scenario())
+
+
+def test_fast_output_gap_falls_back_to_durable_stream_without_skipping(terminal):
+    from unittest.mock import patch,AsyncMock
+    row,user=terminal
+    async def scenario():
+        incoming,outgoing,task=run_socket(row,user)
+        await incoming.put({'type':'websocket.connect'});await outgoing.get();await outgoing.get()
+        with patch('plane.quality.terminal_stream.fast_output',new=AsyncMock(return_value=[{'source_id':'too-late','fast_seq':9,'data':'YQ=='}])):
+            await asyncio.sleep(.15)
+            assert outgoing.empty(),'a cache gap must never print future bytes ahead of durable history'
+        await stop(incoming,task)
+    asyncio.run(scenario())

@@ -1,0 +1,24 @@
+{
+  "package": "websocket-client",
+  "version": "1.8.0",
+  "source": "https://github.com/websocket-client/websocket-client/tree/v1.8.0",
+  "provenance": "unmodified installed distribution, no network install required",
+  "license": "Apache-2.0",
+  "files": {
+    "websocket/_core.py": "3fe95873093e2ca254283a8195e26c9914882635f6bffa381689e074961b867f",
+    "websocket/_app.py": "c4202568cd857ec3cbb1a12c0465e1760e289470c413389fea595259e7c7726f",
+    "websocket/_exceptions.py": "afb946682f18d9bac19da2bf6092510dd618e940865b1397a10b0c720145789e",
+    "websocket/_handshake.py": "87ff3c4babe14ad399063e7330626d20a155d5154c56e12c90bc9b8c90a76a3e",
+    "websocket/_url.py": "91b11d6dd67e04c328610dec31f729f50118d4862b0e9a48282a4820774654c7",
+    "websocket/_abnf.py": "59eb14252486491a73b93a7455e2b5d8ee1261854c37a0b237a6ea5d2e25936c",
+    "websocket/__init__.py": "1af5694cf923be16041997235eccd27ebb3615a547b9d51d1a0192a9ffd16f0e",
+    "websocket/_socket.py": "369b1404ed628670bec4f034536a35fa13172bc7a2a6535c53d476559bd9dea5",
+    "websocket/_utils.py": "477e859c54f16152722a587ec8469aa51c69a0af17c27f491570b2daada1698d",
+    "websocket/_cookiejar.py": "f3ddd25a81e693f272b225e3f259322f2f79728e73bee0bad9718caef9a023b1",
+    "websocket/_ssl_compat.py": "4913edc35ad3dcb3d297dabbd260a2e615bd876c52fa721f75c5db8f21a2f2c1",
+    "websocket/_wsdump.py": "915f362d62e50fa777bf338a395004aa47e8080fd092977485cf563764eada43",
+    "websocket/_logging.py": "0c7454978b0469292896f328e00eaea67ed42181749094f936500bd2f5821d12",
+    "websocket/_http.py": "df71acae85a02e13ac13ca4c0b65e46be463a273ee532a6378544004502d409a",
+    "websocket/py.typed": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

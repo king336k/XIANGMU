@@ -692,3 +692,19 @@ test("slow server acknowledgements keep input bounded and coalesce queued keys",
     globalThis.WebSocket = oldSocket;
   }
 });
+
+test("immediate relay output and durable output do not print the same event twice", async () => {
+  const output = [];
+  const connection = new TerminalConnection(
+    { read: () => new Promise(() => {}), write: async () => ({ id: "unique", status: "open" }) },
+    "/remote/",
+    (bytes) => output.push(...bytes),
+    () => {}
+  );
+  await connection.open("computer", 80, 24);
+  const data = encodeTerminalInput("真实输出");
+  connection.writeOutput(data, "event-1");
+  connection.consume({ status: "open", cursor: 1, events: [{ seq: 1, source_id: "event-1", data }] });
+  assert.equal(new TextDecoder().decode(Uint8Array.from(output)), "真实输出");
+  connection.dispose();
+});

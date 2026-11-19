@@ -19,6 +19,7 @@ export class TerminalConnection {
   private sessionId = "";
   private disposed = false;
   private cursor = 0;
+  private outputIds = new Set<string>();
   private pollTimer: ReturnType<typeof setTimeout> | undefined;
   private inputTimer: ReturnType<typeof setTimeout> | undefined;
   private inputQueue: Uint8Array[] = [];
@@ -200,6 +201,8 @@ export class TerminalConnection {
               this.pendingAcks.delete(message.seq);
               pending.resolve();
             }
+          } else if (message.type === "fast_output") {
+            for (const chunk of message.events) this.writeOutput(chunk.data, chunk.source_id);
           } else if (message.type === "output") this.consume(message);
           else if (message.type === "error") this.fail(new Error(message.error || "终端连接已中断，请重新连接。"));
         } catch {
@@ -243,12 +246,21 @@ export class TerminalConnection {
     });
   }
 
+  private writeOutput(data: string, sourceId?: string) {
+    if (sourceId && this.outputIds.has(sourceId)) return;
+    if (sourceId) {
+      this.outputIds.add(sourceId);
+      if (this.outputIds.size > 1024) this.outputIds.delete(this.outputIds.values().next().value!);
+    }
+    this.output(decodeTerminalOutput(data));
+  }
+
   private consume(response: TerminalSnapshot) {
     if (this.disposed) return;
     this.onSession?.(response);
     for (const event of response.events) {
       if (event.seq > this.cursor) {
-        this.output(decodeTerminalOutput(event.data));
+        this.writeOutput(event.data, event.source_id);
         this.cursor = event.seq;
       }
     }

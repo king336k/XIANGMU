@@ -27,7 +27,7 @@ export type TerminalSession = {
 export type TerminalSnapshot = {
   id: string;
   status: string;
-  events: { seq: number; data: string }[];
+  events: { seq: number; source_id?: string; data: string }[];
   cursor: number;
   error?: string;
 } & TerminalSession;

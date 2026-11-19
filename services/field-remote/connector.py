@@ -772,6 +772,9 @@ def main():
     def stop(_signum, _frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
+    stream = None
+    next_stream_retry = 0.0
+    last_stream_heartbeat = 0.0
     next_robot_refresh=0.0
     robot_refresh = None
     status_executor = ThreadPoolExecutor(max_workers=1)
@@ -784,24 +787,46 @@ def main():
                 from file_browser import robot_status
                 robot_refresh = status_executor.submit(robot_status, policy.daq_local_api)
                 next_robot_refresh = time.monotonic() + 3
+            if stream is None and time.monotonic()>=next_stream_retry:
+                try:
+                    from station_stream import StationStream
+                    stream=StationStream(args.server,token)
+                    operator["capabilities"]["terminal"]["transport"]="websocket"
+                    operator["capabilities"]["terminal"]["transport_version"]="stream-20261119-r3"
+                    operator["capabilities"]["terminal"].pop("transport_error", None)
+                    last_stream_heartbeat=0
+                except (ImportError,OSError,ValueError,RuntimeError):
+                    stream=None
+                next_stream_retry=time.monotonic()+30
             engine.pump()
             outputs, results = engine.outputs[:100], engine.results[:100]
+            if stream is not None:
+                try:
+                    stream.poll(engine)
+                    engine.pump()
+                    operator["capabilities"]["terminal"]["transport_rtt_ms"] = stream.last_roundtrip_ms
+                    outputs, results = engine.outputs[:100], engine.results[:100]
+                    if outputs or results or time.monotonic()-last_stream_heartbeat>=3:
+                        if stream.send(operator,outputs,results):last_stream_heartbeat=time.monotonic()
+                    time.sleep(.01 if engine.terminals else .05)
+                    continue
+                except (OSError,ValueError) as error:
+                    operator["capabilities"]["terminal"]["transport_error"]=str(error)[:80]
+                    stream.close();stream=None;next_stream_retry=time.monotonic()+30
+                    operator["capabilities"]["terminal"]["transport"]="http"
             try:
                 response = exchange(opener, url, token, {'identity': operator, 'outputs': outputs, 'results': results})
-                # A validated successful response acknowledges exactly this batch.
                 engine.acknowledge(len(outputs), len(results))
                 engine.last_exchange = time.monotonic()
                 for command in response['commands']:
-                    if isinstance(command, dict):
-                        engine.accept(command)
+                    if isinstance(command, dict):engine.accept(command)
             except (urllib.error.URLError, OSError, ValueError):
-                # Never print payloads, token, terminal bytes, or server error bodies.
                 pass
-            # Flush ready output immediately; active PTYs use a shorter idle interval.
             time.sleep(0 if engine.outputs or engine.results else 0.05 if engine.terminals else 0.15)
     except KeyboardInterrupt:
         pass
     finally:
+        if stream is not None:stream.close()
         status_executor.shutdown(wait=False, cancel_futures=True)
         opener.close()
         engine.close()

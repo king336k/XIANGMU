@@ -421,7 +421,7 @@ class RemoteSession(BaseAPIView):
             {
                 **terminal_snapshot(session),
                 "error": session.error,
-                "events": [{"seq": e.id, "data": e.data} for e in events],
+                "events": [{"seq": e.id, "source_id": e.source_id, "data": e.data} for e in events],
                 "cursor": events[-1].id if events else after,
             }
         )
@@ -603,7 +603,8 @@ class RemoteExchange(BaseAPIView):
             # Interactive inputs are transport buffers, never retained as an audit transcript.
             if row.session_id:
                 row.payload = {}
-                row.result = {"ok": bool(value.get("ok"))}
+                row.result = {"ok": bool(value.get("ok")),
+                    "terminal_roundtrip_ms": round((timezone.now()-row.created_at).total_seconds()*1000,1)}
                 if not value.get("ok"):
                     session = row.session
                     session.error = "现场终端执行失败，请重新连接。"

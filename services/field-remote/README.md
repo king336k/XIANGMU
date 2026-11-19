@@ -95,3 +95,9 @@ python3 -m compileall -q services/field-remote
 ```
 
 测试仅使用临时专用目录、loopback HTTP 和主机 PTY，不触碰现有 DAQ 或机器人。测试临时目录创建在 `/home/engram/Documents/tmp/artifacts/field-remote-tests-20261118/`。
+
+## 自动实时通道
+
+DAQ 包内置 `station_stream.py` 和 websocket-client 1.8.0 的原版 Python 源码（Apache-2.0，许可及逐文件校验见 vendor/）。现场用户无需 pip、WebSocket 地址或端口配置；沿用平台 URL 和用户配置目录中的设备凭据，由 launch_web.sh 自动安装、登录后启动。客户端仅主动向平台的同源 /api/quality-auth/remote-diagnostics/station-stream/ 连接，不监听现场入站端口。无浏览器 Origin 的设备凭据鉴权与网页登录 Cookie 独立。
+
+小窗口最多4批未确认输出、消息序号及原引擎命令ID去重、连接中断时保留未确认字节并回退 HTTP。原设备/项目权限、目标机器人版本和执行策略仍由平台与现场校验。当前通道模式及最近往返耗时在设备能力中提供，不把握手成功当作性能验收通过。

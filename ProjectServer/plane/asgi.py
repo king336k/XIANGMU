@@ -17,11 +17,12 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "plane.settings.production")
 # is populated before importing code that may import ORM models.
 
 
-from plane.quality.terminal_stream import TerminalConsumer
+from plane.quality.terminal_stream import TerminalConsumer, StationConsumer
 
 application = ProtocolTypeRouter({
     "http": django_asgi_app,
     "websocket": AuthMiddlewareStack(URLRouter([
         path("api/quality-auth/remote-diagnostics/terminal-stream/<uuid:pk>/", TerminalConsumer.as_asgi()),
+        path("api/quality-auth/remote-diagnostics/station-stream/", StationConsumer.as_asgi()),
     ])),
 })
