@@ -37,7 +37,7 @@ def finish(run_id, result, status="completed", error=""):
             result={"summary":"现场身份或授权已变化，本轮结果不能确认恢复。","repaired":False}
             status="failed";error="现场身份或授权已变化"
         run.completed_at=timezone.now()
-        result={**result,'queued_at':run.created_at.timestamp(),
+        result={**result,'target_snapshot':run.result.get('target_snapshot',{}),'queued_at':run.created_at.timestamp(),
             'worker_started_at':run.started_at.timestamp() if run.started_at else None,
             'worker_completed_at':run.completed_at.timestamp(),'worker_queue':'field-repairs'}
         fields = [
@@ -114,9 +114,12 @@ def remote_repair(self, run_id):
             raw = "rr_" + secrets.token_urlsafe(36)
             run.tool_credential_hash = hashlib.sha256(raw.encode()).hexdigest()
             run.status = "running"
+            run.result={**run.result,'target_snapshot':{
+                'collector':{'username':run.workstation.username,'host':run.workstation.capabilities.get('network',{}).get('ip_address','')},
+                'robot':{key:run.workstation.capabilities.get('robot',{}).get(key) for key in ['username','host','target_revision']}}}
             run.started_at=timezone.now()
             run.expires_at = timezone.now() + timedelta(minutes=8)
-            run.save(update_fields=["status", "tool_credential_hash", "expires_at", "started_at"])
+            run.save(update_fields=["status", "tool_credential_hash", "expires_at", "started_at", "result"])
     if busy:
         # Release the station lock and worker slot while the device is occupied.
         raise self.retry(countdown=3)
