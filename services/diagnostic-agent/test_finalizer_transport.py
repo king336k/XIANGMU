@@ -48,6 +48,32 @@ def completed():
 
 
 class FinalizerTransportTests(unittest.TestCase):
+    def test_partial_material_scope_survives_timeout_finalization(self):
+        data = payload()
+        data['config']['analysis_scope'] = 'verified_read_subset'
+        data['references'] = [{'reference': 'MATERIAL-COVERAGE', 'title': '材料读取范围',
+                               'content': 'capture.log仅读取部分；其余内容未参与诊断。'}]
+        calls = []
+
+        def respond(messages, info):
+            calls.append(1)
+            if len(calls) == 1:
+                raise TimeoutError()
+            return completed()
+
+        with (
+            patch.object(runner, 'OpenAIProvider'),
+            patch.object(runner, 'OpenAIChatModel', return_value=FunctionModel(respond)),
+            patch.object(runner, 'Agent', wraps=runner.Agent) as agents,
+        ):
+            result = asyncio.run(runner.analyze(data))
+
+        self.assertTrue(result['evidence_trace']['finalizer']['used'])
+        self.assertEqual(agents.call_count, 2)
+        for call in agents.call_args_list:
+            self.assertIn('只陈述已读取事实', call.kwargs['instructions'])
+            self.assertIn('不能声称全面排除', call.kwargs['instructions'])
+
     def analyze(self, error):
         data = payload()
         calls = []
