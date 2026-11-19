@@ -1097,6 +1097,51 @@ class DiagnosticReasoningTest(unittest.TestCase):
                     'operation_mode':'diagnose','repair_allowed':True}}))
         self.assertFalse(any(body.get('argv')==['repair'] for _,body in self.requests))
 
+class BriefReportTest(unittest.TestCase):
+    def test_old_remote_report_without_brief_remains_valid(self):
+        value=runner.Report.model_validate({'summary':'旧摘要','root_cause':'待查','actions':[],
+            'verification':[],'solution':'补证','repaired':False})
+        self.assertEqual(value.brief_report,'')
+
+    def test_generated_three_line_brief_roundtrips_without_promoting_scope(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        brief='**故障**：复位目标超限。\n**已处理**：按批准计划更正初值，配置复查通过。\n**待验证**：现场安全复位，无同类错误才确认业务恢复。'
+        turns=[]
+        def model(messages,info):
+            turns.append(1)
+            if len(turns)==1:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})])
+            if len(turns)==2:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['verify'],'purpose':'verify'})])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'brief_report':brief,'summary':'配置已复查',
+                'root_cause':'业务仍待验收','actions':[],'verification':[],'solution':'现场安全复测','repaired':False})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)),patch.object(runner.Gateway,'rpc',return_value={'exit_code':0}):
+            result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':'http://unused','tool_token':'synthetic-token','context':{'operation_mode':'verify',
+                    'inspect_argv':['inspect'],'verify_argv':['verify'],'verification_scope':'configuration_validation'}}))
+        self.assertEqual(result['brief_report'],brief)
+        self.assertFalse(result['repaired'] or result['business_verified'])
+        self.assertTrue(result['configuration_verified']);self.assertEqual(result['outcome'],'unresolved')
+
+    def test_brief_has_bound_and_cannot_introduce_unobserved_file_line(self):
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):runner.Report.model_validate({'brief_report':'x'*221,'summary':'摘要',
+            'root_cause':'待查','actions':[],'verification':[],'solution':'补证'})
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        turns=[];runtime={}
+        def model(messages,info):
+            turns.append(1)
+            if len(turns)==1:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'brief_report':'故障位于 /invented/config.yaml:999',
+                'summary':'待查','root_cause':'证据不足','actions':[],'verification':[],'solution':'补证','repaired':False})])
+        from pydantic_ai.exceptions import UnexpectedModelBehavior
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)),patch.object(runner.Gateway,'rpc',return_value={'exit_code':0}):
+            with self.assertRaises(UnexpectedModelBehavior):
+                asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                    'gateway_url':'http://unused','tool_token':'synthetic-token','context':{'inspect_argv':['inspect']}},runtime))
+        self.assertEqual(runtime['gateway'].last_validation_error,'unobserved_location')
+
+
 class ReceiptFinalizationTest(unittest.TestCase):
     def test_budget_after_verified_write_uses_one_tool_free_report_without_replaying(self):
         from pydantic_ai.models.function import FunctionModel

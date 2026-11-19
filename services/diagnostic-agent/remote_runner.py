@@ -52,6 +52,7 @@ class Finding(BaseModel):
 
 
 class Report(BaseModel):
+    brief_report: str = Field(default="", max_length=220, description="新报告主文：故障/已处理/待验证三短句，通常100-180字；不写内部ID/hash或字段解释。")
     summary: str = Field(max_length=5000, description="原失败操作直接环节与当前处理，通常一至两句；内部ID/字段解释留结构化追踪。")
     evidence_details: str = Field(default="", max_length=10000, description="新报告仅2-4条关键原始日志/源码依据，目标800字以内；不重写取证过程或输出UUID/hash/tool引用编号。")
     root_cause: str = Field(max_length=5000)
@@ -545,7 +546,7 @@ context.feedback 是关联原缺陷的标题/描述/编号，应结合它定位�
 报告区分已证实根因、假设、修复操作和待验证。只记录真实操作；只有真实修改且对应回归通过才 repaired=true。
 诊断项、修复项和验证项必须对应同一个对象与原失败操作；多问题按编号逐项对应。当前已恢复时明确本轮仅复核，不能继续按旧报告修改。
 结果使用中文，包含 summary/root_cause/actions/verification/solution/repaired。无法连接或证据不足时明确未修复及缺口。
-【最终文案最高优先级】继续返回兼容summary/root_cause/actions/verification/solution字段，展示默认“故障/已处理/待验证”三短段；每项一句、主文以100至180字为目标，总不超过220字为目标，简单问题不填满四块。summary先说原失败操作的直接环节，根因不明只说明一次；实际修改写关键before→after，待验只保留一个具体动作及通过标准。维护更新导致的停机/暂未连接不是原缺陷根因，不替换原故障主句；纯verify先当前检查结果、必要历史处理、待业务验收一句即可。
+【最终文案最高优先级】新报告必须生成brief_report供默认展示，格式为“**故障**：…\n**已处理**：…\n**待验证**：…”，每段一句、合计100至180字目标、最长220字符；无UUID/hash/内部引用或JSON字段解释。配置通过只说配置通过、业务待验，不得写原业务已恢复。brief_report不能改变回执支持的repaired/verification_scope/repair_locations。继续返回兼容summary/root_cause/actions/verification/solution字段，展示默认“故障/已处理/待验证”三短段；每项一句、主文以100至180字为目标，总不超过220字为目标，简单问题不填满四块。summary先说原失败操作的直接环节，根因不明只说明一次；实际修改写关键before→after，待验只保留一个具体动作及通过标准。维护更新导致的停机/暂未连接不是原缺陷根因，不替换原故障主句；纯verify先当前检查结果、必要历史处理、待业务验收一句即可。
 以下取证、安全、状态规则是内部判断依据，不是公开免责声明清单。正文与evidence_details不写UUID/hash/PLATFORM或tool引用编号，不解释outcome/state等JSON字段；引用ID只在结构化追踪字段保留。实际可读文件名、函数及关键原始错误允许写，长路径/备份位置由repair_locations真实变化明细保留。evidence_details只2至4条最关键日志或源码依据、目标不超过800字符，不重写完整取证过程，不堆反证或重复主文。
 root_cause用一句写已确认原因，未确认只说一次最关键缺项；actions最多4条，每条描述实际业务操作，不重复框架名称或inspect_argv/purpose等内部术语。
 verification最多4条，先说原故障是否恢复及实际检查结果；哈希和各专家原始输出保留在详细证据，不反复复制。
@@ -837,7 +838,7 @@ async def analyze(payload, runtime=None):
                     reject('unknown_evidence_reference','findings只能引用get_diagnostic_state提供的uploaded:N或tool:N。')
                 if finding.kind=='observed' and not finding.evidence_refs:
                     reject('observed_evidence_required','已观察事实必须引用真实证据；无证据推断请标为predicted。')
-            claimed=set().union(*(path_lines(text) for text in (report.summary,report.root_cause,report.solution,report.evidence_details)))
+            claimed=set().union(*(path_lines(text) for text in (report.summary,report.root_cause,report.solution,report.evidence_details,report.brief_report)))
             if claimed-gateway.observed_locations:
                 gateway.validation_mismatches=gateway.mismatch_handles(claimed-gateway.observed_locations)
                 reject('unobserved_location','以下位置是模型未核实声明（不是执行证据）：'
@@ -887,7 +888,7 @@ async def analyze(payload, runtime=None):
                     '已执行配置修改并复查通过时直说配置已恢复、业务待验收，不写成整轮未执行或重新修复。'
                     'findings只引用输入uploaded:N或tool:N，observed必须有引用；明确剩余证据及验收缺口。'
                     'summary/root_cause/solution中路径行号必须出自observed_locations；输出中文typed Report。'
-                    '最终文案只围绕故障、实际处理、待验证，各一句、合计100至180字目标；不重复反证或解释内部字段；evidence_details仅2至4条关键原始依据、800字符以内，内部ID只留结构化字段。'))
+                    '必须生成brief_report作为主文，仅故障、已处理、待验证各一句，最长220字符；配置检查通过不写成业务恢复。最终文案只围绕故障、实际处理、待验证，各一句、合计100至180字目标；不重复反证或解释内部字段；evidence_details仅2至4条关键原始依据、800字符以内，内部ID只留结构化字段。'))
                 try:
                     report_result=await finalizer.run(json.dumps(redact(facts,gateway.secrets),ensure_ascii=False),
                         usage_limits=UsageLimits(request_limit=1,tool_calls_limit=1,output_tokens_limit=final_tokens),usage=final_usage,

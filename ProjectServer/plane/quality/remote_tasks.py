@@ -67,7 +67,10 @@ def finish(run_id, result, status="completed", error=""):
                    "配置修复未验证，待业务验证" if scope and configuration['repair_locations'] else
                    "已修复" if repaired else "验证通过" if verified_only else "未自动修复")
         lines = ["Agent 远程处理：" + outcome]
-        for label, key in fields:
+        brief=result.get('brief_report')
+        if isinstance(brief,str) and brief.strip():
+            lines.append(redact(brief.strip())[:220])
+        for label, key in ([] if isinstance(brief,str) and brief.strip() else fields):
             value = result.get(key, "")
             value = "；".join(map(str, value)) if isinstance(value, list) else str(value)
             if value:
