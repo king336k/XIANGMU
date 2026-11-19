@@ -216,7 +216,8 @@ test("Agent操作正文展示业务摘要，真实目标命令退出码与UUID�
     .map((node) => node.props.children)
     .filter((value) => typeof value === "string")
     .join(" ");
-  assert.match(expandedBody, /D475 第1轮检查机器人配置完成/);
+  assert.match(expandedBody, /第1轮检查机器人配置完成/);
+  assert.ok(!expandedBody.includes("D475"));
   const details = nodes(row).find((node) => node.type === "details");
   assert.equal(details.props.open, undefined);
   for (const value of ["robot", "10.0.0.177", "inspect.py", "config.json", runId, commandId, raw])
@@ -243,4 +244,101 @@ test("服务器已转可读姓名的指派正文仍保留返回的原始详情",
   const details = nodes(row).find((node) => node.type === "details");
   assert.ok(JSON.stringify(details).includes(original));
   assert.ok(nodes(row).some((node) => node.type === "p" && node.props.children === "旧负责人 → 技术员甲"));
+});
+
+test("仅移除已知缺陷编号前缀一次，技术详情保留完整任务编号且未知编号不改", () => {
+  const process = {
+    summary: "BASEKNOW-D-477 第1轮诊断修复 · RAI只读检查：完成",
+    defect_code: "BASEKNOW-D-477",
+    round: 1,
+  };
+  const row = nodes(render([{ ...events[0], remote_process: process }], [], { code: "BASEKNOW-D-477" })).find(
+    (node) => node.type === "li"
+  );
+  const details = nodes(row).find((node) => node.type === "details");
+  const body = row.props.children.filter((node) => node?.type !== "details");
+  assert.ok(JSON.stringify(body).includes("第1轮诊断修复 · RAI只读检查：完成"));
+  assert.ok(!JSON.stringify(body).includes("BASEKNOW-D-477"));
+  assert.ok(JSON.stringify(details).includes("BASEKNOW-D-477"));
+  const unknown = render([{ ...events[0], remote_process: { summary: "OTHER-D-99 检查完成" } }], [], {
+    code: "BASEKNOW-D-477",
+  });
+  assert.ok(nodes(unknown).some((node) => node.type === "p" && node.props.children === "OTHER-D-99 检查完成"));
+  const partial = render([{ ...events[0], remote_process: { summary: "BASEKNOW-D-4770 检查完成" } }], [], {
+    code: "BASEKNOW-D-477",
+  });
+  assert.ok(nodes(partial).some((node) => node.type === "p" && node.props.children === "BASEKNOW-D-4770 检查完成"));
+});
+
+test("配置字段详情区分修改新增删除和null，行号只显示实际记录", () => {
+  const changes = [
+    {
+      key: "robot_port",
+      before: 18778,
+      after: 18777,
+      before_exists: true,
+      after_exists: true,
+      path: "/home/robot/config.json",
+      line: 42,
+      backup: "/home/robot/config.json.bak",
+      before_sha256: "a".repeat(64),
+      after_sha256: "b".repeat(64),
+    },
+    { key: "new_flag", after: false, before_exists: false, after_exists: true, path: "/home/robot/config.json" },
+    {
+      key: "old_flag",
+      before: null,
+      before_exists: true,
+      after_exists: false,
+      path: "/home/robot/config.json",
+      before_line: 12,
+    },
+    {
+      key: "nullable",
+      before: null,
+      after: "ready",
+      before_exists: true,
+      after_exists: true,
+      path: "/home/robot/config.json",
+    },
+    { key: "unrecorded", before_exists: true, after_exists: true, path: "/home/robot/config.json" },
+  ];
+  const tree = render(
+    [
+      {
+        ...events[0],
+        remote_process: {
+          summary: "配置修改完成",
+          command: { kind: "patch_file", path: "/home/robot/config.json", changes },
+        },
+      },
+    ],
+    []
+  );
+  const details = nodes(tree).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children].flat().some((child) => child?.type === "summary" && child.props.children === "查看操作详情")
+  );
+  const text = nodes(details)
+    .flatMap((node) => [node.props?.children].flat())
+    .filter((value) => typeof value === "string" || typeof value === "number")
+    .join("");
+  for (const value of [
+    "配置字段 robot_port",
+    "18778 → 18777",
+    "新增配置字段 new_flag",
+    "不存在 → false",
+    "删除配置字段 old_flag",
+    "null → 不存在",
+    'null → "ready"',
+    "未记录 → 未记录",
+    "/home/robot/config.json:42",
+    "行号未记录",
+    "config.json.bak",
+    "a".repeat(64),
+    "b".repeat(64),
+  ])
+    assert.ok(text.includes(value), value);
+  assert.equal(details.props.open, undefined);
 });

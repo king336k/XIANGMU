@@ -112,7 +112,30 @@ export type RemoteProcess = {
   defect_code?: string;
   round?: number;
   target?: { label?: string; username?: string; host?: string };
-  command?: { argv?: string[]; path?: string; exit_code?: number | null };
+  command?: {
+    argv?: string[];
+    path?: string;
+    exit_code?: number | null;
+    kind?: string;
+    file_type?: string;
+    backup?: string;
+    expected_sha256?: string;
+    sha256?: string;
+    changes?: {
+      key: string;
+      before?: unknown;
+      after?: unknown;
+      before_exists?: boolean;
+      after_exists?: boolean;
+      line?: number | null;
+      before_line?: number | null;
+      after_line?: number | null;
+      path?: string;
+      backup?: string;
+      before_sha256?: string;
+      after_sha256?: string;
+    }[];
+  };
   run_id?: string;
   command_id?: string;
   details?: string;
