@@ -5,6 +5,7 @@ os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
 import asyncio
 import json
+import ipaddress
 import re
 import sys
 import time
@@ -34,8 +35,17 @@ PATH_LINE = re.compile(r'(?<![\w/:])((?:/|\.{1,2}/)?(?:[\w.@+-]+/)+[\w.@+-]+|(?:
 
 
 def path_lines(text):
-    return {(path,int(line)) for path,line in PATH_LINE.findall(text)
-            if not re.fullmatch(r'(?:[0-9]{1,3}\.){3}[0-9]{1,3}',path)}
+    result=set()
+    for path,line in PATH_LINE.findall(text):
+        if '/' not in path:
+            address=path.rsplit('@',1)[-1]
+            try:
+                ipaddress.ip_address(address)
+                continue
+            except ValueError:
+                pass
+        result.add((path,int(line)))
+    return result
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -91,6 +101,20 @@ class Gateway:
         self.observed_locations = set()
         self.last_validation_error = ''
         self.last_tool_validation_error = ''
+        self.validation_mismatches = []
+
+    def mismatch_handles(self,locations):
+        """Bounded untrusted model claims, never exception text or token material."""
+        handles=[]
+        for path,line in sorted(locations)[:5]:
+            safe_path=redact(path,self.secrets)
+            sensitive=re.search(r'(?i)(?:bearer|password|passwd|api[_-]?key|secret|token|credential)',safe_path)
+            opaque=re.search(r'[A-Za-z0-9_-]{32,}',safe_path)
+            if sensitive or opaque or len(safe_path)>240:
+                safe_path='[untrusted location redacted]'
+            safe_line=line if type(line) is int and 0<line<=1_000_000 and str(line) not in self.secrets else '[untrusted line redacted]'
+            handles.append({'path':safe_path,'line':safe_line,'untrusted_model_claim':True})
+        return handles
 
     def reject_tool(self,reason):
         self.last_tool_validation_error=reason
@@ -536,8 +560,12 @@ async def analyze(payload, runtime=None):
                 reject('verify_not_executed','本轮是复测模式，必须实际执行固定verify_argv并如实报告结果。')
             claimed=set().union(*(path_lines(text) for text in (report.summary,report.root_cause,report.solution)))
             if claimed-gateway.observed_locations:
-                reject('unobserved_location','分析包含本轮读取或执行回执未出现的路径:行号。请实际读取该来源，或删除未证实的位置并明确待定位。')
+                gateway.validation_mismatches=gateway.mismatch_handles(claimed-gateway.observed_locations)
+                reject('unobserved_location','以下位置是模型未核实声明（不是执行证据）：'
+                    +json.dumps(gateway.validation_mismatches,ensure_ascii=False)
+                    +'。请实际读取该来源，或删除这些未证实位置；不要重新修复已恢复的故障。')
             gateway.last_validation_error=''
+            gateway.validation_mismatches=[]
             return report
 
         async def invoke():
@@ -608,6 +636,7 @@ def failed_analysis(payload, runtime, error):
             'execution_error':True,'agent_error_code':classes[0],'agent_error_chain':classes}
     result['validation_reason']=gateway.last_validation_error if gateway else ''
     result['tool_validation_reason']=gateway.last_tool_validation_error if gateway else ''
+    result['validation_mismatches']=gateway.validation_mismatches if gateway else []
     return redact(result,gateway.secrets) if gateway else result
 
 

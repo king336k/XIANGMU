@@ -405,6 +405,9 @@ class GatewayTest(unittest.TestCase):
             turns.append(1)
             if len(turns)==1:
                 return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})])
+            if len(turns)==3:
+                retries=[part.content for message in messages for part in message.parts if getattr(part,'part_kind','') in {'retry-prompt','tool-return'}]
+                self.assertTrue(any('/invented/Dockerfile' in str(value) and 'untrusted_model_claim' in str(value) for value in retries))
             root_cause='/invented/Dockerfile:999 的参数错误' if len(turns)==2 else '当前证据不足，未读取源码'
             return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'待查','root_cause':root_cause,
                 'actions':[],'verification':[],'solution':'补充源码后定位','repaired':False})])
@@ -416,6 +419,7 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual(len(turns),3)
         self.assertNotIn('/invented/Dockerfile',result['root_cause'])
         self.assertEqual(runtime['gateway'].last_validation_error,'')
+        self.assertEqual(runtime['gateway'].validation_mismatches,[])
 
     def test_current_file_line_reference_remains_supported(self):
         from pydantic_ai.models.function import FunctionModel
@@ -426,7 +430,7 @@ class GatewayTest(unittest.TestCase):
             if len(turns)==1:
                 return ModelResponse(parts=[ToolCallPart('read_file',{'path':'/actual/config.py'})])
             return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'已读取当前配置',
-                'root_cause':'/actual/config.py:1 为实际读取内容，原因待进一步确认','actions':[],
+                'root_cause':'机器人（engram@10.10.10.177:18777）；/actual/config.py:1 为实际读取内容，原因待进一步确认','actions':[],
                 'verification':[],'solution':'继续只读核查','repaired':False})])
         with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
             result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
@@ -440,6 +444,9 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual(runner.path_lines('10.10.10.177:8093 与 https://example.com:443 是端点'),set())
         self.assertEqual(runner.path_lines('/actual/Dockerfile:9 与 src/main.py:12'),
                          {('/actual/Dockerfile',9),('src/main.py',12)})
+        self.assertEqual(runner.path_lines('机器人（engram@10.10.10.177:18777），实际配置 /path.json:4'),
+                         {('/path.json',4)})
+        self.assertEqual(runner.path_lines('/files/engram@10.10.10.177:4'),{('/files/engram@10.10.10.177',4)})
 
     def test_secret_redaction(self):
         value = runner.redact({"summary": "synthetic-token key-value", "items": ["key-value"], "synthetic-token": "safe"}, ["synthetic-token", "key-value"])
@@ -674,7 +681,19 @@ class LocationReceiptTest(unittest.TestCase):
         self.assertEqual(result['validation_reason'],'unobserved_location')
         self.assertEqual(result['actions'],['现场取证完成'])
         self.assertEqual(result['agent_error_code'],'UnexpectedModelBehavior')
-        self.assertNotIn('/invented/',output.getvalue())
+        self.assertEqual(result['validation_mismatches'],[{'path':'/invented/config.py','line':999,'untrusted_model_claim':True}])
+
+    def test_location_mismatch_handles_are_bounded_redacted_untrusted_claims(self):
+        gateway=runner.Gateway('http://unused','synthetic-token',secrets=['synthetic-key'])
+        claims={(f'/unknown/file{index}.py',index+1) for index in range(10)}
+        self.assertEqual(len(gateway.mismatch_handles(claims)),5)
+        claims={('/config/synthetic-key.py',1),('/config/api_key.py',2),('/config/'+'a'*48+'.py',3)}
+        value=gateway.mismatch_handles(claims)
+        self.assertTrue(all(row['untrusted_model_claim'] for row in value))
+        self.assertNotIn('synthetic-key',json.dumps(value))
+        self.assertNotIn('a'*48,json.dumps(value))
+        self.assertNotIn('api_key.py',json.dumps(value))
+        self.assertEqual(gateway.mismatch_handles({('/config/value.py',int('9'*40))})[0]['line'],'[untrusted line redacted]')
 
     def test_validation_failure_records_only_safe_class_chain_and_actual_actions(self):
         from pydantic_ai.exceptions import UnexpectedModelBehavior
