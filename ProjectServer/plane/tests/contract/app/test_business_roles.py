@@ -52,12 +52,15 @@ def test_collector_is_reporter_and_cannot_execute_or_assign(session_client, busi
     assert context.data["capabilities"]["report"] and not context.data["capabilities"]["execute"]
     defect = session_client.post(base + "defects/", {"title": "采集异常"}, format="json")
     assert defect.status_code == 201
-    assert (
-        session_client.post(
-            base + "cases/", {"title": "不允许", "steps": [{"action": "执行", "expected": "成功"}]}, format="json"
-        ).status_code
-        == 403
+    case = session_client.post(
+        base + "cases/", {"title": "成员新增用例", "steps": [{"action": "执行", "expected": "成功"}]}, format="json"
     )
+    assert case.status_code == 201
+    assert session_client.patch(
+        base + f"cases/{case.data['id']}/",
+        {"expected_version": case.data["version"], "title": "无管理权限不可维护"},
+        format="json",
+    ).status_code == 403
     assert (
         session_client.patch(
             base + f"defects/{defect.data['id']}/", {"status": "in_progress"}, format="json"
