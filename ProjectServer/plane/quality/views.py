@@ -30,6 +30,7 @@ from .serializers import (
     CaseSerializer,
     DefectInput,
     DefectSerializer,
+    DefectSummarySerializer,
     ExecutionInput,
     ExecutionSerializer,
     PlanInput,
@@ -430,21 +431,32 @@ class ExecutionList(QualityView):
         return Response(ExecutionSerializer(execution).data, status=201)
 
 
-def defect_queryset():
+def defect_queryset(summary=False):
     from .agent_lifecycle import processing_prefetch
-    return Defect.objects.select_related(
+    from .models import DefectCollaborator, DefectVerification
+    events = DefectEvent.objects.select_related("created_by")
+    if summary:
+        events = events.filter(status="open", previous_status="")
+    return Defect.objects.annotate(
+        _has_verification=Exists(DefectVerification.objects.filter(defect_id=OuterRef("pk")))
+    ).select_related(
+        "created_by",
         "assignee",
         "module",
         "case",
         "daq_report",
         "repair_issue",
-        "source_execution__item__revision",
-        "source_execution__item__plan",
-        "source_execution__created_by",
-        "regression_execution__item__revision",
-        "regression_execution__item__plan",
-        "regression_execution__created_by",
-    ).prefetch_related("events__created_by", "sources", processing_prefetch())
+    ).prefetch_related(
+        Prefetch("events", queryset=events),
+        Prefetch("source_execution", queryset=TestExecution.objects.select_related(
+            "item__revision", "item__plan", "created_by")),
+        Prefetch("regression_execution", queryset=TestExecution.objects.select_related(
+            "item__revision", "item__plan", "created_by")),
+        "sources",
+        Prefetch("collaborators", queryset=DefectCollaborator.objects.select_related("user"),
+            to_attr="_defect_collaborators"),
+        processing_prefetch(),
+    )
 
 
 class ExecutionDefect(QualityView):
@@ -487,7 +499,10 @@ class ExecutionDefect(QualityView):
 
 class DefectList(QualityView):
     def get(self, request, **kwargs):
-        return self.listing(defect_queryset().filter(project=self.project()), DefectSerializer)
+        summary = request.query_params.get("summary") == "true"
+        queryset = defect_queryset(summary=summary).filter(project=self.project())
+        serializer = DefectSummarySerializer if summary else DefectSerializer
+        return self.listing(queryset, serializer)
 
     @transaction.atomic
     def post(self, request, **kwargs):

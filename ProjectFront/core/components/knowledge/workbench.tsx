@@ -1,7 +1,7 @@
 import { useParams } from "next/navigation";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { can, canOpenKnowledgeTab } from "@/components/quality/types";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import useSWR from "swr";
 import { useSearchParams, Navigate, useLocation } from "react-router";
 import { BookOpen, Search, Plus, RefreshCw } from "lucide-react";
@@ -15,14 +15,28 @@ import { Empty, fieldClass, Paging } from "@/components/quality/shared";
 import type { Context, Page } from "@/components/quality/types";
 import type { Article, Publication } from "./types";
 import { articleStatusNames } from "./types";
-import { ArticleEditor } from "./article-editor";
-import { ArticleDetail } from "./article-detail";
-import { PublicationDetail } from "./publication-detail";
-import { DocumentImportForm } from "../quality/document-import-form";
-import { GovernancePanel } from "./governance-panel";
+
 import { movedSettingsPath } from "@/components/settings/management-paths";
-import { AssistantPanel } from "./assistant-panel";
+
 import { DocumentWorkspaceNav } from "@/components/documentation/workspace-nav";
+
+const panelLoading = (
+  <div role="status" className="p-5 text-13 text-secondary">
+    正在加载…
+  </div>
+);
+const ArticleEditor = lazy(() => import("./article-editor").then((module) => ({ default: module.ArticleEditor })));
+const ArticleDetail = lazy(() => import("./article-detail").then((module) => ({ default: module.ArticleDetail })));
+const PublicationDetail = lazy(() =>
+  import("./publication-detail").then((module) => ({ default: module.PublicationDetail }))
+);
+const DocumentImportForm = lazy(() =>
+  import("../quality/document-import-form").then((module) => ({ default: module.DocumentImportForm }))
+);
+const GovernancePanel = lazy(() =>
+  import("./governance-panel").then((module) => ({ default: module.GovernancePanel }))
+);
+const AssistantPanel = lazy(() => import("./assistant-panel").then((module) => ({ default: module.AssistantPanel })));
 
 export function KnowledgeWorkbench() {
   const { workspaceSlug, projectId } = useParams();
@@ -143,15 +157,19 @@ export function KnowledgeWorkbench() {
             当前账号没有此功能权限。
           </p>
         ) : tab === "governance" ? (
-          <GovernancePanel base={base} isManager={canReview} />
+          <Suspense fallback={panelLoading}>
+            <GovernancePanel base={base} isManager={canReview} />
+          </Suspense>
         ) : tab === "assistant" ? (
           context && (
-            <AssistantPanel
-              base={base}
-              canWrite={can(context, "chat")}
-              canConfigure={!!context.can_configure_model}
-              onNavigate={(nextTab) => setParams({ tab: nextTab })}
-            />
+            <Suspense fallback={panelLoading}>
+              <AssistantPanel
+                base={base}
+                canWrite={can(context, "chat")}
+                canConfigure={!!context.can_configure_model}
+                onNavigate={(nextTab) => setParams({ tab: nextTab })}
+              />
+            </Suspense>
           )
         ) : (
           <>
@@ -269,36 +287,46 @@ export function KnowledgeWorkbench() {
         )}
       </main>
       {importing && (
-        <DocumentImportForm
-          base={base.replace("/knowledge/", "/quality/")}
-          resource="knowledge"
-          onClose={() => setImporting(false)}
-          onSaved={saved}
-        />
+        <Suspense fallback={panelLoading}>
+          <DocumentImportForm
+            base={base.replace("/knowledge/", "/quality/")}
+            resource="knowledge"
+            onClose={() => setImporting(false)}
+            onSaved={saved}
+          />
+        </Suspense>
       )}
       {editing !== undefined && context && (
-        <ArticleEditor
-          base={base}
-          context={context}
-          value={editing ?? undefined}
-          onClose={() => setEditing(undefined)}
-          onSaved={saved}
-        />
+        <Suspense fallback={panelLoading}>
+          <ArticleEditor
+            base={base}
+            context={context}
+            value={editing ?? undefined}
+            onClose={() => setEditing(undefined)}
+            onSaved={saved}
+          />
+        </Suspense>
       )}
       {article && context && (
-        <ArticleDetail
-          base={base}
-          value={article}
-          canReview={canReview}
-          onClose={() => setArticle(null)}
-          onSaved={saved}
-          onEdit={(value) => {
-            setArticle(null);
-            setEditing(value);
-          }}
-        />
+        <Suspense fallback={panelLoading}>
+          <ArticleDetail
+            base={base}
+            value={article}
+            canReview={canReview}
+            onClose={() => setArticle(null)}
+            onSaved={saved}
+            onEdit={(value) => {
+              setArticle(null);
+              setEditing(value);
+            }}
+          />
+        </Suspense>
       )}
-      {publication && <PublicationDetail value={publication} onClose={() => setPublication(null)} />}
+      {publication && (
+        <Suspense fallback={panelLoading}>
+          <PublicationDetail value={publication} onClose={() => setPublication(null)} />
+        </Suspense>
+      )}
     </div>
   );
 }

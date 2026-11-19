@@ -1,19 +1,20 @@
+import { VersionAcceptancePanel } from "./version-acceptance-panel";
 import { ProjectRouteLink as Link } from "@/components/common/project-route-link";
 import { pageSize } from "./pagination";
 import { useResolvedProjectParams } from "@/hooks/use-resolved-project-params";
 // SPDX-License-Identifier: AGPL-3.0-only
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import useSWR from "swr";
 import { Navigate, useParams, useSearchParams } from "react-router";
 import { Button, CustomMenu } from "@plane/ui";
 import { Plus, ChevronDown, ArrowLeft, RefreshCw, GitBranch, CalendarRange, Flag, List } from "lucide-react";
 import { VersionEventHistory } from "./version-event-history";
-import { VersionAcceptancePanel } from "./version-acceptance-panel";
+
 import { PageHead } from "@/components/core/page-title";
-import { LinkedTaskPeek } from "./linked-task-peek";
+
 import { VersionRecords } from "./version-records";
 import type { LinkedRecordKind, LinkedRecordMode } from "./version-records";
-import { VersionRecordDialog } from "./version-record-dialog";
+
 import type { VersionRecordTarget } from "./version-record-dialog";
 import { qualityApi, errorMessage } from "./api";
 import { can } from "./types";
@@ -29,6 +30,17 @@ const displays = [
   { key: "milestones", title: "里程碑", icon: Flag },
   { key: "flow", title: "流程图", icon: GitBranch },
 ];
+const panelLoading = (
+  <div role="status" className="p-5 text-13 text-secondary">
+    正在加载…
+  </div>
+);
+
+const LinkedTaskPeek = lazy(() => import("./linked-task-peek").then((module) => ({ default: module.LinkedTaskPeek })));
+const VersionRecordDialog = lazy(() =>
+  import("./version-record-dialog").then((module) => ({ default: module.VersionRecordDialog }))
+);
+
 export function VersionsWorkbench() {
   const { workspaceSlug, projectId } = useResolvedProjectParams();
   const canonicalParams = useParams();
@@ -369,24 +381,28 @@ export function VersionsWorkbench() {
         )}
       </div>
       {activeTask && (
-        <LinkedTaskPeek
-          id={activeTask}
-          onClosed={() => {
-            setActiveTask(undefined);
-            void recordsSaved();
-          }}
-        />
+        <Suspense fallback={panelLoading}>
+          <LinkedTaskPeek
+            id={activeTask}
+            onClosed={() => {
+              setActiveTask(undefined);
+              void recordsSaved();
+            }}
+          />
+        </Suspense>
       )}
       {recordTarget && context && version && (
-        <VersionRecordDialog
-          target={recordTarget}
-          base={base}
-          projectUrl={projectUrl}
-          context={context}
-          build={version.version}
-          onClose={() => setRecordTarget(undefined)}
-          onSaved={recordsSaved}
-        />
+        <Suspense fallback={panelLoading}>
+          <VersionRecordDialog
+            target={recordTarget}
+            base={base}
+            projectUrl={projectUrl}
+            context={context}
+            build={version.version}
+            onClose={() => setRecordTarget(undefined)}
+            onSaved={recordsSaved}
+          />
+        </Suspense>
       )}
       {form && context && (
         <VersionForm

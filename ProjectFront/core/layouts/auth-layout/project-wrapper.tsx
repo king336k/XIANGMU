@@ -5,6 +5,7 @@
  */
 
 import type { ReactNode } from "react";
+import { useLocation } from "react-router";
 import { useEffect, useState } from "react";
 import { usePageStore, EPageStoreType } from "@/hooks/store";
 import { qualityApi } from "@/components/quality/api";
@@ -50,6 +51,11 @@ interface IProjectAuthWrapper {
 
 export const ProjectAuthWrapper = observer(function ProjectAuthWrapper(props: IProjectAuthWrapper) {
   const { workspaceSlug, projectId, children, isLoading: isParentLoading = false } = props;
+  const { pathname } = useLocation();
+  const needsIssueOptions =
+    !/^\/[^/]+\/(?:p|projects)\/[^/]+\/(?:defects|requirements|quality|versions|knowledge|pages)(?:\/|$)/.test(
+      pathname
+    );
   // states
   const [isJoiningProject, setIsJoiningProject] = useState(false);
   // store hooks
@@ -89,9 +95,9 @@ export const ProjectAuthWrapper = observer(function ProjectAuthWrapper(props: IP
   const isWorkspaceAdmin = allowPermissions([EUserPermissions.ADMIN], EUserPermissionsLevel.WORKSPACE, workspaceSlug);
   // Initialize module timeline chart
   useEffect(() => {
-    initGantt();
+    if (needsIssueOptions) initGantt();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [needsIssueOptions]);
 
   // fetching project details
   const { isLoading: isProjectDetailsLoading, error: projectDetailsError } = useSWR(
@@ -122,33 +128,49 @@ export const ProjectAuthWrapper = observer(function ProjectAuthWrapper(props: IP
     revalidateOnFocus: false,
   });
   // fetching project intake state
-  useSWR(PROJECT_INTAKE_STATE(projectId, currentProjectRole), () => fetchProjectIntakeState(workspaceSlug, projectId), {
-    revalidateIfStale: false,
-    revalidateOnFocus: false,
-  });
+  useSWR(
+    needsIssueOptions ? PROJECT_INTAKE_STATE(projectId, currentProjectRole) : null,
+    () => fetchProjectIntakeState(workspaceSlug, projectId),
+    {
+      revalidateIfStale: false,
+      revalidateOnFocus: false,
+    }
+  );
   // fetching project estimates
-  useSWR(PROJECT_ESTIMATES(projectId, currentProjectRole), () => getProjectEstimates(workspaceSlug, projectId), {
-    revalidateIfStale: false,
-    revalidateOnFocus: false,
-  });
+  useSWR(
+    needsIssueOptions ? PROJECT_ESTIMATES(projectId, currentProjectRole) : null,
+    () => getProjectEstimates(workspaceSlug, projectId),
+    {
+      revalidateIfStale: false,
+      revalidateOnFocus: false,
+    }
+  );
   // fetching project cycles
-  useSWR(PROJECT_ALL_CYCLES(projectId, currentProjectRole), () => fetchAllCycles(workspaceSlug, projectId), {
-    revalidateIfStale: false,
-    revalidateOnFocus: false,
-  });
+  useSWR(
+    needsIssueOptions ? PROJECT_ALL_CYCLES(projectId, currentProjectRole) : null,
+    () => fetchAllCycles(workspaceSlug, projectId),
+    {
+      revalidateIfStale: false,
+      revalidateOnFocus: false,
+    }
+  );
   // fetching project modules
   useSWR(
-    PROJECT_MODULES(projectId, currentProjectRole),
+    needsIssueOptions ? PROJECT_MODULES(projectId, currentProjectRole) : null,
     async () => {
       await Promise.all([fetchModulesSlim(workspaceSlug, projectId), fetchModules(workspaceSlug, projectId)]);
     },
     { revalidateIfStale: false, revalidateOnFocus: false }
   );
   // fetching project views
-  useSWR(PROJECT_VIEWS(projectId, currentProjectRole), () => fetchViews(workspaceSlug, projectId), {
-    revalidateIfStale: false,
-    revalidateOnFocus: false,
-  });
+  useSWR(
+    needsIssueOptions ? PROJECT_VIEWS(projectId, currentProjectRole) : null,
+    () => fetchViews(workspaceSlug, projectId),
+    {
+      revalidateIfStale: false,
+      revalidateOnFocus: false,
+    }
+  );
 
   // handle join project
   const handleJoinProject = () => {

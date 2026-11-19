@@ -90,6 +90,10 @@ def fingerprint(data):
 
 def signed_record(link):
     prefetched = getattr(link.defect, "_incident_signature_events", None)
+    if prefetched is None:
+        events = getattr(link.defect, "_prefetched_objects_cache", {}).get("events")
+        if events is not None:
+            prefetched = [event for event in events if event.status == "open" and event.previous_status == ""]
     notes = (
         (event.note for event in prefetched)
         if prefetched is not None
@@ -121,9 +125,14 @@ def signed_record(link):
 
 
 def trusted_incident(defect):
-    for link in SourceLink.objects.filter(defect=defect, source_system=SYSTEM, record_type=TYPE).select_related(
-        "defect", "project__workspace", "created_by"
-    ):
+    links = getattr(defect, "_prefetched_objects_cache", {}).get("sources")
+    if links is None:
+        links = SourceLink.objects.filter(defect=defect, source_system=SYSTEM, record_type=TYPE).select_related(
+            "defect", "project__workspace", "created_by"
+        )
+    for link in links:
+        if link.source_system != SYSTEM or link.record_type != TYPE:
+            continue
         if signed_record(link):
             return link
     return None

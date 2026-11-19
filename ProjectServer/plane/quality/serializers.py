@@ -367,7 +367,10 @@ class DefectSerializer(AuthoredRecordSerializer):
         data["assignment_reason"] = readable_references(
             data["assignment_reason"], instance.project_id, instance.id, self.context
         )
-        data["has_verification"] = instance.verification_rounds.exists()
+        data["has_verification"] = (
+            instance._has_verification if hasattr(instance, "_has_verification")
+            else instance.verification_rounds.exists()
+        )
         data["source_kind"] = (
             "daq"
             if hasattr(instance, "daq_report")
@@ -388,7 +391,8 @@ class DefectSerializer(AuthoredRecordSerializer):
     def get_collaborators(self, obj):
         return [
             {"user_id": str(row.user_id), "name": row.user.display_name or "成员"}
-            for row in obj.collaborators.select_related("user")
+            for row in (obj._defect_collaborators if hasattr(obj, "_defect_collaborators")
+                else obj.collaborators.select_related("user"))
         ]
 
     manual_verification_allowed = serializers.SerializerMethodField()
@@ -465,3 +469,11 @@ class DefectSerializer(AuthoredRecordSerializer):
             "agent_processing",
             "agent_availability",
         ]
+
+
+class DefectSummarySerializer(DefectSerializer):
+    """List contract keeps the same fields but fetches complete history on demand."""
+    events = serializers.SerializerMethodField()
+
+    def get_events(self, obj):
+        return []

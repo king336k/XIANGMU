@@ -2,23 +2,23 @@ import { ProjectRouteLink as Link } from "@/components/common/project-route-link
 import { useResolvedProjectParams } from "@/hooks/use-resolved-project-params";
 import { renderNumericDateTime } from "@plane/utils";
 // SPDX-License-Identifier: AGPL-3.0-only
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import useSWR from "swr";
 import { Navigate, useParams, useSearchParams } from "react-router";
 import { RequirementState, requirementStatuses } from "./requirement-state";
 import { Badge } from "./record-badge";
-import { LinkedTaskPeek } from "./linked-task-peek";
+
 import { ClipboardList, Plus, ChevronDown } from "lucide-react";
 import { Button } from "@plane/ui";
 import { AppSidebarToggleButton } from "@/components/sidebar/sidebar-toggle-button";
 import { PageHead } from "@/components/core/page-title";
 import { qualityApi, errorMessage } from "./api";
-import { DocumentImportForm } from "./document-import-form";
+
 import { TableHeaderFilter } from "./table-header-filter";
 import { ListFilters } from "./list-filters";
 import { pageSize, normalizedPageParams } from "./pagination";
 import { RecordProgress } from "./record-progress";
-import { CaseForm } from "./case-form";
+
 import { Empty, Field, fieldClass, Modal, Paging } from "./shared";
 import { can, priorityNames } from "./types";
 import type { Context, Page } from "./types";
@@ -65,6 +65,17 @@ const actions: Record<string, string> = {
 };
 const requirementPriorityNames = { urgent: "紧急", ...priorityNames, none: "未设置" };
 const statuses = requirementStatuses;
+const panelLoading = (
+  <div role="status" className="p-5 text-13 text-secondary">
+    正在加载…
+  </div>
+);
+const LinkedTaskPeek = lazy(() => import("./linked-task-peek").then((module) => ({ default: module.LinkedTaskPeek })));
+const CaseForm = lazy(() => import("./case-form").then((module) => ({ default: module.CaseForm })));
+const DocumentImportForm = lazy(() =>
+  import("./document-import-form").then((module) => ({ default: module.DocumentImportForm }))
+);
+
 export function RequirementsWorkbench({
   embedded,
 }: {
@@ -413,13 +424,15 @@ export function RequirementsWorkbench({
         />
       )}
       {activeTask && (
-        <LinkedTaskPeek
-          id={activeTask}
-          onClosed={() => {
-            setActiveTask(undefined);
-            void saved();
-          }}
-        />
+        <Suspense fallback={panelLoading}>
+          <LinkedTaskPeek
+            id={activeTask}
+            onClosed={() => {
+              setActiveTask(undefined);
+              void saved();
+            }}
+          />
+        </Suspense>
       )}
       {embedded?.id && !current && (
         <Modal title="需求详情" onClose={embedded.onClose}>
@@ -427,7 +440,9 @@ export function RequirementsWorkbench({
         </Modal>
       )}
       {importing && (
-        <DocumentImportForm base={base} resource="requirements" onClose={() => setImporting(false)} onSaved={saved} />
+        <Suspense fallback={panelLoading}>
+          <DocumentImportForm base={base} resource="requirements" onClose={() => setImporting(false)} onSaved={saved} />
+        </Suspense>
       )}
       {editor !== undefined && context && (
         <Modal
@@ -721,13 +736,15 @@ export function RequirementsWorkbench({
         </Modal>
       )}
       {creatingCase && current && context && (
-        <CaseForm
-          base={base}
-          context={context}
-          requirementId={current.id}
-          onClose={() => setCreatingCase(false)}
-          onSaved={saved}
-        />
+        <Suspense fallback={panelLoading}>
+          <CaseForm
+            base={base}
+            context={context}
+            requirementId={current.id}
+            onClose={() => setCreatingCase(false)}
+            onSaved={saved}
+          />
+        </Suspense>
       )}
       {action === "task" && current && (
         <Modal

@@ -3,7 +3,7 @@ import { projectDutySummary } from "./duty-summary";
 import { renderNumericDateTime } from "@plane/utils";
 import { useResolvedProjectParams } from "@/hooks/use-resolved-project-params";
 // SPDX-License-Identifier: AGPL-3.0-only
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { useSearchParams, Navigate, useParams, useLocation } from "react-router";
 import { Beaker, Bug, ClipboardList, FileCheck, Plus, RefreshCw, Link2 } from "lucide-react";
@@ -11,15 +11,14 @@ import { Button, getButtonStyling } from "@plane/ui";
 import { AppSidebarToggleButton } from "@/components/sidebar/sidebar-toggle-button";
 import { PageHead } from "@/components/core/page-title";
 import { qualityApi, errorMessage } from "./api";
-import { CaseHistory } from "./case-history";
+
 import { CaseListActions } from "./case-list-actions";
-import { CaseForm } from "./case-form";
+
 import { DefectQuickEdit } from "./defect-quick-edit";
-import { DefectForm } from "./defect-form";
-import { SourceForm } from "./source-form";
+
 import { BulkActionsBar } from "./bulk-actions-bar";
 import { movedSettingsPath } from "@/components/settings/management-paths";
-import { FieldResourcesPanel } from "./field-resources-panel";
+
 import {
   defectDisplayTitle,
   can,
@@ -33,23 +32,48 @@ import {
 import { SavedViewControls } from "./saved-view-controls";
 import { LayoutControls, recordLayout } from "./layout-controls";
 import { RecordPresentation } from "./record-presentation";
-import { TaskPackageForm } from "./task-package-form";
-import { ImportForm } from "./import-form";
-import { ReportsPanel } from "./reports-panel";
-import { DefectVerificationResults } from "./defect-verification-results";
-import { PlanForm } from "./plan-form";
-import { PlanDetail } from "./plan-detail";
+
 import { ListFilters } from "./list-filters";
 import { pageSize, normalizedPageParams } from "./pagination";
-import { DefectStatistics } from "./defect-statistics";
+
 import { Empty, Paging, Modal } from "./shared";
 import { CaseList, PlanList, ExecutionList, DefectList } from "./record-lists";
-import { AssetsPanel } from "./assets-panel";
+
 import type { Suite, Release } from "./assets-panel";
-import { QualitySummary } from "./quality-summary";
-import { QualityRecordPeek } from "./quality-record-peek";
+
 import type { OverviewRecord } from "./quality-overview-details";
 import type { Context, Defect, Execution, Page, Plan, Report, TestCase } from "./types";
+
+const panelLoading = (
+  <div role="status" className="p-5 text-13 text-secondary">
+    正在加载…
+  </div>
+);
+const DefectForm = lazy(() => import("./defect-form").then((module) => ({ default: module.DefectForm })));
+const ReportsPanel = lazy(() => import("./reports-panel").then((module) => ({ default: module.ReportsPanel })));
+const DefectStatistics = lazy(() =>
+  import("./defect-statistics").then((module) => ({ default: module.DefectStatistics }))
+);
+const QualitySummary = lazy(() => import("./quality-summary").then((module) => ({ default: module.QualitySummary })));
+const QualityRecordPeek = lazy(() =>
+  import("./quality-record-peek").then((module) => ({ default: module.QualityRecordPeek }))
+);
+const PlanDetail = lazy(() => import("./plan-detail").then((module) => ({ default: module.PlanDetail })));
+const AssetsPanel = lazy(() => import("./assets-panel").then((module) => ({ default: module.AssetsPanel })));
+const FieldResourcesPanel = lazy(() =>
+  import("./field-resources-panel").then((module) => ({ default: module.FieldResourcesPanel }))
+);
+const DefectVerificationResults = lazy(() =>
+  import("./defect-verification-results").then((module) => ({ default: module.DefectVerificationResults }))
+);
+const CaseHistory = lazy(() => import("./case-history").then((module) => ({ default: module.CaseHistory })));
+const CaseForm = lazy(() => import("./case-form").then((module) => ({ default: module.CaseForm })));
+const PlanForm = lazy(() => import("./plan-form").then((module) => ({ default: module.PlanForm })));
+const TaskPackageForm = lazy(() =>
+  import("./task-package-form").then((module) => ({ default: module.TaskPackageForm }))
+);
+const ImportForm = lazy(() => import("./import-form").then((module) => ({ default: module.ImportForm })));
+const SourceForm = lazy(() => import("./source-form").then((module) => ({ default: module.SourceForm })));
 
 const tabs = [
   { key: "cases", name: "测试用例", group: "assets" },
@@ -83,6 +107,8 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
       : "plans";
   const group = tabs.find((item) => item.key === tab)?.group;
   const page = Math.max(1, Number(params.get("page")) || 1);
+  const collectionParams = normalizedPageParams(params);
+  if (tab === "defects") collectionParams.set("summary", "true");
   const base = `/api/workspaces/${workspaceSlug}/projects/${projectId}/quality/`;
   const projectUrl = `/${workspaceSlug}/projects/${projectId}`;
   const {
@@ -97,7 +123,7 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
     isLoading,
     mutate,
   } = useSWR(
-    tabAllowed &&
+    (tab === "defects" || tabAllowed) &&
       ![
         "verification-results",
         "report",
@@ -107,7 +133,7 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
         "overview",
         "defect-statistics",
       ].includes(tab)
-      ? `${base}${tab}/?${normalizedPageParams(params).toString()}`
+      ? `${base}${tab}/?${collectionParams.toString()}`
       : null,
     (url: string) => qualityApi.read<Page<TestCase | Plan | Execution | Defect | Suite | Release>>(url),
     {
@@ -128,10 +154,14 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
     data: report,
     error: reportError,
     mutate: refreshReport,
-  } = useSWR(tabAllowed ? `${base}report/` : null, (url: string) => qualityApi.read<Report>(url), {
-    refreshInterval: 15000,
-    revalidateOnMount: true,
-  });
+  } = useSWR(
+    tabAllowed && tab === "overview" ? `${base}report/` : null,
+    (url: string) => qualityApi.read<Report>(url),
+    {
+      refreshInterval: 15000,
+      revalidateOnMount: true,
+    }
+  );
   const [form, setForm] = useState<"case" | "plan" | "defect" | "source" | "import" | "task-package" | null>(null);
   const [caseRead, setCaseRead] = useState<{ value: TestCase; history: boolean }>();
   const [selectedCases, setSelectedCases] = useState<TestCase[]>([]);
@@ -190,7 +220,7 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
           ))
     );
     await mutate();
-    await refreshReport();
+    if (tab === "overview") await refreshReport();
     await refreshContext();
   };
   const switchTab = (key: string) => {
@@ -512,20 +542,22 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
           context && (
             <>
               {activePlan && tab === "plans" ? (
-                <PlanDetail
-                  base={base}
-                  value={activePlan}
-                  canWrite={can(context, "execute")}
-                  context={context}
-                  onBack={() => {
-                    setPlan(null);
-                    const next = new URLSearchParams(params);
-                    next.delete("plan");
-                    setParams(next);
-                  }}
-                  onCopied={setPlan}
-                  onSaved={saved}
-                />
+                <Suspense fallback={panelLoading}>
+                  <PlanDetail
+                    base={base}
+                    value={activePlan}
+                    canWrite={can(context, "execute")}
+                    context={context}
+                    onBack={() => {
+                      setPlan(null);
+                      const next = new URLSearchParams(params);
+                      next.delete("plan");
+                      setParams(next);
+                    }}
+                    onCopied={setPlan}
+                    onSaved={saved}
+                  />
+                </Suspense>
               ) : (
                 <>
                   {(defectsOnly || ["cases", "plans", "suites"].includes(tab)) && (
@@ -589,16 +621,18 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
                     <ListFilters kind="defects" context={context} params={params} onApply={setParams} />
                   )}
                   {tab === "defect-statistics" && (
-                    <DefectStatistics
-                      base={base}
-                      params={params}
-                      onOpenDefect={(id) => {
-                        const next = new URLSearchParams(params);
-                        next.set("panel", "statistics");
-                        next.set("defect", id);
-                        setParams(next, { preventScrollReset: true });
-                      }}
-                    />
+                    <Suspense fallback={panelLoading}>
+                      <DefectStatistics
+                        base={base}
+                        params={params}
+                        onOpenDefect={(id) => {
+                          const next = new URLSearchParams(params);
+                          next.set("panel", "statistics");
+                          next.set("defect", id);
+                          setParams(next, { preventScrollReset: true });
+                        }}
+                      />
+                    </Suspense>
                   )}
                   {isLoading &&
                   ![
@@ -792,36 +826,52 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
                     />
                   )}
                   {(tab === "suites" || tab === "releases") && (
-                    <AssetsPanel
-                      base={base}
-                      kind={tab}
-                      rows={visible as (Suite | Release)[]}
-                      context={context}
-                      onSaved={saved}
-                      layout={layout}
-                    />
+                    <Suspense fallback={panelLoading}>
+                      <AssetsPanel
+                        base={base}
+                        kind={tab}
+                        rows={visible as (Suite | Release)[]}
+                        context={context}
+                        onSaved={saved}
+                        layout={layout}
+                      />
+                    </Suspense>
                   )}
-                  {tab === "resources" && <FieldResourcesPanel base={base} context={context} />}
+                  {tab === "resources" && (
+                    <Suspense fallback={panelLoading}>
+                      <FieldResourcesPanel base={base} context={context} />
+                    </Suspense>
+                  )}
                   {tab === "overview" && report && (
-                    <QualitySummary
-                      base={base}
-                      onOpenRecord={setOverviewRecord}
-                      report={report}
-                      onNavigate={(nextTab, result, currentOnly) => {
-                        if (nextTab === "defects") window.location.assign(`${projectUrl}/defects/?view=unclosed`);
-                        else {
-                          setParams({
-                            tab: nextTab,
-                            ...(result ? { result } : {}),
-                            ...(currentOnly ? { current_only: "true" } : {}),
-                          });
-                          setPlan(null);
-                        }
-                      }}
-                    />
+                    <Suspense fallback={panelLoading}>
+                      <QualitySummary
+                        base={base}
+                        onOpenRecord={setOverviewRecord}
+                        report={report}
+                        onNavigate={(nextTab, result, currentOnly) => {
+                          if (nextTab === "defects") window.location.assign(`${projectUrl}/defects/?view=unclosed`);
+                          else {
+                            setParams({
+                              tab: nextTab,
+                              ...(result ? { result } : {}),
+                              ...(currentOnly ? { current_only: "true" } : {}),
+                            });
+                            setPlan(null);
+                          }
+                        }}
+                      />
+                    </Suspense>
                   )}
-                  {tab === "verification-results" && <DefectVerificationResults base={base} projectUrl={projectUrl} />}
-                  {tab === "report" && <ReportsPanel base={base} context={context} />}
+                  {tab === "verification-results" && (
+                    <Suspense fallback={panelLoading}>
+                      <DefectVerificationResults base={base} projectUrl={projectUrl} />
+                    </Suspense>
+                  )}
+                  {tab === "report" && (
+                    <Suspense fallback={panelLoading}>
+                      <ReportsPanel base={base} context={context} />
+                    </Suspense>
+                  )}
                   {![
                     "verification-results",
                     "report",
@@ -856,22 +906,26 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
         )}
       </main>
       {caseRead && (
-        <CaseHistory
-          base={base}
-          value={caseRead.value}
-          currentOnly={!caseRead.history}
-          onClose={() => setCaseRead(undefined)}
-        />
+        <Suspense fallback={panelLoading}>
+          <CaseHistory
+            base={base}
+            value={caseRead.value}
+            currentOnly={!caseRead.history}
+            onClose={() => setCaseRead(undefined)}
+          />
+        </Suspense>
       )}
       {context && form === "case" && (
-        <CaseForm
-          base={base}
-          context={context}
-          value={caseValue}
-          copy={copyCase}
-          onClose={() => setForm(null)}
-          onSaved={saved}
-        />
+        <Suspense fallback={panelLoading}>
+          <CaseForm
+            base={base}
+            context={context}
+            value={caseValue}
+            copy={copyCase}
+            onClose={() => setForm(null)}
+            onSaved={saved}
+          />
+        </Suspense>
       )}
       {viewExecution && (
         <Modal title="测试执行记录" onClose={() => setViewExecution(undefined)}>
@@ -884,7 +938,9 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
         </Modal>
       )}
       {context && form === "plan" && (
-        <PlanForm base={base} context={context} onClose={() => setForm(null)} onSaved={saved} />
+        <Suspense fallback={panelLoading}>
+          <PlanForm base={base} context={context} onClose={() => setForm(null)} onSaved={saved} />
+        </Suspense>
       )}
       {quickEdit && context && (
         <DefectQuickEdit
@@ -898,39 +954,53 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
         />
       )}
       {context && (form === "defect" || (!!linkedDefect && defectsOnly)) && (
-        <DefectForm
-          key={`${(defectValue || linkedDefect)?.id || "new"}:${defectEntryMode || "view"}`}
-          initialMode={defectEntryMode}
-          onFromSource={() => setForm("source")}
-          base={base}
-          context={context}
-          value={defectValue || linkedDefect}
-          onClose={() => {
-            setForm(null);
-            setDefectEntryMode(undefined);
-            const next = new URLSearchParams(params);
-            next.delete("defect");
-            setParams(next, { preventScrollReset: true });
-          }}
-          onSaved={saved}
-          projectUrl={projectUrl}
-        />
+        <Suspense fallback={panelLoading}>
+          <DefectForm
+            key={`${(defectValue || linkedDefect)?.id || "new"}:${defectEntryMode || "view"}`}
+            initialMode={defectEntryMode}
+            onFromSource={() => setForm("source")}
+            base={base}
+            context={context}
+            value={defectValue || linkedDefect}
+            onClose={() => {
+              setForm(null);
+              setDefectEntryMode(undefined);
+              const next = new URLSearchParams(params);
+              next.delete("defect");
+              setParams(next, { preventScrollReset: true });
+            }}
+            onSaved={saved}
+            projectUrl={projectUrl}
+          />
+        </Suspense>
       )}
       {context && overviewRecord && (
-        <QualityRecordPeek
-          base={base}
-          context={context}
-          record={overviewRecord}
-          projectUrl={projectUrl}
-          onClose={() => setOverviewRecord(undefined)}
-          onSaved={saved}
-        />
+        <Suspense fallback={panelLoading}>
+          <QualityRecordPeek
+            base={base}
+            context={context}
+            record={overviewRecord}
+            projectUrl={projectUrl}
+            onClose={() => setOverviewRecord(undefined)}
+            onSaved={saved}
+          />
+        </Suspense>
       )}
-      {context && form === "source" && <SourceForm base={base} onClose={() => setForm(null)} onSaved={saved} />}
+      {context && form === "source" && (
+        <Suspense fallback={panelLoading}>
+          <SourceForm base={base} onClose={() => setForm(null)} onSaved={saved} />
+        </Suspense>
+      )}
       {context && form === "task-package" && (
-        <TaskPackageForm base={base} onClose={() => setForm(null)} onSaved={saved} />
+        <Suspense fallback={panelLoading}>
+          <TaskPackageForm base={base} onClose={() => setForm(null)} onSaved={saved} />
+        </Suspense>
       )}
-      {context && form === "import" && <ImportForm base={base} onClose={() => setForm(null)} onSaved={saved} />}
+      {context && form === "import" && (
+        <Suspense fallback={panelLoading}>
+          <ImportForm base={base} onClose={() => setForm(null)} onSaved={saved} />
+        </Suspense>
+      )}
     </div>
   );
 }

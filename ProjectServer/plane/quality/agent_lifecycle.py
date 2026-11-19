@@ -178,7 +178,12 @@ def command_rows(run):
 
 
 def agent_processing(defect):
-    if not hasattr(defect,'_agent_processing'):preload_processing([defect])
+    if not hasattr(defect,'_agent_processing'):
+        if hasattr(defect,'_latest_agent_runs'):
+            runs=defect._latest_agent_runs
+            if runs:command_rows(runs[0])
+            defect._agent_processing=processing(runs[0] if runs else None)
+        else:preload_processing([defect])
     return defect._agent_processing
 
 
