@@ -15,6 +15,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import hashlib
 import ipaddress
 import json
+import math
 import multiprocessing
 import os
 from pathlib import Path
@@ -26,6 +27,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from datetime import datetime
 
 from connector import Engine, Policy, identity, NoRedirect
 from stress_harness import summarize, percentile
@@ -58,6 +60,11 @@ def validate_manifest(value):
         raise ValueError('isolation_id required')
     if value.get('model_mode') not in ('controlled_stub','real_model_e2e'):
         raise ValueError('explicit model_mode required')
+    if type(value.get('full_job_lifecycle',False)) is not bool:
+        raise ValueError('full_job_lifecycle must be boolean')
+    capacity=value.get('expected_worker_concurrency')
+    if capacity is not None and (type(capacity) is not int or not 1<=capacity<=16):
+        raise ValueError('expected worker concurrency must be 1..16')
     users=value.get('users',[]);stations=value.get('stations',[])
     if not isinstance(users,list) or not 1<=len(users)<=16 or not isinstance(stations,list) or not 1<=len(stations)<=16:
         raise ValueError('1..16 users and stations required')
@@ -170,6 +177,84 @@ def wait_for_markers(folder, count, seconds=60):
     while len(list(folder.iterdir()))<count:
         if time.monotonic()>deadline:raise TimeoutError('not all isolated stations became ready')
         time.sleep(.01)
+
+
+def epoch(value):
+    if isinstance(value,str):
+        try:
+            parsed=datetime.fromisoformat(value.replace('Z','+00:00'))
+            return parsed.timestamp() if parsed.tzinfo is not None else None
+        except (ValueError,OverflowError):return None
+    return float(value) if type(value) in (int,float) and math.isfinite(value) and value>0 else None
+
+
+def max_overlap(intervals):
+    points=[]
+    for start,end in intervals:
+        if start is not None and end is not None and end>start:
+            points.extend(((start,1),(end,-1)))
+    if not points:return None
+    active=peak=0
+    for _at,delta in sorted(points):
+        active+=delta;peak=max(peak,active)
+    return peak
+
+
+def operation_statistics(samples):
+    report=summarize(samples)
+    for name,summary in report.items():
+        rows=[row for row in samples if row['operation']==name]
+        summary['max_concurrent_requests']=max_overlap([(epoch(row.get('started_at')),epoch(row.get('completed_at'))) for row in rows])
+        statuses={}
+        for row in rows:
+            if type(row.get('status')) is int:
+                status=str(row['status']);statuses[status]=statuses.get(status,0)+1
+        if statuses:summary['http_status_counts']=statuses
+        summary['expected_conflicts']=sum(row.get('status')==409 and row['ok'] for row in rows)
+    return report
+
+
+def job_lifecycle_summary(stations,capacity=None):
+    # RemoteAgentRun.id identifies one worker-owned lifecycle. Its internal
+    # model/tool/diagnose/repair/verify stages never create extra jobs here.
+    unique={};duplicates=0
+    for station in stations:
+        for job in station.get('jobs',[]):
+            key=job['id']
+            if key in unique:duplicates+=1
+            else:unique[key]=job
+    intervals=[];missing=[];exact_wait=[];observed_wait=[];queued=0;observed=0
+    for key,job in unique.items():
+        start=epoch(job.get('worker_started_at'));end=epoch(job.get('worker_completed_at'))
+        if start is not None and end is not None and end>start:intervals.append((start,end))
+        else:missing.append(key)
+        queued_at=epoch(job.get('queued_at'))
+        if start is not None and queued_at is not None and start>=queued_at:exact_wait.append(start-queued_at)
+        observations=job.get('observations',[])
+        if observations:
+            observed+=1
+            queue_times=[epoch(row.get('at')) for row in observations if row.get('status')=='queued']
+            run_times=[epoch(row.get('at')) for row in observations if row.get('status')=='running']
+            queue_times=[value for value in queue_times if value is not None]
+            run_times=[value for value in run_times if value is not None]
+            if queue_times:queued+=1
+            if queue_times and run_times and min(run_times)>=min(queue_times):
+                observed_wait.append(min(run_times)-min(queue_times))
+    peak=max_overlap(intervals)
+    result={'job_count':len(unique),'completed_jobs':sum(row.get('status')=='completed' for row in unique.values()),
+            'counting_unit':'one RemoteAgentRun.id across its entire worker lifecycle; internal stages excluded',
+            'worker_timed_jobs':len(intervals),'missing_worker_timing_job_ids':missing,'duplicate_job_records':duplicates,
+            'max_concurrent_running':peak,'queued_jobs_observed':queued if observed else None,
+            'expected_worker_concurrency':capacity,
+            'capacity_exceeded':peak>capacity if peak is not None and capacity is not None else None,
+            'capacity_peak_reached':peak==capacity if peak is not None and capacity is not None else None,
+            'capacity_verified':bool(capacity is not None and unique and not missing and not duplicates and peak==capacity)}
+    queues={row.get('worker_queue') for row in unique.values() if isinstance(row.get('worker_queue'),str)}
+    if queues:result['observed_worker_queues']=sorted(queues)
+    def waiting(values):return {'samples':len(values),'p50':percentile(values,.5),'p95':percentile(values,.95),'max':max(values)}
+    if exact_wait:result['queue_wait_seconds']={**waiting(exact_wait),'source':'server queued_at to worker_started_at'}
+    if observed_wait:result['observed_queue_to_running_seconds']={**waiting(observed_wait),'source':'client polling observations; approximate, includes observation delay'}
+    return result
 
 
 def mixed_overlap(stations):
@@ -342,11 +427,14 @@ def station_job(job):
                 if identifier!=station['owner_user_id']:
                     user(identifier).request('GET',terminal_path,expected=(403,404),operation='terminal_crossowner_expected_deny')
             # New contract: queued work may be submitted while human terminal is busy.
-            modes=('diagnose','repair') if manifest['model_mode']=='controlled_stub' else ('repair',)
+            modes=(('diagnose','repair') if manifest['model_mode']=='controlled_stub'
+                   and not manifest.get('full_job_lifecycle') else ('repair',))
             for mode,defect in zip(modes,(station['defect_ids']*2)[:len(modes)]):
+                submitted_at=time.time()
                 run=owner.request('POST',BASE+'agent-runs/',{'device_id':station['device_id'],'defect_id':defect,'mode':mode,
                     'problem':'Isolated '+manifest['model_mode']+' mixed stress; inspect config.json and repair only when mode permits.'},expected=(201,),operation='agent_'+mode+'_submit')
-                run_results.append({'id':run['id'],'mode':mode})
+                run_results.append({'id':run['id'],'mode':mode,'observations':[{'at':submitted_at,'status':run.get('status')}],
+                                    'queued_at':run.get('queued_at') or run.get('created_at')})
             owner.request('POST',BASE,{'action':'open','device_id':station['device_id']},expected=(409,),operation='busy_terminal_expected_409')
             owner.request('POST',BASE+'files/',{'device_id':station['device_id'],'target':'operator','action':'upload_start','path':'files',
                 'filename':'busy.bin','size':1,'sha256':hashlib.sha256(b'x').hexdigest()},expected=(409,),operation='busy_upload_expected_409')
@@ -356,7 +444,7 @@ def station_job(job):
             sid=None
             wait_started=time.time()
             for run in run_results:
-                observed=[]
+                observed=run['observations']
                 def read_run():
                     value=owner.request('GET',BASE+'agent-runs/'+run['id']+'/',operation='agent_'+run['mode']+'_poll')
                     observed.append({'at':time.time(),'status':value.get('status')})
@@ -400,6 +488,11 @@ def station_job(job):
                                  'model_started_at':row.get('result',{}).get('controlled_stub_started_at'),
                                  'model_completed_at':row.get('result',{}).get('controlled_stub_completed_at')} for row in run_results],
             'runs':[{'id':row['id'],'mode':row['mode'],'status':row.get('status')} for row in run_results],
+            'jobs':[{'id':row['id'],'mode':row['mode'],'status':row.get('status'),'observations':row.get('observations',[]),
+                     'worker_started_at':row.get('result',{}).get('worker_started_at'),
+                     'worker_completed_at':row.get('result',{}).get('worker_completed_at'),
+                     'worker_queue':row.get('result',{}).get('worker_queue'),
+                     'queued_at':row.get('result',{}).get('queued_at') or row.get('queued_at')} for row in run_results],
             'config_sha256':hashlib.sha256(config.read_bytes()).hexdigest(),
             'original_diagnostics_unchanged':bool(diagnostics_before) and diagnostics_before==diagnostics_after}
 
@@ -419,10 +512,14 @@ def main():
     report={'scope':'isolated real central HTTP plus actual edge Engine','model_mode':manifest['model_mode'],
             'physical_multi_host':False,'distinct_uid_tested':False,'users_are_fixture_http_sessions':True,
             'started_at':started,'completed_at':time.time(),'station_count':len(results),'user_count':len(manifest['users']),
-            'operation_count':len(samples),'operations':summarize(samples),'stations':results,
+            'operation_count':len(samples),'operations':operation_statistics(samples),'stations':results,
             'p50_ms':percentile([row['elapsed_ms'] for row in samples],.5),'p95_ms':percentile([row['elapsed_ms'] for row in samples],.95),
             'ok':all(row['ok'] for row in results),'mixed_overlap':mixed_overlap(results)}
     report['distinct_station_pids']=len({row['pid'] for row in results})
+    report['full_job_lifecycle']=manifest.get('full_job_lifecycle',False)
+    report['job_lifecycle']=job_lifecycle_summary(results,manifest.get('expected_worker_concurrency'))
+    if manifest.get('expected_worker_concurrency') is not None and not report['job_lifecycle']['capacity_verified']:
+        report['ok']=False
     if report['distinct_station_pids']!=len(results):report['ok']=False
     fd=os.open(args.output,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
     with os.fdopen(fd,'w') as stream:json.dump(report,stream,indent=2);stream.flush();os.fsync(stream.fileno())

@@ -9,7 +9,8 @@ import uuid
 from unittest.mock import Mock, patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from platform_stress import Http, ApiError, validate_manifest, wait_for_markers, mixed_overlap, submit_diagnostic, submit_signed_feedback
+from platform_stress import (Http, ApiError, validate_manifest, wait_for_markers, mixed_overlap,
+                             submit_diagnostic, submit_signed_feedback, job_lifecycle_summary, operation_statistics)
 
 
 def fixture():
@@ -21,6 +22,44 @@ def fixture():
 
 
 class PlatformStressTests(unittest.TestCase):
+    def test_full_job_capacity_uses_real_lifecycle_and_does_not_count_stages(self):
+        jobs=[{'id':str(n),'mode':'repair','status':'completed','worker_started_at':start,
+               'worker_completed_at':end,'queued_at':start-.5,
+               'observations':[{'at':start-.4,'status':'queued'},{'at':start+.1,'status':'running'}],
+               'stages':[{'stage':'diagnose'},{'stage':'repair'},{'stage':'verify'}]}
+              for n,(start,end) in enumerate(((1,10),(2,8),(3,7),(4,9),(10,11)))]
+        report=job_lifecycle_summary([{'device_id':'one','jobs':jobs}],4)
+        self.assertEqual(report['job_count'],5)
+        self.assertEqual(report['max_concurrent_running'],4)
+        self.assertTrue(report['capacity_verified'])
+        self.assertFalse(report['capacity_exceeded'])
+        self.assertEqual(report['queued_jobs_observed'],5)
+        self.assertEqual(report['queue_wait_seconds']['p95'],.5)
+        jobs.append({'id':'overflow','mode':'repair','status':'completed','worker_started_at':5,'worker_completed_at':6})
+        overflow=job_lifecycle_summary([{'jobs':jobs}],4)
+        self.assertEqual(overflow['max_concurrent_running'],5)
+        self.assertTrue(overflow['capacity_exceeded'])
+        self.assertFalse(overflow['capacity_verified'])
+
+    def test_missing_worker_timing_never_claims_capacity_or_invents_queue_wait(self):
+        report=job_lifecycle_summary([{'jobs':[{'id':'one','mode':'repair','status':'completed'}]}],4)
+        self.assertIsNone(report['max_concurrent_running'])
+        self.assertIsNone(report['queued_jobs_observed'])
+        self.assertNotIn('queue_wait_seconds',report)
+        self.assertFalse(report['capacity_verified'])
+        partial=job_lifecycle_summary([{'jobs':[{'id':'one','worker_started_at':1,'worker_completed_at':2},
+                                               {'id':'two'}]}],1)
+        self.assertFalse(partial['capacity_verified'])
+
+    def test_http_operation_concurrency_and_expected_409_are_not_worker_jobs(self):
+        rows=[{'operation':'files','ok':True,'status':201,'elapsed_ms':1,'started_at':1,'completed_at':4},
+              {'operation':'files','ok':True,'status':409,'elapsed_ms':2,'started_at':2,'completed_at':3},
+              {'operation':'files','ok':False,'status':500,'elapsed_ms':3,'started_at':4,'completed_at':5}]
+        report=operation_statistics(rows)['files']
+        self.assertEqual(report['max_concurrent_requests'],2)
+        self.assertEqual(report['errors'],1)
+        self.assertEqual(report['http_status_counts'],{'201':1,'409':1,'500':1})
+
     def test_signed_feedback_validates_response_without_reporting_signatures_payload_or_code(self):
         issue=str(uuid.uuid4());client=Mock()
         client.request.return_value={'issueId':issue,'issueCode':'Q-TEST-001'}
