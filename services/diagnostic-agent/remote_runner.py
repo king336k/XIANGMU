@@ -43,6 +43,13 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+class ToolValidationError(ValueError):
+    """A fixed local validation code, safe to return as model correction data."""
+    def __init__(self,reason):
+        self.reason=reason
+        super().__init__(reason)
+
+
 def redact(value, secrets):
     """Remove exact credentials at every output boundary, including tool results."""
     if isinstance(value, str):
@@ -83,6 +90,11 @@ class Gateway:
         self.executions = []
         self.observed_locations = set()
         self.last_validation_error = ''
+        self.last_tool_validation_error = ''
+
+    def reject_tool(self,reason):
+        self.last_tool_validation_error=reason
+        raise ToolValidationError(reason)
 
     def observe_locations(self, value, depth=0):
         """Retain only location handles present in actual current reads/receipts."""
@@ -166,9 +178,9 @@ class Gateway:
         explicit check with a failing exit code when the original fault remains.
         """
         if purpose not in {"inspect", "repair", "verify"} or not 1 <= len(argv) <= 80:
-            raise ValueError("invalid_command")
+            self.reject_tool("invalid_command")
         if any(not isinstance(arg, str) or len(arg) > 16000 for arg in argv):
-            raise ValueError("invalid_command_argument")
+            self.reject_tool("invalid_command_argument")
         # Model labels are advisory. Only exact server-configured commands are reads.
         if argv == self.verify_argv:
             phase = "verify"
@@ -179,17 +191,17 @@ class Gateway:
         else:
             phase = "repair"
         if phase == "repair" and not self.inspected:
-            raise ValueError("inspect_current_target_before_repair")
+            self.reject_tool("inspect_current_target_before_repair")
         if phase == "repair" and not self.repair_allowed:
-            raise ValueError("repair_not_authorized")
+            self.reject_tool("repair_not_authorized")
         if phase == 'repair' and self.require_knowledge and not self.knowledge_searched:
-            raise ValueError('search_project_knowledge_before_mutation')
+            self.reject_tool('search_project_knowledge_before_mutation')
         if phase == "repair" and self.repair_argv is not None and (
             not isinstance(self.repair_argv, list) or argv[:-1] != self.repair_argv or not re.fullmatch(r"[a-f0-9]{64}", argv[-1])
         ):
-            raise ValueError("use_configured_repair_prefix_with_current_sha256")
+            self.reject_tool("use_configured_repair_prefix_with_current_sha256")
         if purpose == "verify" and phase != "verify":
-            raise ValueError("use_configured_verification_command")
+            self.reject_tool("use_configured_verification_command")
         if phase == "verify":
             # Every fresh check supersedes previous success, including failure/timeout.
             self.verified_mutation = 0
@@ -256,15 +268,15 @@ class Gateway:
     def patch_file(self, path: str, expected_sha256: str, content: str) -> dict:
         """Patch a previously read remote file using its exact SHA256; requires post-check."""
         if self.repair_argv is not None and path not in self.editable_files:
-            raise ValueError("use_configured_repair_command_instead_of_generic_patch")
+            self.reject_tool("use_configured_repair_command_instead_of_generic_patch")
         if not self.inspected or self.read_hashes.get(path) != expected_sha256:
-            raise ValueError("read_exact_current_file_before_patch")
+            self.reject_tool("read_exact_current_file_before_patch")
         if not self.repair_allowed:
-            raise ValueError("repair_not_authorized")
+            self.reject_tool("repair_not_authorized")
         if self.require_knowledge and not self.knowledge_searched:
-            raise ValueError('search_project_knowledge_before_mutation')
+            self.reject_tool('search_project_knowledge_before_mutation')
         if len(content.encode()) > 256 * 1024:
-            raise ValueError("patch_too_large")
+            self.reject_tool("patch_too_large")
         self.verification_passed = False
         self.verification_attempted = False
         self.verified_mutation = 0
@@ -340,9 +352,21 @@ async def analyze(payload, runtime=None):
                            http_client=DefaultAsyncHttpxClient(timeout=70, trust_env=False)) as client:
         model = OpenAIChatModel(config["model"], provider=OpenAIProvider(openai_client=client))
         agent = Agent(model, output_type=Report, instructions=INSTRUCTIONS, retries=1, tool_timeout=36)
-        agent.tool_plain(gateway.run_command, sequential=True)
+        @agent.tool_plain(sequential=True)
+        def run_command(argv: list[str], cwd: str = '.', timeout: int = 30, purpose: str = 'inspect') -> dict:
+            """Run only approved argv; fixed validation codes allow correcting arguments without expanding authorization."""
+            try:
+                return gateway.run_command(argv,cwd,timeout,purpose)
+            except ToolValidationError as error:
+                raise ModelRetry(error.reason) from None
         agent.tool_plain(gateway.read_file, sequential=True)
-        agent.tool_plain(gateway.patch_file, sequential=True)
+        @agent.tool_plain(sequential=True)
+        def patch_file(path: str, expected_sha256: str, content: str) -> dict:
+            """Patch an explicitly approved current file with the SHA256 returned by read_file; then verify."""
+            try:
+                return gateway.patch_file(path,expected_sha256,content)
+            except ToolValidationError as error:
+                raise ModelRetry(error.reason) from None
         consulted = set()
         research_state = {'searched': False, 'calls': 0}
 
@@ -531,7 +555,7 @@ def safe_error_classes(error):
     """Classify only known exception types; never inspect provider error messages."""
     allowed={'TimeoutError','UsageLimitExceeded','UnexpectedModelBehavior','ModelRetry','ValidationError',
              'ModelHTTPError','ModelAPIError','ModelConnectionError','ModelRequestTimeout','ModelTimeoutError',
-             'RuntimeError','ValueError','KeyError','TypeError','JSONDecodeError','CancelledError'}
+             'RuntimeError','ValueError','KeyError','TypeError','JSONDecodeError','CancelledError','ToolValidationError'}
     classes=[]
     seen=set()
     while error is not None and id(error) not in seen and len(classes)<8:
@@ -557,6 +581,7 @@ def failed_analysis(payload, runtime, error):
             'mode':mode if mode in {'repair','diagnose','verify'} else 'diagnose','outcome':'unresolved',
             'execution_error':True,'agent_error_code':classes[0],'agent_error_chain':classes}
     result['validation_reason']=gateway.last_validation_error if gateway else ''
+    result['tool_validation_reason']=gateway.last_tool_validation_error if gateway else ''
     return redact(result,gateway.secrets) if gateway else result
 
 

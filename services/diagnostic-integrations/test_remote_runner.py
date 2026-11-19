@@ -177,6 +177,72 @@ class GatewayTest(unittest.TestCase):
         self.assertTrue(result['repaired'] and result['verification_passed'])
         self.assertEqual([body['operation'] for _,body in self.requests],['run','read_file','patch_file','run'])
 
+    def test_model_corrects_invalid_repair_arguments_then_completes_joint_repair(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        turns=[];runtime={}
+        def model(messages,info):
+            index=len(turns);turns.append(index)
+            sequence=[('run_command',{'argv':['inspect']}),('search_project_knowledge',{'query':'collector robot config'}),
+                ('read_file',{'path':'collector-config.json'}),
+                ('run_command',{'argv':['robot-repair','wrong-sha'],'purpose':'repair'}),
+                ('patch_file',{'path':'collector-config.json','expected_sha256':'a'*64,'content':'after'}),
+                ('run_command',{'argv':['robot-repair','--expected-sha256','b'*64],'purpose':'repair'}),
+                ('run_command',{'argv':['check'],'purpose':'verify'})]
+            if index==4:
+                self.assertEqual(runtime['gateway'].last_tool_validation_error,'use_configured_repair_prefix_with_current_sha256')
+                self.assertEqual(runtime['gateway'].mutation,0)
+            if index<len(sequence):
+                name,args=sequence[index];return ModelResponse(parts=[ToolCallPart(name,args)])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'两端已修复并复测',
+                'root_cause':'本轮读取的配置异常','actions':[],'verification':[],'solution':'继续观察','repaired':True})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            value=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','problem':'联合修复',
+                'context':{'operation_mode':'repair','inspect_argv':['inspect'],'verify_argv':['check'],
+                    'repair_argv':['robot-repair','--expected-sha256'],'editable_files':['collector-config.json'],
+                    'require_knowledge_search':True}},runtime))
+        self.assertTrue(value['repaired'] and value['verification_passed'])
+        self.assertEqual(len(turns),8)
+        self.assertEqual(runtime['gateway'].mutation,2)
+        self.assertFalse(any(body.get('argv')==['robot-repair','wrong-sha'] for _,body in self.requests))
+
+    def test_failed_report_exposes_only_fixed_tool_validation_reason(self):
+        gateway=runner.Gateway('http://unused','synthetic',repair_allowed=False)
+        gateway.inspected=True
+        with patch.object(gateway,'rpc') as rpc:
+            with self.assertRaises(runner.ToolValidationError) as error:
+                gateway.run_command(['arbitrary-secret-command'],purpose='inspect')
+        rpc.assert_not_called()
+        value=runner.failed_analysis({'context':{}},{'gateway':gateway},error.exception)
+        self.assertEqual(value['agent_error_code'],'ToolValidationError')
+        self.assertEqual(value['tool_validation_reason'],'repair_not_authorized')
+        self.assertNotIn('arbitrary-secret-command',json.dumps(value))
+
+    def test_model_can_correct_patch_sha_without_dispatching_the_invalid_write(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        turns=[]
+        def model(messages,info):
+            index=len(turns);turns.append(index)
+            sequence=[('run_command',{'argv':['inspect']}),('read_file',{'path':'collector-config.json'}),
+                ('patch_file',{'path':'collector-config.json','expected_sha256':'b'*64,'content':'after'}),
+                ('patch_file',{'path':'collector-config.json','expected_sha256':'a'*64,'content':'after'}),
+                ('run_command',{'argv':['check'],'purpose':'verify'})]
+            if index<len(sequence):
+                name,args=sequence[index];return ModelResponse(parts=[ToolCallPart(name,args)])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'采集机修复已复测','root_cause':'已读取配置异常',
+                'actions':[],'verification':[],'solution':'继续观察','repaired':True})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            value=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','problem':'修复采集机',
+                'context':{'inspect_argv':['inspect'],'verify_argv':['check'],'editable_files':['collector-config.json'],
+                    'repair_argv':['robot-repair']}}))
+        self.assertTrue(value['repaired'])
+        writes=[body for _,body in self.requests if body['operation']=='patch_file']
+        self.assertEqual(len(writes),1)
+        self.assertEqual(writes[0]['expected_sha256'],'a'*64)
+
     def test_failed_mutation_cannot_be_declared_repaired_by_later_check(self):
         self.gateway.run_command(['inspect'], purpose='inspect')
         with patch.object(self.gateway, 'rpc', return_value={'exit_code': 1, 'error': 'failed'}):
