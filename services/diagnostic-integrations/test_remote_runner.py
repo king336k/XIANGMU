@@ -95,6 +95,34 @@ class GatewayTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.gateway.read_file("/config")
 
+    def test_configuration_repair_uses_observed_snapshot_without_model_copying_hash(self):
+        self.gateway.verification_scope='configuration_validation'
+        self.gateway.repair_argv=['daq-local-diagnostics-v1','repair']
+        self.gateway.inspect_argv=['daq-local-diagnostics-v1','inspect']
+        self.responder=lambda body: {'exit_code':1,'stdout':json.dumps({
+            'scope':'configuration_validation','checks':[{'state':'fail'}],
+            'configuration':{'state':'fail','repair_allowed':True,'repair_authority':'verified_device_baseline',
+                             'snapshot_sha256':'a'*64}})} if body.get('argv')==self.gateway.inspect_argv else {'exit_code':0}
+        self.gateway.run_command(self.gateway.inspect_argv)
+        self.gateway.apply_configuration_repair()
+        self.assertEqual(self.requests[-1][1]['argv'],['daq-local-diagnostics-v1','repair','a'*64])
+        self.assertEqual(self.requests[-1][1]['purpose'],'repair')
+
+    def test_configuration_repair_never_guesses_an_unobserved_snapshot(self):
+        self.gateway.verification_scope='configuration_validation'
+        self.gateway.repair_argv=['daq-local-diagnostics-v1','repair']
+        with self.assertRaisesRegex(ValueError,'configuration_snapshot_not_observed'):
+            self.gateway.apply_configuration_repair()
+        self.assertEqual(self.requests,[])
+
+    def test_source_page_registers_only_the_read_file_lines(self):
+        self.gateway.observe_locations({'source':'local_source_snapshot','path':'src/solver.cpp',
+            'content_start_line':42,'content':'actual source\n/never/read.cpp:999\n'})
+        self.assertIn(('src/solver.cpp',42),self.gateway.observed_locations)
+        self.assertIn(('src/solver.cpp',43),self.gateway.observed_locations)
+        self.assertNotIn(('/never/read.cpp',999),self.gateway.observed_locations)
+        self.assertNotIn(('src/solver.cpp',44),self.gateway.observed_locations)
+
     def test_empty_patch_response_is_not_successful_mutation(self):
         self.gateway.run_command(['inspect'])
         self.gateway.read_file('/config')
@@ -693,6 +721,347 @@ class GatewayTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DiagnosticReasoningTest(unittest.TestCase):
+    setUp=GatewayTest.setUp
+    tearDown=GatewayTest.tearDown
+    # Reuse the local HTTP gateway fixture without inheriting the existing cases.
+    def test_configuration_verification_never_proves_business_recovery(self):
+        self.gateway.verification_scope='configuration_validation'
+        self.gateway.run_command(['inspect'])
+        with patch.object(self.gateway,'rpc',return_value={'exit_code':0,'stdout':json.dumps({'configuration':{
+            'repair':{'state':'applied','changed':True}}})}):
+            self.gateway.run_command(['repair'],purpose='repair')
+        self.gateway.run_command(['check'],purpose='verify')
+        self.assertTrue(self.gateway.verification_passed)
+        self.assertFalse(self.gateway.repair_verified)
+        self.assertTrue(self.gateway.configuration_repaired)
+        self.assertIn('配置',' '.join(self.gateway.execution_summary()[1]))
+        self.assertIn('业务',' '.join(self.gateway.execution_summary()[1]))
+
+    def test_limited_verify_mode_does_not_emit_business_verified_outcome(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        for scope in ('configuration_validation','read_only_connectivity','readonly_connectivity'):
+            turns=[]
+            def model(messages,info):
+                index=len(turns);turns.append(index)
+                if index==0:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})])
+                if index==1:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['check'],'purpose':'verify'})])
+                return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'限定检查通过，业务待验收',
+                    'root_cause':'本轮检查未覆盖原业务故障','actions':[],'verification':[],
+                    'solution':'原失败业务操作须单独验收','repaired':False})])
+            with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+                value=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                    'gateway_url':self.gateway.url,'tool_token':'synthetic-token','context':{'inspect_argv':['inspect'],
+                        'verify_argv':['check'],'operation_mode':'verify','verification_scope':scope,'repair_allowed':False}}))
+            self.assertEqual(value['outcome'],'unresolved')
+            self.assertTrue(value['verification_passed'])
+            self.assertFalse(value['business_verified'])
+            self.assertTrue(value['needs_business_verification'])
+            self.assertEqual(value['configuration_verified'],scope=='configuration_validation')
+
+    def test_written_runtime_unverified_receipt_keeps_actual_changes_without_success_claim(self):
+        gateway=runner.Gateway(self.gateway.url,'synthetic-token',inspect_argv=['inspect'],verify_argv=['check'],
+            repair_argv=['repair-config'],verification_scope='configuration_validation')
+        change={'path':'/state/overrides/config.yaml','key':'initial_joint_states.arm[0]',
+            'before':3.3,'after':0.3,'backup':'/state/overrides/config.yaml.backup','target_kind':'collector'}
+        self.responder=lambda body: {'ok':False,'exit_code':1,'stdout':json.dumps({'scope':'configuration_validation',
+            'configuration':{'repair':{'state':'written_runtime_unverified','changed':['initial_joint_states.arm[0]'],
+                'changes':[change]}}})} if body.get('argv',[])[:1]==['repair-config'] else             {'ok':False,'exit_code':1} if body.get('argv')==['check'] else {'exit_code':0}
+        gateway.run_command(['inspect'])
+        gateway.run_command(['repair-config','a'*64],purpose='repair')
+        gateway.run_command(['check'],purpose='verify')
+        self.assertFalse(gateway.repair_verified or gateway.configuration_repaired or gateway.verification_passed)
+        self.assertEqual(gateway.successful_mutation,0)
+        self.assertEqual(gateway.repair_locations[0]['path'],change['path'])
+        self.assertEqual(gateway.repair_locations[0]['backup'],change['backup'])
+        self.assertIn('配置已写入，验证未通过',gateway.execution_summary()[0])
+        result=runner.failed_analysis({'context':{}},{'gateway':gateway},TimeoutError())
+        self.assertEqual(result['repair_locations'][0]['path'],change['path'])
+        with self.assertRaisesRegex(runner.ToolValidationError,'unchanged_repair_already_attempted'):
+            gateway.run_command(['repair-config','a'*64],purpose='repair')
+
+    def test_same_repair_without_changed_current_evidence_is_not_replayed(self):
+        self.gateway.run_command(['inspect'])
+        with patch.object(self.gateway,'rpc',return_value={'exit_code':1}):
+            self.gateway.run_command(['repair'],purpose='repair')
+            self.gateway.run_command(['check'],purpose='verify')
+        self.gateway.run_command(['inspect'])
+        with self.assertRaisesRegex(runner.ToolValidationError,'unchanged_repair_already_attempted'):
+            self.gateway.run_command(['repair'],purpose='repair')
+        self.assertEqual(len([body for _,body in self.requests if body.get('argv')==['repair']]),0)
+        # A different, observed state permits one new attempt; retries remain bounded.
+        with patch.object(self.gateway,'rpc',return_value={'exit_code':0,'stdout':'new service state'}):
+            self.gateway.run_command(['inspect'])
+        self.gateway.run_command(['repair'],purpose='repair')
+        self.assertEqual(self.gateway.mutation,2)
+
+    def test_uploaded_observation_and_configuration_repair_are_separate_from_business(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        turns=[]
+        def respond(body):
+            if body.get('argv')==['repair-config','a'*64]:
+                return {'ok':True,'exit_code':0,'stdout':json.dumps({'changes':[{'path':'/approved/settings.yaml',
+                    'key':'start_pose','before':3.3,'after':0.3,'backup':'/approved/settings.yaml.backup'}]})}
+            return {'ok':True,'exit_code':0,'stdout':'configuration semantic validation passed'}
+        self.responder=respond
+        def model(messages,info):
+            index=len(turns);turns.append(index)
+            sequence=[('get_diagnostic_state',{}),('run_command',{'argv':['inspect']}),
+                ('run_command',{'argv':['repair-config','a'*64],'purpose':'repair'}),
+                ('run_command',{'argv':['check'],'purpose':'verify'})]
+            if index==1:
+                returned=[part.content for message in messages for part in message.parts if getattr(part,'part_kind','')=='tool-return' and getattr(part,'tool_name','')=='get_diagnostic_state']
+                self.assertIn('joint limit violation',json.dumps(returned))
+                self.assertIn('historical',json.dumps(returned))
+            if index<len(sequence):
+                name,args=sequence[index];return ModelResponse(parts=[ToolCallPart(name,args)])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'配置已修复，运动待验收',
+                'root_cause':'上传日志明确目标无效；配置修复回执已返回。','actions':[],'verification':[],
+                'solution':'由获授权现场人员验证原失败操作。','repaired':False,
+                'findings':[{'kind':'observed','statement':'历史日志出现joint limit violation','evidence_refs':['uploaded:0']}],
+                'remaining_gaps':['原失败业务操作尚未复测']})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            value=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','problem':'修复',
+                'context':{'inspect_argv':['inspect'],'verify_argv':['check'],'repair_argv':['repair-config'],
+                    'verification_scope':'configuration_validation','feedback_materials':{'sources':[
+                        {'name':'feedback.json','sha256':'b'*64,'excerpt':'reset goal is invalid: joint limit violation'}]}}}))
+        self.assertFalse(value['repaired'])
+        self.assertTrue(value['configuration_repaired'])
+        self.assertEqual(value['verification_scope'],'configuration_validation')
+        self.assertEqual(value['outcome'],'unresolved')
+        self.assertEqual(value['findings'][0]['evidence_refs'],['uploaded:0'])
+        self.assertEqual(value['remaining_gaps'],['原失败业务操作尚未复测'])
+
+    def test_receipt_scope_restricts_default_context_business_claim(self):
+        self.gateway.run_command(['inspect'])
+        self.gateway.run_command(['repair'],purpose='repair')
+        with patch.object(self.gateway,'rpc',return_value={'exit_code':0,'stdout':json.dumps({'scope':'read_only_connectivity'})}):
+            self.gateway.run_command(['check'],purpose='verify')
+        self.assertFalse(self.gateway.repair_verified)
+        self.assertEqual(self.gateway.verification_scope,'read_only_connectivity')
+
+    def test_configuration_blocked_or_noop_is_not_an_applied_repair(self):
+        for state in ('blocked','not_needed'):
+            gateway=runner.Gateway('http://unused','synthetic',inspect_argv=['inspect'],verify_argv=['check'],
+                verification_scope='configuration_validation')
+            with patch.object(gateway,'rpc',return_value={'exit_code':0}):gateway.run_command(['inspect'])
+            with patch.object(gateway,'rpc',return_value={'exit_code':0,'stdout':json.dumps({'configuration':{
+                'repair':{'state':state,'blocked_reason':'baseline_missing'}}})}):
+                gateway.run_command(['repair'],purpose='repair')
+            with patch.object(gateway,'rpc',return_value={'exit_code':0}):gateway.run_command(['check'],purpose='verify')
+            self.assertFalse(gateway.configuration_repaired)
+            self.assertNotIn('授权修复完成',gateway.execution_summary()[0])
+
+    def test_openai_request_timeout_retries_same_request_without_repeating_tools(self):
+        import httpx
+        calls=[]
+        def response(name,args):
+            return httpx.Response(200,json={'id':'synthetic','object':'chat.completion','created':1,'model':'test',
+                'choices':[{'index':0,'finish_reason':'tool_calls','message':{'role':'assistant','content':None,
+                    'tool_calls':[{'id':'call'+str(len(calls)),'type':'function','function':{'name':name,'arguments':json.dumps(args)}}]}}],
+                'usage':{'prompt_tokens':1,'completion_tokens':1,'total_tokens':2}})
+        async def handle(request):
+            calls.append(json.loads(request.content))
+            sequence=[('run_command',{'argv':['inspect']}),('run_command',{'argv':['repair'],'purpose':'repair'}),
+                ('run_command',{'argv':['check'],'purpose':'verify'})]
+            if len(calls)<=3:return response(*sequence[len(calls)-1])
+            if len(calls)==4:raise httpx.ReadTimeout('synthetic timeout',request=request)
+            return response('final_result',{'summary':'已修复并复测','root_cause':'当前配置异常','actions':[],
+                'verification':[],'solution':'继续观察','repaired':True})
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        with patch.object(runner,'DefaultAsyncHttpxClient',return_value=client):
+            value=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://provider.invalid/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','context':{'inspect_argv':['inspect'],'verify_argv':['check']}}))
+        self.assertTrue(value['repaired'])
+        self.assertEqual(len(calls),5)
+        self.assertEqual(calls[3],calls[4])
+        self.assertEqual([body['argv'] for _,body in self.requests],[['inspect'],['repair'],['check']])
+
+    def test_persistent_provider_timeout_preserves_receipts_without_repair_replay(self):
+        import httpx
+        calls=[];runtime={}
+        async def handle(request):
+            calls.append(json.loads(request.content))
+            if len(calls)<=3:
+                argv=[['inspect'],['repair'],['check']][len(calls)-1]
+                args={'argv':argv,'purpose':'verify' if argv==['check'] else 'repair' if argv==['repair'] else 'inspect'}
+                return httpx.Response(200,json={'id':'synthetic','object':'chat.completion','created':1,'model':'test',
+                    'choices':[{'index':0,'finish_reason':'tool_calls','message':{'role':'assistant','content':None,
+                        'tool_calls':[{'id':str(len(calls)),'type':'function','function':{'name':'run_command','arguments':json.dumps(args)}}]}}],
+                    'usage':{'prompt_tokens':1,'completion_tokens':1,'total_tokens':2}})
+            raise httpx.ReadTimeout('synthetic secret provider body',request=request)
+        payload={'config':{'model':'test','api_key':'synthetic','base_url':'https://provider.invalid/v1'},
+            'gateway_url':self.gateway.url,'tool_token':'synthetic-token','context':{'inspect_argv':['inspect'],'verify_argv':['check']}}
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        with patch.object(runner,'DefaultAsyncHttpxClient',return_value=client):
+            try:asyncio.run(runner.analyze(payload,runtime))
+            except Exception as error:value=runner.failed_analysis(payload,runtime,error)
+        self.assertEqual(len(calls),5)
+        self.assertFalse(value['repaired'])
+        self.assertTrue(value['verification_passed'])
+        self.assertIn('现场取证完成',value['actions'])
+        self.assertEqual(len(self.requests),3)
+        self.assertNotIn('provider body',json.dumps(value))
+
+    def test_provider_authentication_failure_is_not_retried(self):
+        import httpx
+        calls=[]
+        async def handle(request):
+            calls.append(1)
+            return httpx.Response(401,json={'error':{'message':'synthetic provider body','type':'authentication_error'}})
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        with patch.object(runner,'DefaultAsyncHttpxClient',return_value=client):
+            with self.assertRaises(Exception):
+                asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://provider.invalid/v1'},
+                    'gateway_url':self.gateway.url,'tool_token':'synthetic-token','context':{}}))
+        self.assertEqual(len(calls),1)
+        self.assertEqual(len(self.requests),0)
+
+    def test_connectivity_only_report_must_account_for_available_uploaded_fault(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        turns=[]
+        def model(messages,info):
+            index=len(turns);turns.append(index)
+            if index==0:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})])
+            report={'summary':'当前连通，故障待定位','root_cause':'当前配置未取证','actions':[],'verification':[],
+                'solution':'按上传故障检查实际运行输入','repaired':False}
+            if index==2:
+                report['findings']=[{'kind':'observed','statement':'上传证据显示服务调用失败',
+                    'evidence_refs':['uploaded:0']}]
+                report['remaining_gaps']=['故障发生时对应服务与当前进程状态尚未关联']
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,report)])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            value=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','context':{'inspect_argv':['inspect'],
+                    'repair_allowed':False,'feedback_materials':{'sources':[{'excerpt':'service request timed out'}]}}}))
+        self.assertEqual(len(turns),3)
+        self.assertEqual(value['findings'][0]['evidence_refs'],['uploaded:0'])
+
+    def test_different_fault_categories_continue_after_failed_verification(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        for category in ('dependency_environment_mismatch','service_not_ready','storage_mount_not_ready'):
+            state={'config_ready':False,'downstream_ready':False};turns=[]
+            self.requests.clear()
+            def digest():return hashlib.sha256(json.dumps(state,sort_keys=True).encode()).hexdigest()
+            def respond(body):
+                if body['operation']!='run':return {'results':[]}
+                argv=body['argv']
+                if argv==['inspect']:
+                    return {'exit_code':0,'stdout':json.dumps({'state':state,'sha256':digest(),'failure':category})}
+                if argv[:1]==['repair-allowed']:
+                    self.assertEqual(argv[-1],digest())
+                    key='config_ready' if not state['config_ready'] else 'downstream_ready'
+                    state[key]=True
+                    return {'exit_code':0,'stdout':json.dumps({'changes':[{'path':'/approved/settings.json',
+                        'key':key,'before':False,'after':True}]})}
+                unresolved=not all(state.values())
+                return {'exit_code':1 if unresolved else 0,'stdout':json.dumps({'remaining_fault':category if unresolved else None})}
+            self.responder=respond
+            def model(messages,info):
+                index=len(turns);turns.append(index)
+                sequence=[('run_command',{'argv':['inspect']}),
+                    ('run_command',{'argv':['repair-allowed',digest()],'purpose':'repair'}),
+                    ('run_command',{'argv':['check'],'purpose':'verify'}),
+                    ('run_command',{'argv':['inspect']}),
+                    ('run_command',{'argv':['repair-allowed',digest()],'purpose':'repair'}),
+                    ('run_command',{'argv':['check'],'purpose':'verify'})]
+                if index<len(sequence):
+                    name,args=sequence[index];return ModelResponse(parts=[ToolCallPart(name,args)])
+                return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'两项故障均通过最终验收',
+                    'root_cause':category+'与配置状态分别异常','actions':[],'verification':[],
+                    'solution':'保留本轮结果','repaired':True})])
+            with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+                value=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                    'gateway_url':self.gateway.url,'tool_token':'synthetic-token','context':{'inspect_argv':['inspect'],
+                        'verify_argv':['check'],'repair_argv':['repair-allowed']}}))
+            self.assertTrue(value['repaired'])
+            self.assertEqual(state,{'config_ready':True,'downstream_ready':True})
+            self.assertEqual(len(self.requests),6)
+            self.assertIn(category,value['root_cause'])
+
+    def test_negative_structured_inspection_is_valid_fault_evidence_before_repair(self):
+        gateway=runner.Gateway(self.gateway.url,'synthetic-token',inspect_argv=['inspect'],verify_argv=['check'],
+            repair_argv=['repair-config'])
+        self.responder=lambda body: {'exit_code':1,'ok':False,'stdout':json.dumps({'scope':'configuration_validation',
+            'checks':[{'name':'configuration','state':'fail'}],'configuration':{'state':'fail','snapshot_sha256':'a'*64}})} if body.get('argv')==['inspect'] else {'exit_code':0}
+        result=gateway.run_command(['inspect'])
+        self.assertTrue(gateway.inspected)
+        self.assertFalse(gateway.verification_passed)
+        self.assertEqual(result['exit_code'],1)
+        gateway.run_command(['repair-config','a'*64],purpose='repair')
+        self.assertEqual(len(self.requests),2)
+
+    def test_report_cannot_promote_prediction_or_unknown_source_to_observed_fact(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        for invalid in ({'kind':'observed','statement':'依赖缺失','evidence_refs':[]},
+                        {'kind':'observed','statement':'服务已恢复','evidence_refs':['tool:999']}):
+            turns=[]
+            def model(messages,info):
+                index=len(turns);turns.append(index)
+                if index==0:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})])
+                finding=invalid if index==1 else {'kind':'predicted','statement':'依赖状态需要当前环境验证','evidence_refs':[]}
+                return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'当前证据不足',
+                    'root_cause':'尚不能证实依赖或服务故障','actions':[],'verification':[],
+                    'solution':'补充该进程实际解释器及服务失败日志','repaired':False,'findings':[finding]})])
+            with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+                value=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                    'gateway_url':self.gateway.url,'tool_token':'synthetic-token','context':{'inspect_argv':['inspect'],'repair_allowed':False}}))
+            self.assertEqual(len(turns),3)
+            self.assertEqual(value['findings'][0]['kind'],'predicted')
+
+    def test_timeout_retry_is_once_per_task_and_obeys_original_deadline(self):
+        from pydantic_ai.models.function import FunctionModel
+        calls=[]
+        def model(messages,info):
+            calls.append(1)
+            raise runner.ModelTimeoutError('synthetic','provider detail')
+        wrapper=runner.TimeoutRetryModel(FunctionModel(model),runner.time.monotonic()+10)
+        from pydantic_ai.models import ModelRequestParameters
+        for _ in range(2):
+            with self.assertRaises(runner.ModelTimeoutError):
+                asyncio.run(wrapper.request([],None,ModelRequestParameters()))
+        self.assertEqual(len(calls),3)  # First request retries once; next request never retries again.
+        expired=runner.TimeoutRetryModel(FunctionModel(model),runner.time.monotonic()-1)
+        with self.assertRaises(TimeoutError):asyncio.run(expired.request([],None,ModelRequestParameters()))
+        self.assertEqual(len(calls),3)
+
+    def test_invalid_configuration_does_not_authorize_a_release_default_repair(self):
+        self.responder=lambda body: {'exit_code':1,'stdout':json.dumps({'scope':'configuration_validation',
+            'checks':[{'name':'configuration','state':'fail'}],
+            'configuration':{'state':'fail','repair_allowed':False,'baseline':{'state':'candidate'},
+                'capabilities':{'supported_repairs':[],'service_dependency_connection_repair':False},
+                'blocked_reason':'device_calibration_provenance_required'}})}
+        self.gateway.run_command(['inspect'])
+        with self.assertRaisesRegex(runner.ToolValidationError,'configuration_repair_plan_not_supported'):
+            self.gateway.run_command(['repair'],purpose='repair')
+        capability=self.gateway.capability_state()
+        self.assertFalse(capability['configuration']['repair_allowed'])
+        self.assertIn('device_calibration_provenance_required',json.dumps(capability))
+        self.assertEqual(len(self.requests),1)
+
+    def test_diagnose_mode_blocks_mutation_even_if_context_repair_flag_is_true(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        turns=[]
+        def model(messages,info):
+            index=len(turns);turns.append(index)
+            if index==0:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['inspect']})])
+            if index==1:return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['repair'],'purpose':'repair'})])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'只读诊断','root_cause':'待查',
+                'actions':[],'verification':[],'solution':'需授权','repaired':False})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','context':{'inspect_argv':['inspect'],
+                    'operation_mode':'diagnose','repair_allowed':True}}))
+        self.assertFalse(any(body.get('argv')==['repair'] for _,body in self.requests))
 
 class LocationReceiptTest(unittest.TestCase):
     def test_failed_patch_receipt_cannot_add_locations_or_ip_as_line(self):

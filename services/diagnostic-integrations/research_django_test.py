@@ -1,5 +1,6 @@
 """Run with ProjectServer's Django runtime; no database or network mutations."""
 import os
+import json
 os.environ.setdefault('DJANGO_SETTINGS_MODULE','plane.settings.test')
 import django
 django.setup()
@@ -31,6 +32,17 @@ class ResearchViewTest(unittest.TestCase):
             payload={'kind':'run','argv':['fixed-inspect']},result={'ok':False,'exit_code':1})]
         with patch('django.core.cache.cache',self.cache),self.assertRaises(PermissionDenied):
             research._view()().post(self.request)
+
+    def test_valid_negative_configuration_inspection_can_research_the_fault(self):
+        receipt={'ok':False,'exit_code':1,'stdout':json.dumps({'scope':'configuration_validation',
+            'checks':[{'name':'configuration','state':'fail'}],
+            'configuration':{'state':'fail','findings':[{'code':'invalid_field'}]}})}
+        self.run.remotecommand_set.filter.return_value.__getitem__.return_value=[SimpleNamespace(
+            payload={'kind':'run','argv':['fixed-inspect']},result=receipt)]
+        with patch('django.core.cache.cache',self.cache),patch.object(research,'read_source',return_value={'content':'reference'})as fetch:
+            response=research._view()().post(self.request)
+        self.assertEqual(response.data['content'],'reference')
+        fetch.assert_called_once()
 
     def test_kb_error_does_not_permanently_block_approved_research(self):
         with patch('django.core.cache.cache',self.cache),patch.object(research,'knowledge',side_effect=RuntimeError('synthetic')):
