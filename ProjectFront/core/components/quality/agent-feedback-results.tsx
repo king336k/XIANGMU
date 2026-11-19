@@ -5,9 +5,19 @@ import { useState } from "react";
 import { renderNumericDateTime } from "@plane/utils";
 import { qualityApi, errorMessage } from "./api";
 import { AgentFeedbackActions } from "./agent-feedback-actions";
+import { AgentReportText } from "./agent-report-text";
+import { ConfigurationChangeDiff } from "./configuration-change-diff";
 import { reportSections } from "./report-summary";
+import type { RemoteProcess } from "./types";
 
-type Reply = { id: string; visibility: string; content: string; created_at: string };
+type Change = NonNullable<NonNullable<RemoteProcess["command"]>["changes"]>[number];
+type Reply = {
+  id: string;
+  visibility: string;
+  content: string;
+  created_at: string;
+  repair_changes?: (Change & { target: string })[];
+};
 const prefix = "Agent 远程处理：";
 
 export function AgentFeedbackResults({
@@ -67,6 +77,10 @@ export function AgentFeedbackResults({
           const [status] = reply.content.slice(prefix.length).split("\n");
           const repaired = status.trim() === "已修复";
           const verified = status.trim() === "验证通过";
+          const changesByTarget = new Map<string, Change[]>();
+          for (const change of reply.repair_changes || []) {
+            changesByTarget.set(change.target, [...(changesByTarget.get(change.target) || []), change]);
+          }
           return (
             <div key={reply.id} className="rounded border border-subtle px-3 py-2">
               <button
@@ -89,18 +103,26 @@ export function AgentFeedbackResults({
               {expandedId === reply.id && (
                 <div className="mt-3 space-y-3">
                   <dl className="space-y-2 text-13">
-                    {reportSections(reply.content).map((section) => (
-                      <div key={section.label} className="grid gap-1 sm:grid-cols-[3rem_minmax(0,1fr)] sm:gap-3">
-                        <dt className="text-12 text-secondary">{section.label}</dt>
-                        <dd className="leading-6 break-words whitespace-pre-wrap">{section.text}</dd>
-                      </div>
-                    ))}
+                    {reportSections(reply.content)
+                      .filter((section) => !changesByTarget.size || section.label !== "位置")
+                      .map((section) => (
+                        <div key={section.label} className="grid gap-1 sm:grid-cols-[3rem_minmax(0,1fr)] sm:gap-3">
+                          <dt className="text-12 text-secondary">{section.label}</dt>
+                          <dd className="leading-6 break-words whitespace-pre-wrap">{section.text}</dd>
+                        </div>
+                      ))}
                   </dl>
+                  {[...changesByTarget].map(([target, changes]) => (
+                    <section key={target} className="space-y-2">
+                      <h4 className="text-12 font-medium">{target}</h4>
+                      <ConfigurationChangeDiff command={{ changes }} />
+                    </section>
+                  ))}
                   <details className="border-t border-subtle pt-2">
                     <summary className="cursor-pointer text-12 text-secondary">详细证据与处理过程</summary>
-                    <pre className="font-sans mt-2 max-h-96 overflow-auto text-12 leading-6 break-words whitespace-pre-wrap">
-                      {reply.content}
-                    </pre>
+                    <div className="mt-2 max-h-96 overflow-auto">
+                      <AgentReportText content={reply.content} />
+                    </div>
                   </details>
                 </div>
               )}

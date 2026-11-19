@@ -1,4 +1,6 @@
 import { reportSummary } from "./report-summary-fixture.js";
+import { ConfigurationChangeDiff } from "./configuration-diff-fixture.js";
+import { AgentReportText } from "./agent-report-text-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -16,9 +18,12 @@ function render(data, error, expanded = null) {
   new Function(
     "require",
     "exports",
-    ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } })
-      .outputText
+    ts.transpileModule(source, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText
   )((name) => {
+    if (name === "./configuration-change-diff") return { ConfigurationChangeDiff };
+    if (name === "./agent-report-text") return { AgentReportText };
     if (name === "react") return { ...React, useState: () => [expanded, () => {}] };
     if (name === "./agent-feedback-actions") return { AgentFeedbackActions: () => null };
     if (name === "swr") return { default: () => ({ data, error, mutate() {} }) };
@@ -125,4 +130,72 @@ test("修改位置原样保留实际主机完整路径行号键和值变化", ()
     /robot177 · \/home\/operator\/workspace\/runtime\/config\/collector.json:42 · telemetry_enabled false→true/
   );
   assert.ok(html.indexOf("collector.json:42") < html.indexOf("详细证据与处理过程"));
+});
+
+test("Agent现场处理只使用服务器结构化变更生成按目标分组diff，位置原文仍在完整证据", () => {
+  const html = render([
+    {
+      id: "repair",
+      visibility: "public",
+      content: "Agent 远程处理：已修复\n结论：端口已修复\n修改位置：原始位置文字",
+      created_at: "2026-11-19",
+      repair_changes: [
+        {
+          target: "机器人：engram@10.0.0.177",
+          path: "/home/engram/config.json",
+          key: "telemetry_enabled",
+          before: false,
+          after: true,
+          before_line: 2,
+          after_line: 3,
+        },
+        {
+          target: "采集电脑：engram-test@10.0.0.195",
+          path: "/home/engram-test/config.json",
+          key: "robot_port",
+          before: 18778,
+          after: 18777,
+          before_line: 4,
+          after_line: 4,
+        },
+        {
+          target: "机器人：engram@10.0.0.177",
+          path: "/home/engram/config.json",
+          key: "accept_commands",
+          before: false,
+          after: true,
+          line: 5,
+        },
+      ],
+    },
+  ]);
+  assert.match(html, /机器人.*engram@10\.0\.0\.177/);
+  assert.match(html, /采集电脑.*engram-test@10\.0\.0\.195/);
+  assert.equal((html.match(/机器人：engram@10\.0\.0\.177/g) || []).length, 1);
+  assert.equal((html.match(/aria-label="配置差异"/g) || []).length, 2);
+  assert.match(html, /aria-label="配置差异"/);
+  assert.match(html, /&quot;robot_port&quot;: 18778/);
+  assert.match(html, /&quot;robot_port&quot;: 18777/);
+  assert.ok(html.indexOf('aria-label="配置差异"') < html.indexOf("详细证据与处理过程"));
+  assert.ok(html.indexOf("原始位置文字") > html.indexOf("详细证据与处理过程"));
+  assert.match(html, /<strong[^>]*>结论：<\/strong>/);
+  assert.match(html, /− 修改前 · 第2行/);
+  assert.match(html, /\+ 修改后 · 第3行/);
+  assert.match(html, /回执位置：第5行（未区分修改前后）/);
+  assert.equal((html.match(/<dt[^>]*>位置<\/dt>/g) || []).length, 0);
+});
+
+test("空结构化变更保留旧结果的位置原文且不生成diff", () => {
+  const html = render([
+    {
+      id: "legacy",
+      visibility: "public",
+      content: "Agent 远程处理：已修复\n修改位置：机器人配置第3行",
+      created_at: "2026-11-19",
+      repair_changes: [],
+    },
+  ]);
+  assert.match(html, /<dt[^>]*>位置<\/dt>/);
+  assert.doesNotMatch(html, /aria-label="配置差异"/);
+  assert.ok(html.indexOf("机器人配置第3行") < html.indexOf("详细证据与处理过程"));
 });
