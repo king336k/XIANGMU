@@ -764,3 +764,26 @@ def test_daq_report_gets_triage_owner_and_manager_todo_before_diagnosis(reportin
     )
     assert todo.status_code == 200, todo.content
     assert any(row["id"] == str(defect.id) for row in todo.data["results"])
+
+
+def test_daq_public_reply_uses_same_observed_evidence_as_platform(reporting):
+    from datetime import timedelta
+    from plane.quality.models import DefectComment,FieldAgent
+    from plane.quality.remote_models import RemoteWorkstation,RemoteAgentRun,RemoteCommand
+    from plane.quality.sources import CommentSerializer
+    destination,user,payload,_=reporting
+    created=call('/api/quality-auth/daq-reports/',{**payload,'hubProjectId':str(destination.id)},'POST')
+    defect=Defect.objects.get(pk=created.data['issueId'])
+    comment=DefectComment.objects.create(project=destination,defect=defect,created_by=user,visibility='public',content='Agent 远程处理：已修复\n结论：已安装并复测')
+    agent=FieldAgent.objects.create(project=destination,created_by=user,owner=user,name='actual source')
+    station=RemoteWorkstation.objects.create(agent=agent,hostname='test-host',username='collector',last_seen_at=timezone.now(),
+        credential_expires_at=timezone.now()+timedelta(minutes=5))
+    run=RemoteAgentRun.objects.create(workstation=station,defect=defect,owner=user,comment=comment,expires_at=timezone.now()+timedelta(minutes=5),result={'repair_locations':[{'target':'采集电脑','path':'/approved/config.json','key':'enabled','before':False,'after':True,'before_line':2,'line':2}]})
+    RemoteCommand.objects.create(workstation=station,run=run,payload={'kind':'run','argv':['pip','check']},status='done',result={'ok':True,'exit_code':0,'stdout':'No broken requirements found.'},expires_at=run.expires_at)
+    expected=CommentSerializer(comment).data
+    response=call(f'/api/quality-auth/daq-reports/{defect.id}/')
+    assert response.status_code==200,response.data
+    reply=response.data['comments'][0]
+    assert reply['repair_changes']==expected['repair_changes']
+    assert reply['command_operations']==expected['command_operations']
+    assert call(f'/api/quality-auth/daq-reports/{defect.id}/',actor=99).status_code in {403,404}

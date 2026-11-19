@@ -279,6 +279,17 @@ class DaqOwnReportDetail(ReportingView):
         from .diagnostics import expire_stale
 
         expire_stale(defect)
+        from .sources import CommentSerializer,with_agent_evidence
+        comments=with_agent_evidence(defect.comments.filter(project_id=defect.project_id,visibility="public").order_by("created_at","id"))
+        public_comments=[]
+        context={}
+        for comment in comments:
+            evidence=CommentSerializer(comment,context=context).data
+            reply={"id":str(comment.id),"actor":(comment.created_by.display_name or comment.created_by.username) if comment.created_by_id else "系统",
+                "content":comment.content,"created_at":comment.created_at}
+            if evidence['repair_changes'] or evidence['command_operations']:
+                reply.update(repair_changes=evidence['repair_changes'],command_operations=evidence['command_operations'])
+            public_comments.append(reply)
         return Response(
             {
                 "defect": {
@@ -294,19 +305,7 @@ class DaqOwnReportDetail(ReportingView):
                 },
                 "source": receipt(link, self),
                 "timeline": report_timeline(defect),
-                "comments": [
-                    {
-                        "id": str(comment.id),
-                        "actor": (comment.created_by.display_name or comment.created_by.username)
-                        if comment.created_by_id
-                        else "系统",
-                        "content": comment.content,
-                        "created_at": comment.created_at,
-                    }
-                    for comment in defect.comments.filter(project_id=defect.project_id, visibility="public")
-                    .select_related("created_by")
-                    .order_by("created_at", "id")
-                ],
+                "comments": public_comments,
             }
         )
 

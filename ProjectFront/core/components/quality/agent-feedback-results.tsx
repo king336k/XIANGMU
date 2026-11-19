@@ -111,16 +111,18 @@ export function AgentFeedbackResults({
                       .filter((section) => !changesByTarget.size || section.label !== "位置")
                       .map((section) => (
                         <div key={section.label} className="grid gap-1 sm:grid-cols-[3rem_minmax(0,1fr)] sm:gap-3">
-                          <dt className="text-12 text-secondary">{section.label}</dt>
+                          <dt className="text-12 font-semibold text-secondary">{section.label}</dt>
                           <dd className="leading-6 break-words whitespace-pre-wrap">{section.text}</dd>
                         </div>
                       ))}
                   </dl>
                   {[...changesByTarget].map(([target, changes]) => (
-                    <section key={target} className="space-y-2">
-                      <h4 className="text-12 font-medium">{target}</h4>
-                      <ConfigurationChangeDiff command={{ changes }} />
-                    </section>
+                    <details key={target} className="space-y-2 rounded border border-subtle p-3">
+                      <summary className="cursor-pointer text-12 font-medium">{target}</summary>
+                      <div className="mt-2">
+                        <ConfigurationChangeDiff command={{ changes }} />
+                      </div>
+                    </details>
                   ))}
                   {reply.command_operations?.map((command) => {
                     const key = JSON.stringify(command);

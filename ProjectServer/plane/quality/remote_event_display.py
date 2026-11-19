@@ -90,7 +90,10 @@ def safe_output(value,depth=0):
                 lines.append('[含凭据的命令输出已隐藏]')
             else:lines.append(line)
         cleaned='\n'.join(lines)
-    return redact(cleaned)[-8192:]
+    cleaned=redact(cleaned)
+    try:cleaned=json.dumps(json.loads(cleaned),ensure_ascii=False,indent=2)
+    except (ValueError,TypeError,RecursionError):pass
+    return cleaned[-8192:]
 
 
 def execution_steps(result):

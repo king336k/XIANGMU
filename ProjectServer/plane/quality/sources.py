@@ -175,6 +175,9 @@ class CommentSerializer(serializers.ModelSerializer):
                 command_target=target
                 receipt=receipts.get(row.id,{})
                 receipt_changes=receipt.get('changes',[])
+                if stage=='repair' and changes and isinstance(receipt_changes,list) and any(
+                    isinstance(item,dict) and any(item.get('path')==shown.get('path') and item.get('key')==shown.get('key')
+                        for shown in changes) for item in receipt_changes):continue
                 actual_targets={(item.get('target_kind'),item.get('target_username'),item.get('target_ip'))
                     for item in (receipt_changes if isinstance(receipt_changes,list) else []) if isinstance(item,dict)
                     and item.get('target_kind') in {'robot','collector'}
@@ -199,25 +202,28 @@ class CommentSerializer(serializers.ModelSerializer):
         fields = ["id", "content", "visibility", "actor", "created_at", "repair_changes", "command_operations"]
 
 
+def with_agent_evidence(comments):
+    from django.db.models import Prefetch,F
+    from django.db.models.functions import JSONObject,Substr
+    from django.db.models.fields.json import KeyTextTransform
+    from .remote_models import RemoteCommand
+    commands=RemoteCommand.objects.only('id','run_id','created_at','status').annotate(
+        display_payload=JSONObject(kind=F('payload__kind'),argv=F('payload__argv')),
+        display_result=JSONObject(ok=F('result__ok'),exit_code=F('result__exit_code'),
+            timed_out=F('result__timed_out'),changes=F('result__changes'),
+            stdout=Substr(KeyTextTransform('stdout','result'),1,65536),stderr=Substr(KeyTextTransform('stderr','result'),1,65536))
+    ).order_by('created_at','id')[:32]
+    return comments.select_related("created_by", "remoteagentrun__workstation", "remoteagentrun__defect").prefetch_related(
+        Prefetch("remoteagentrun__remotecommand_set",queryset=commands,to_attr="display_commands"))
+
+
 class DefectCollaboration(QualityView):
     def get(self, request, pk, **kwargs):
         defect = self.obj(Defect, pk)
         from .collaboration_admin import internal_access
 
         # Rich discussions have their own tab; retain only legacy notes/public replies in operation history.
-        from django.db.models import Prefetch,F
-        from django.db.models.functions import JSONObject,Substr
-        from django.db.models.fields.json import KeyTextTransform
-        from .remote_models import RemoteCommand
-        commands=RemoteCommand.objects.only('id','run_id','created_at','status').annotate(
-            display_payload=JSONObject(kind=F('payload__kind'),argv=F('payload__argv')),
-            display_result=JSONObject(ok=F('result__ok'),exit_code=F('result__exit_code'),
-                timed_out=F('result__timed_out'),changes=F('result__changes'),
-                stdout=Substr(KeyTextTransform('stdout','result'),1,65536),stderr=Substr(KeyTextTransform('stderr','result'),1,65536))
-        ).order_by('created_at','id')[:32]
-        comments = defect.comments.filter(request_id__isnull=True).select_related(
-            "created_by", "remoteagentrun__workstation", "remoteagentrun__defect"
-        ).prefetch_related(Prefetch('remoteagentrun__remotecommand_set',queryset=commands,to_attr='display_commands'))
+        comments = with_agent_evidence(defect.comments.filter(request_id__isnull=True))
         if not internal_access(self.project_id, request.user, self.workspace_slug):
             comments = comments.filter(visibility="public")
         return self.listing(comments, CommentSerializer)
