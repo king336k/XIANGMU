@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import unittest
 import asyncio
 import io
+import hashlib
 from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -18,6 +19,8 @@ SPEC.loader.exec_module(runner)
 class GatewayTest(unittest.TestCase):
     def setUp(self):
         self.requests = []
+        self.responder = None
+        fixture = self
         requests = self.requests
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
@@ -32,6 +35,8 @@ class GatewayTest(unittest.TestCase):
                     response={'sources':[{'id':'rai','kind':'github'}]}
                 elif body['operation']=='read_source':
                     response={'source_id':'rai','content':'official reference','revision':'a'*40}
+                if fixture.responder is not None:
+                    response=fixture.responder(body)
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(json.dumps(response).encode())
@@ -298,6 +303,108 @@ class GatewayTest(unittest.TestCase):
                 "gateway_url": self.gateway.url, "tool_token": "synthetic-token", "problem": "synthetic", "context": {'verify_argv':['check-config']}}))
         self.assertTrue(result["repaired"])
         self.assertEqual(len(self.requests), 3)
+
+    def test_one_agent_repairs_two_faults_and_requires_the_same_round_final_check(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        state={'telemetry_enabled':False,'accept_commands':False}
+        observed=[];turns=[];runtime={}
+        def digest():return hashlib.sha256(json.dumps(state,sort_keys=True).encode()).hexdigest()
+        def respond(body):
+            if body['operation']=='knowledge':
+                return {'source':'project_knowledge','results':[{'title':'连接与指令配置核查','content':'两项均需就绪后复测。'}],'case_history':[]}
+            argv=body['argv']
+            if argv==['inspect-multi']:
+                return {'ok':True,'exit_code':0,'stdout':json.dumps({'config':state,'config_sha256':digest()})}
+            if argv[:2]==['repair-multi','--expected-sha256']:
+                self.assertEqual(argv[2],digest())
+                key=next(key for key,value in state.items() if value is False)
+                state[key]=True
+                observed.append('repair:'+key)
+                return {'ok':True,'exit_code':0,'stdout':json.dumps({'config_sha256':digest(),'changes':[{'path':'/robot/config.json',
+                    'key':key,'line':2 if key=='telemetry_enabled' else 3,'before':False,'after':True}]})}
+            self.assertEqual(argv,['verify-multi'])
+            unresolved=[key for key,value in state.items() if value is False]
+            observed.append('verify:'+('failed' if unresolved else 'passed'))
+            return {'ok':not unresolved,'exit_code':1 if unresolved else 0,'stdout':json.dumps({'unresolved':unresolved,'config_sha256':digest()})}
+        self.responder=respond
+        def model(messages,info):
+            index=len(turns);turns.append(index)
+            known_sha=''
+            for message in messages:
+                for part in message.parts:
+                    if getattr(part,'part_kind','')=='tool-return' and isinstance(part.content,dict):
+                        try:receipt=json.loads(part.content.get('stdout','{}'))
+                        except (ValueError,TypeError):continue
+                        if isinstance(receipt,dict) and isinstance(receipt.get('config_sha256'),str):
+                            known_sha=receipt['config_sha256']
+            sequence=[('run_command',{'argv':['inspect-multi']}),
+                ('search_project_knowledge',{'query':'连接与指令配置'}),
+                ('run_command',{'argv':['repair-multi','--expected-sha256',known_sha],'purpose':'repair'}),
+                ('run_command',{'argv':['verify-multi'],'purpose':'verify'})]
+            if index<len(sequence):
+                name,args=sequence[index];return ModelResponse(parts=[ToolCallPart(name,args)])
+            if index==4:
+                self.assertFalse(runtime['gateway'].repair_verified)
+                return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'第一项已恢复',
+                    'root_cause':'仍有指令配置未就绪','actions':[],'verification':[],'solution':'继续处理剩余项','repaired':True})])
+            if index==5:
+                self.assertEqual(runtime['gateway'].last_validation_error,'repair_not_verified')
+                return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['repair-multi','--expected-sha256',known_sha],'purpose':'repair'})])
+            if index==6:
+                self.assertFalse(runtime['gateway'].verification_passed)
+                return ModelResponse(parts=[ToolCallPart('run_command',{'argv':['verify-multi'],'purpose':'verify'})])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'两项配置均恢复并通过本轮最终复测',
+                'root_cause':'遥测与指令配置分别未启用','actions':[],'verification':[],'solution':'无需额外处理','repaired':True})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','problem':'整套诊断与修复',
+                'context':{'operation_mode':'repair','inspect_argv':['inspect-multi'],'verify_argv':['verify-multi'],
+                    'repair_argv':['repair-multi','--expected-sha256'],'require_knowledge_search':True}},runtime))
+        self.assertEqual(observed,['repair:telemetry_enabled','verify:failed','repair:accept_commands','verify:passed'])
+        self.assertEqual([body['operation'] for _,body in self.requests],['run','knowledge','run','run','run','run'])
+        self.assertEqual(len(turns),8)
+        self.assertTrue(result['repaired'] and result['verification_passed'])
+        self.assertEqual(result['outcome'],'repaired')
+        self.assertEqual([row['key'] for row in result['repair_locations']],['telemetry_enabled','accept_commands'])
+
+    def test_partial_multi_fault_repair_remains_unresolved_and_reports_remaining_fault(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        state={'telemetry_enabled':False,'accept_commands':False};turns=[]
+        def respond(body):
+            if body['operation']=='knowledge':return {'results':[],'case_history':[]}
+            argv=body['argv']
+            if argv==['inspect-partial']:
+                return {'ok':True,'exit_code':0,'stdout':json.dumps({'config':state})}
+            if argv[:1]==['repair-first']:
+                state['telemetry_enabled']=True
+                return {'ok':True,'exit_code':0,'stdout':'{"changes":[]}'}
+            self.assertEqual(argv,['verify-partial'])
+            return {'ok':False,'exit_code':1,'stdout':'{"unresolved":["accept_commands"]}'}
+        self.responder=respond
+        def model(messages,info):
+            index=len(turns);turns.append(index)
+            sequence=[('run_command',{'argv':['inspect-partial']}),('search_project_knowledge',{'query':'telemetry commands'}),
+                ('run_command',{'argv':['repair-first','a'*64],'purpose':'repair'}),
+                ('run_command',{'argv':['verify-partial'],'purpose':'verify'})]
+            if index<len(sequence):
+                name,args=sequence[index];return ModelResponse(parts=[ToolCallPart(name,args)])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'遥测项已处理，整体仍未恢复',
+                'root_cause':'accept_commands 尚未就绪；遥测项已处理','actions':[],
+                'verification':[],'solution':'accept_commands 需要现场授权后处理，再执行固定复测。','repaired':False})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','problem':'处理两项异常',
+                'context':{'operation_mode':'repair','inspect_argv':['inspect-partial'],'verify_argv':['verify-partial'],
+                    'repair_argv':['repair-first'],'require_knowledge_search':True}}))
+        self.assertEqual(state,{'telemetry_enabled':True,'accept_commands':False})
+        self.assertFalse(result['repaired'] or result['verification_passed'])
+        self.assertEqual(result['outcome'],'unresolved')
+        self.assertIn('accept_commands',result['root_cause'])
+        self.assertIn('现场授权',result['solution'])
+        self.assertIn('失败',' '.join(result['verification']))
+        self.assertEqual(len(turns),5)
 
     def test_holmes_subprocess_receives_secrets_only_via_stdin(self):
         from pydantic_ai.models.function import FunctionModel

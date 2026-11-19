@@ -291,6 +291,9 @@ run_command 的 purpose 必须如实标为 inspect/repair/verify。任何可能�
 context 由服务端设备配置提供时，其中 inspect_argv、verify_argv 是预先批准的固定入口，必须原样优先调用；不要替换为未授权shell或猜测其他路径。
 context.repair_allowed=false 时只读诊断。repair_scope 限定修复对象；只能更改该范围，跨主机入口中的本地路径不代表允许修改本机。
 context.operation_mode=diagnose 时只重新取证并诊断；=verify 时必须执行固定 verify_argv 重新验证，两种模式禁止修改配置或服务；=repair 时才允许在授权范围内修复。
+repair 是同一轮连续的诊断与修复：现场取证→知识检索→有证据且获授权的修复→固定复测；复测发现另一项故障时，在原任务剩余预算内继续取证和修复，再执行最终固定复测，不要求用户另开修复任务。
+多项故障不能以第一项修好认定整轮恢复；中途固定复测失败时repaired=false。仅所有本轮修复之后的最新固定复测通过才可声明修复，且结论只限该检查实际覆盖范围。
+剩余故障不在授权范围、需要现场处理或预算不足时停止修改，root_cause和solution明确已处理项、未解决项、缺少证据及后续复测条件；不得反复重放同一无变化修复或编造其余项目已恢复。
 context.feedback 是关联原缺陷的标题/描述/编号，应结合它定位具体问题；本轮按钮problem可能只是泛化操作说明，不能取代原问题。
 正文设备称呼统一采用context.collector_identity/robot_identity的“采集电脑（用户名@IP）”“机器人（用户名@IP）”，有端口时写“机器人（用户名@IP:端口）”；不使用195/177简称或主机名当用户名，缺失身份先取证，不编造。
 报告区分已证实根因、假设、修复操作和待验证。只记录真实操作；只有真实修改且对应回归通过才 repaired=true。
