@@ -113,8 +113,12 @@ def daq_binding(defect):
     except (ValueError,TypeError):return {'kind':'daq','state':'conflict','device_id':None,'source_instance':source},None
     station=RemoteWorkstation.objects.select_related('agent__project__workspace').filter(
         pk=device,agent__project_id=defect.project_id).first()
-    state='missing' if station is None else 'conflict' if station.agent.source_instance and station.agent.source_instance!=source else 'matched'
-    return {'kind':'daq','state':state,'device_id':device,'source_instance':source},station
+    from .daq_execution_binding import source_matches
+    accepted_source=station is not None and (not station.agent.source_instance or source_matches(station,accepted[0]))
+    state='missing' if station is None else 'matched' if accepted_source else 'conflict'
+    binding={'kind':'daq','state':state,'device_id':device,'source_instance':source}
+    if state=='matched' and station.agent.source_instance and station.agent.source_instance!=source:binding['execution_scope']='verify_only'
+    return binding,station
 
 
 def defect_agent_availability(defect):
@@ -128,6 +132,7 @@ def defect_agent_availability(defect):
 
 def feedback_for(station, defect_id=None):
     from .daq_incidents import signed_record
+    from .daq_execution_binding import source_matches
     from .models import SourceLink, DefectEvent
 
     links = SourceLink.objects.filter(
@@ -143,7 +148,7 @@ def feedback_for(station, defect_id=None):
         record=signed_record(link)
         if (record and record.get('authorityMode')=='report_only'
                 and record.get('payload',{}).get('device')==str(station.id)
-                and (not station.agent.source_instance or station.agent.source_instance==link.source_instance)):
+                and (not station.agent.source_instance or source_matches(station,link))):
             verified.append(link.defect_id)
     rows=Defect.objects.filter(project_id=station.agent.project_id)
     if defect_id:rows=rows.filter(pk=defect_id)
@@ -733,6 +738,9 @@ class RemoteRuns(BaseAPIView):
         defect=Defect.objects.select_for_update().get(pk=defect.pk)
         problem = serializers.CharField(max_length=8000).run_validation(request.data.get("problem"))
         mode = serializers.ChoiceField(choices=["diagnose", "repair", "verify"], default="repair").run_validation(request.data.get("mode", "repair"))
+        binding,_=daq_binding(defect)
+        if binding.get('execution_scope')=='verify_only' and mode!='verify':
+            raise Conflict('这条历史反馈仅批准在原采集电脑重新验证，请使用重新验证。')
         active = RemoteAgentRun.objects.filter(workstation=station, status__in=["queued", "running"], expires_at__gt=timezone.now())
         if active.filter(defect=defect).exists():
             raise Conflict("这条反馈已有处理任务，请查看当前进度。")

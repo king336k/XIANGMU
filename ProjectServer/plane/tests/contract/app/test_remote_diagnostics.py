@@ -507,3 +507,28 @@ def test_signed_source_conflict_gets_one_technical_followup_without_faking_an_ag
     assert defect.edit_version==version and events.count()==1
     from plane.quality.remote_diagnostics import defect_agent_availability
     assert defect_agent_availability(defect)=={'state':'conflict','summary':'反馈接入来源与原执行端不一致，尚未开始现场处理。'}
+
+
+def test_single_history_approval_only_enables_original_device_verify_and_keeps_signature_private(remote):
+    from unittest.mock import patch
+    from plane.quality.daq_execution_binding import approve_execution_binding
+    from plane.quality.serializers import EventSerializer
+    client,edge,device,project=remote;heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device);station.agent.source_instance='current-source';station.agent.save()
+    station.machine_fingerprint='a'*64;station.enrollment_claim_hash='b'*64;station.save()
+    defect=signed_device_defect(project,device,source='historical-drift')
+    approved=approve_execution_binding(actor=station.agent.owner,defect_id=defect.id,station_id=station.id,
+        reason='用户确认同一电脑升级，原设备仅只读复核',expected_current_source='current-source',apply=True)
+    assert approved['approved_scope']=='verify_only'
+    data=client.get(BASE+'defect-targets/',{'defect_id':str(defect.id)}).data
+    assert data['binding']['state']=='matched'and data['binding']['execution_scope']=='verify_only'
+    assert [row['id']for row in data['results']]==[device]
+    with patch('plane.quality.remote_tasks.remote_repair.apply_async'):
+        for mode in ('repair','diagnose'):
+            response=client.post(BASE+'agent-runs/',{'device_id':device,'defect_id':str(defect.id),'problem':'retest','mode':mode},format='json')
+            assert response.status_code==409
+        response=client.post(BASE+'agent-runs/',{'device_id':device,'defect_id':str(defect.id),'problem':'retest','mode':'verify'},format='json')
+        assert response.status_code==201
+    event=defect.events.get(id=approved['event_id'])
+    shown=EventSerializer(event).data['note']
+    assert 'executionBindingSignature'not in shown and '管理员批准'in shown

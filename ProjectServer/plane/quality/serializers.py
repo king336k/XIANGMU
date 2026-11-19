@@ -309,7 +309,7 @@ class EventSerializer(serializers.ModelSerializer):
             if (
                 isinstance(note, dict)
                 and isinstance(note.get("message"), str)
-                and ("incidentSignature" in note or "incidentSessionSignature" in note)
+                and ("incidentSignature" in note or "incidentSessionSignature" in note or "executionBindingSignature" in note)
             ):
                 data["note"] = note["message"]
         except (ValueError, TypeError):
