@@ -2,6 +2,7 @@ import { ProjectRouteLink as Link } from "@/components/common/project-route-link
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useState } from "react";
 import { ConfigurationChangeDiff } from "./configuration-change-diff";
+import { groupSuccessfulInspections } from "./timeline-inspection-groups";
 import { sortBy } from "lodash-es";
 import useSWR from "swr";
 import { CustomMenu } from "@plane/ui";
@@ -225,138 +226,152 @@ export function RecordProgress({
                     {day} · {events.length} 条记录
                   </summary>
                   <ul aria-label="处理历程" className="m-0 list-none space-y-3 px-3 pb-3">
-                    {events.map((item) => (
-                      <li key={item.id} className="border-l-2 border-subtle pl-3">
-                        <div className="flex flex-wrap items-center gap-2 text-12">
-                          <strong className="font-medium">{item.actor || "系统"}</strong>
-                          <Badge value={item.tone || "neutral"} label={item.label} variant="plain" />
-                          <time dateTime={item.date} className="text-11 text-secondary">
-                            {renderNumericDateTime(item.date)}
-                          </time>
-                        </div>
-                        {eventSummary(item, defectFlow?.value.code) && (
-                          <p className="mt-1 text-12 break-words whitespace-pre-wrap text-secondary">
-                            {eventSummary(item, defectFlow?.value.code)}
-                          </p>
-                        )}
-                        {(item.remote_process ||
-                          item.details ||
-                          (item.note &&
-                            (technicalId.test(item.note) ||
-                              item.note.length > 180 ||
-                              item.note.split("\n").length > 3))) && (
-                          <details className="mt-2 text-12 text-secondary">
-                            <summary className="cursor-pointer">查看操作详情</summary>
-                            <dl className="mt-2 space-y-3">
-                              {item.remote_process?.defect_code && (
-                                <div>
-                                  <dt className="text-tertiary">任务</dt>
-                                  <dd>{eventSummary(item, defectFlow?.value.code).split(" · ")[0]}</dd>
-                                </div>
-                              )}
-                              {item.remote_process?.target && (
-                                <div>
-                                  <dt className="text-tertiary">目标</dt>
-                                  <dd>
-                                    {item.remote_process.target.label || "现场"} ·{" "}
-                                    {item.remote_process.target.username || "用户名待确认"}@
-                                    {item.remote_process.target.host || "IP待确认"}
-                                  </dd>
-                                </div>
-                              )}
-                              {!!item.remote_process?.command?.argv?.length && (
-                                <div>
-                                  <dt className="text-tertiary">命令参数</dt>
-                                  <dd>
-                                    <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
-                                      {JSON.stringify(item.remote_process.command.argv, null, 2)}
-                                    </pre>
-                                  </dd>
-                                </div>
-                              )}
-                              {item.remote_process?.command?.path && !item.remote_process.command.changes?.length && (
-                                <div>
-                                  <dt className="text-tertiary">文件位置</dt>
-                                  <dd className="break-all">{item.remote_process.command.path}</dd>
-                                </div>
-                              )}
-                              {!!item.remote_process?.command?.changes?.length && (
-                                <div>
-                                  <dt className="text-tertiary">配置差异</dt>
-                                  <dd className="mt-2">
-                                    <ConfigurationChangeDiff command={item.remote_process.command} />
-                                  </dd>
-                                </div>
-                              )}
-                              {item.remote_process?.command?.exit_code !== undefined &&
-                                item.remote_process.command.exit_code !== null && (
+                    {groupSuccessfulInspections(events, (item) => item.remote_process).map((group) => {
+                      const entries = group.items.map((item) => (
+                        <li key={item.id} className="border-l-2 border-subtle pl-3">
+                          <div className="flex flex-wrap items-center gap-2 text-12">
+                            <strong className="font-medium">{item.actor || "系统"}</strong>
+                            <Badge value={item.tone || "neutral"} label={item.label} variant="plain" />
+                            <time dateTime={item.date} className="text-11 text-secondary">
+                              {renderNumericDateTime(item.date)}
+                            </time>
+                          </div>
+                          {eventSummary(item, defectFlow?.value.code) && (
+                            <p className="mt-1 text-12 break-words whitespace-pre-wrap text-secondary">
+                              {eventSummary(item, defectFlow?.value.code)}
+                            </p>
+                          )}
+                          {(item.remote_process ||
+                            item.details ||
+                            (item.note &&
+                              (technicalId.test(item.note) ||
+                                item.note.length > 180 ||
+                                item.note.split("\n").length > 3))) && (
+                            <details className="mt-2 text-12 text-secondary">
+                              <summary className="cursor-pointer">查看操作详情</summary>
+                              <dl className="mt-2 space-y-3">
+                                {item.remote_process?.defect_code && (
                                   <div>
-                                    <dt className="text-tertiary">退出码</dt>
-                                    <dd>{item.remote_process.command.exit_code}</dd>
+                                    <dt className="text-tertiary">任务</dt>
+                                    <dd>{eventSummary(item, defectFlow?.value.code).split(" · ")[0]}</dd>
                                   </div>
                                 )}
-                              {item.remote_process?.details && (
-                                <div>
-                                  <dt className="text-tertiary">执行说明</dt>
-                                  <dd className="break-words whitespace-pre-wrap">{item.remote_process.details}</dd>
-                                </div>
-                              )}
-                              {(item.remote_process?.command?.expected_sha256 ||
-                                item.remote_process?.command?.sha256 ||
-                                item.remote_process?.command?.backup) && (
-                                <div className="text-11 break-all text-tertiary">
-                                  {item.remote_process.command.backup && (
-                                    <p>备份：{item.remote_process.command.backup}</p>
-                                  )}
-                                  {item.remote_process.command.expected_sha256 && (
-                                    <p>
-                                      {item.remote_process.command.kind === "patch_file"
-                                        ? "修改前校验："
-                                        : "预期校验值："}
-                                      {item.remote_process.command.expected_sha256}
-                                    </p>
-                                  )}
-                                  {item.remote_process.command.sha256 && (
-                                    <p>
-                                      {item.remote_process.command.kind === "patch_file"
-                                        ? "修改后校验："
-                                        : "文件校验值："}
-                                      {item.remote_process.command.sha256}
-                                    </p>
-                                  )}
-                                </div>
-                              )}
-                              <div>
-                                <details>
-                                  <summary className="cursor-pointer text-11 text-tertiary">技术记录</summary>
-                                  <div className="mt-2 space-y-2 text-11 text-tertiary">
-                                    <p>{item.remote_process?.defect_code}</p>{" "}
+                                {item.remote_process?.target && (
+                                  <div>
+                                    <dt className="text-tertiary">目标</dt>
+                                    <dd>
+                                      {item.remote_process.target.label || "现场"} ·{" "}
+                                      {item.remote_process.target.username || "用户名待确认"}@
+                                      {item.remote_process.target.host || "IP待确认"}
+                                    </dd>
+                                  </div>
+                                )}
+                                {!!item.remote_process?.command?.argv?.length && (
+                                  <div>
+                                    <dt className="text-tertiary">命令参数</dt>
+                                    <dd>
+                                      <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
+                                        {JSON.stringify(item.remote_process.command.argv, null, 2)}
+                                      </pre>
+                                    </dd>
+                                  </div>
+                                )}
+                                {item.remote_process?.command?.path && !item.remote_process.command.changes?.length && (
+                                  <div>
+                                    <dt className="text-tertiary">文件位置</dt>
+                                    <dd className="break-all">{item.remote_process.command.path}</dd>
+                                  </div>
+                                )}
+                                {!!item.remote_process?.command?.changes?.length && (
+                                  <div>
+                                    <dt className="text-tertiary">配置差异</dt>
+                                    <dd className="mt-2">
+                                      <ConfigurationChangeDiff command={item.remote_process.command} />
+                                    </dd>
+                                  </div>
+                                )}
+                                {item.remote_process?.command?.exit_code !== undefined &&
+                                  item.remote_process.command.exit_code !== null && (
                                     <div>
-                                      <dt className="text-tertiary">原始记录</dt>
-                                      <dd className="break-words whitespace-pre-wrap">
-                                        {Array.from(
-                                          new Set(
-                                            [item.details, item.note, item.remote_process?.summary].filter(Boolean)
-                                          )
-                                        ).join("\n")}
-                                      </dd>
+                                      <dt className="text-tertiary">退出码</dt>
+                                      <dd>{item.remote_process.command.exit_code}</dd>
                                     </div>
-                                    {(item.remote_process?.run_id || item.remote_process?.command_id) && (
-                                      <div className="border-t border-subtle pt-2 text-11 break-all text-tertiary">
-                                        {item.remote_process.run_id && <p>任务ID：{item.remote_process.run_id}</p>}
-                                        {item.remote_process.command_id && (
-                                          <p>命令ID：{item.remote_process.command_id}</p>
-                                        )}
-                                      </div>
+                                  )}
+                                {item.remote_process?.details && (
+                                  <div>
+                                    <dt className="text-tertiary">执行说明</dt>
+                                    <dd className="break-words whitespace-pre-wrap">{item.remote_process.details}</dd>
+                                  </div>
+                                )}
+                                {(item.remote_process?.command?.expected_sha256 ||
+                                  item.remote_process?.command?.sha256 ||
+                                  item.remote_process?.command?.backup) && (
+                                  <div className="text-11 break-all text-tertiary">
+                                    {item.remote_process.command.backup && (
+                                      <p>备份：{item.remote_process.command.backup}</p>
+                                    )}
+                                    {item.remote_process.command.expected_sha256 && (
+                                      <p>
+                                        {item.remote_process.command.kind === "patch_file"
+                                          ? "修改前校验："
+                                          : "预期校验值："}
+                                        {item.remote_process.command.expected_sha256}
+                                      </p>
+                                    )}
+                                    {item.remote_process.command.sha256 && (
+                                      <p>
+                                        {item.remote_process.command.kind === "patch_file"
+                                          ? "修改后校验："
+                                          : "文件校验值："}
+                                        {item.remote_process.command.sha256}
+                                      </p>
                                     )}
                                   </div>
-                                </details>
-                              </div>
-                            </dl>
+                                )}
+                                <div>
+                                  <details>
+                                    <summary className="cursor-pointer text-11 text-tertiary">技术记录</summary>
+                                    <div className="mt-2 space-y-2 text-11 text-tertiary">
+                                      <p>{item.remote_process?.defect_code}</p>{" "}
+                                      <div>
+                                        <dt className="text-tertiary">原始记录</dt>
+                                        <dd className="break-words whitespace-pre-wrap">
+                                          {Array.from(
+                                            new Set(
+                                              [item.details, item.note, item.remote_process?.summary].filter(Boolean)
+                                            )
+                                          ).join("\n")}
+                                        </dd>
+                                      </div>
+                                      {(item.remote_process?.run_id || item.remote_process?.command_id) && (
+                                        <div className="border-t border-subtle pt-2 text-11 break-all text-tertiary">
+                                          {item.remote_process.run_id && <p>任务ID：{item.remote_process.run_id}</p>}
+                                          {item.remote_process.command_id && (
+                                            <p>命令ID：{item.remote_process.command_id}</p>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </details>
+                                </div>
+                              </dl>
+                            </details>
+                          )}
+                        </li>
+                      ));
+                      return group.grouped ? (
+                        <li key={`inspection-${group.items[0].id}`} className="list-none">
+                          <details className="rounded border border-subtle px-3 py-2">
+                            <summary className="cursor-pointer text-12 text-secondary">
+                              检查过程（{group.items.length}项）
+                            </summary>
+                            <ul className="mt-3 list-none space-y-3">{entries}</ul>
                           </details>
-                        )}
-                      </li>
-                    ))}
+                        </li>
+                      ) : (
+                        entries[0]
+                      );
+                    })}
                   </ul>
                 </details>
               ))}

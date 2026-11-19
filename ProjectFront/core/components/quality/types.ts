@@ -117,6 +117,8 @@ export type RemoteProcess = {
     path?: string;
     exit_code?: number | null;
     kind?: string;
+    ok?: boolean | null;
+    status?: string;
     file_type?: string;
     backup?: string;
     expected_sha256?: string;

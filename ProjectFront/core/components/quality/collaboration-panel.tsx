@@ -4,6 +4,7 @@ import { renderNumericDateTime } from "@plane/utils";
 import { can, statusNames, resultNames } from "./types";
 import { useState } from "react";
 import { ConfigurationChangeDiff } from "./configuration-change-diff";
+import { groupSuccessfulInspections } from "./timeline-inspection-groups";
 import useSWR from "swr";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
@@ -261,134 +262,149 @@ export function CollaborationPanel({
                 {date} · {rows.length} 条记录
               </summary>
               <ul aria-label="处理时间线" className="m-0 list-none space-y-3 px-3 pb-3">
-                {rows.map((row) => (
-                  <li key={row.id} className="m-0 list-none border-l-2 border-subtle pl-3 text-12">
-                    <p className="m-0 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                      <strong className="text-14 font-semibold">{row.actor}</strong>
-                      <span className={`font-medium ${row.tone}`}>{row.action}</span>
-                      <time className="text-11 text-tertiary" dateTime={row.at}>
-                        {renderNumericDateTime(row.at)}
-                      </time>
-                    </p>
-                    {row.content &&
-                      (row.content.length > 180 || row.content.split("\n").length > 3 ? (
-                        <details className="mt-1">
-                          <summary className="cursor-pointer text-secondary">查看详细内容</summary>
+                {groupSuccessfulInspections(rows, (row) => row.process).map((group) => {
+                  const entries = group.items.map((row) => (
+                    <li key={row.id} className="m-0 list-none border-l-2 border-subtle pl-3 text-12">
+                      <p className="m-0 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <strong className="text-14 font-semibold">{row.actor}</strong>
+                        <span className={`font-medium ${row.tone}`}>{row.action}</span>
+                        <time className="text-11 text-tertiary" dateTime={row.at}>
+                          {renderNumericDateTime(row.at)}
+                        </time>
+                      </p>
+                      {row.content &&
+                        (row.content.length > 180 || row.content.split("\n").length > 3 ? (
+                          <details className="mt-1">
+                            <summary className="cursor-pointer text-secondary">查看详细内容</summary>
+                            <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>
+                          </details>
+                        ) : (
                           <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>
-                        </details>
-                      ) : (
-                        <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>
-                      ))}
-                    {(row.process || row.rawDetails) && (
-                      <details className="mt-2 text-secondary">
-                        <summary className="cursor-pointer">查看操作详情</summary>
-                        <dl className="mt-2 space-y-2 text-12">
-                          {row.process && (row.process.defect_code || value.code) && (
-                            <div>
-                              <dt className="text-tertiary">任务</dt>
-                              <dd>
-                                {
-                                  processSummary(row.process.summary, [row.process.defect_code, value.code]).split(
-                                    " · "
-                                  )[0]
-                                }
-                              </dd>
-                            </div>
-                          )}
-                          {row.process?.target && (
-                            <div>
-                              <dt className="text-tertiary">目标</dt>
-                              <dd>
-                                {row.process.target.label || "现场"} · {row.process.target.username || "用户名待确认"}@
-                                {row.process.target.host || "IP待确认"}
-                              </dd>
-                            </div>
-                          )}
-                          {!!row.process?.command?.argv?.length && (
-                            <div>
-                              <dt className="text-tertiary">命令参数</dt>
-                              <dd>
-                                <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
-                                  {JSON.stringify(row.process.command.argv, null, 2)}
-                                </pre>
-                              </dd>
-                            </div>
-                          )}
-                          {row.process?.command?.path && !row.process.command.changes?.length && (
-                            <div>
-                              <dt className="text-tertiary">文件位置</dt>
-                              <dd className="break-all">{row.process.command.path}</dd>
-                            </div>
-                          )}
-                          {!!row.process?.command?.changes?.length && (
-                            <div>
-                              <dt className="text-tertiary">配置差异</dt>
-                              <dd className="mt-2">
-                                <ConfigurationChangeDiff command={row.process.command} />
-                              </dd>
-                            </div>
-                          )}
-                          {(row.process?.command?.backup ||
-                            row.process?.command?.expected_sha256 ||
-                            row.process?.command?.sha256) && (
-                            <div>
-                              <dt className="text-tertiary">备份与文件校验</dt>
-                              <dd className="space-y-1 text-11 break-all">
-                                {row.process.command.backup && <p>备份：{row.process.command.backup}</p>}
-                                {row.process.command.expected_sha256 && (
-                                  <p>
-                                    {row.process.command.kind === "patch_file" ? "修改前：" : "预期校验值："}
-                                    {row.process.command.expected_sha256}
-                                  </p>
-                                )}
-                                {row.process.command.sha256 && (
-                                  <p>
-                                    {row.process.command.kind === "patch_file" ? "修改后：" : "文件校验值："}
-                                    {row.process.command.sha256}
-                                  </p>
-                                )}
-                              </dd>
-                            </div>
-                          )}
-                          {row.process?.command?.exit_code !== undefined && row.process.command.exit_code !== null && (
-                            <div>
-                              <dt className="text-tertiary">退出码</dt>
-                              <dd>{row.process.command.exit_code}</dd>
-                            </div>
-                          )}
-                          {row.process?.details && (
-                            <div>
-                              <dt className="text-tertiary">执行说明</dt>
-                              <dd className="break-words whitespace-pre-wrap">{row.process.details}</dd>
-                            </div>
-                          )}
-                          <div>
-                            <details>
-                              <summary className="cursor-pointer text-11 text-tertiary">技术记录</summary>
-                              <div className="mt-2 space-y-2 text-11 text-tertiary">
-                                <p>{row.process?.defect_code || value.code}</p>{" "}
-                                {row.rawDetails && (
-                                  <div>
-                                    <dt className="text-tertiary">原始记录</dt>
-                                    <dd className="break-words whitespace-pre-wrap">{row.rawDetails}</dd>
-                                  </div>
-                                )}
-                                {(row.process?.run_id || row.process?.command_id) && (
-                                  <div className="space-y-1 border-t border-subtle pt-2 text-11 text-tertiary">
-                                    {row.process.run_id && <p className="break-all">任务ID：{row.process.run_id}</p>}
-                                    {row.process.command_id && (
-                                      <p className="break-all">命令ID：{row.process.command_id}</p>
-                                    )}
-                                  </div>
-                                )}
+                        ))}
+                      {(row.process || row.rawDetails) && (
+                        <details className="mt-2 text-secondary">
+                          <summary className="cursor-pointer">查看操作详情</summary>
+                          <dl className="mt-2 space-y-2 text-12">
+                            {row.process && (row.process.defect_code || value.code) && (
+                              <div>
+                                <dt className="text-tertiary">任务</dt>
+                                <dd>
+                                  {
+                                    processSummary(row.process.summary, [row.process.defect_code, value.code]).split(
+                                      " · "
+                                    )[0]
+                                  }
+                                </dd>
                               </div>
-                            </details>
-                          </div>
-                        </dl>
+                            )}
+                            {row.process?.target && (
+                              <div>
+                                <dt className="text-tertiary">目标</dt>
+                                <dd>
+                                  {row.process.target.label || "现场"} · {row.process.target.username || "用户名待确认"}
+                                  @{row.process.target.host || "IP待确认"}
+                                </dd>
+                              </div>
+                            )}
+                            {!!row.process?.command?.argv?.length && (
+                              <div>
+                                <dt className="text-tertiary">命令参数</dt>
+                                <dd>
+                                  <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
+                                    {JSON.stringify(row.process.command.argv, null, 2)}
+                                  </pre>
+                                </dd>
+                              </div>
+                            )}
+                            {row.process?.command?.path && !row.process.command.changes?.length && (
+                              <div>
+                                <dt className="text-tertiary">文件位置</dt>
+                                <dd className="break-all">{row.process.command.path}</dd>
+                              </div>
+                            )}
+                            {!!row.process?.command?.changes?.length && (
+                              <div>
+                                <dt className="text-tertiary">配置差异</dt>
+                                <dd className="mt-2">
+                                  <ConfigurationChangeDiff command={row.process.command} />
+                                </dd>
+                              </div>
+                            )}
+                            {(row.process?.command?.backup ||
+                              row.process?.command?.expected_sha256 ||
+                              row.process?.command?.sha256) && (
+                              <div>
+                                <dt className="text-tertiary">备份与文件校验</dt>
+                                <dd className="space-y-1 text-11 break-all">
+                                  {row.process.command.backup && <p>备份：{row.process.command.backup}</p>}
+                                  {row.process.command.expected_sha256 && (
+                                    <p>
+                                      {row.process.command.kind === "patch_file" ? "修改前：" : "预期校验值："}
+                                      {row.process.command.expected_sha256}
+                                    </p>
+                                  )}
+                                  {row.process.command.sha256 && (
+                                    <p>
+                                      {row.process.command.kind === "patch_file" ? "修改后：" : "文件校验值："}
+                                      {row.process.command.sha256}
+                                    </p>
+                                  )}
+                                </dd>
+                              </div>
+                            )}
+                            {row.process?.command?.exit_code !== undefined &&
+                              row.process.command.exit_code !== null && (
+                                <div>
+                                  <dt className="text-tertiary">退出码</dt>
+                                  <dd>{row.process.command.exit_code}</dd>
+                                </div>
+                              )}
+                            {row.process?.details && (
+                              <div>
+                                <dt className="text-tertiary">执行说明</dt>
+                                <dd className="break-words whitespace-pre-wrap">{row.process.details}</dd>
+                              </div>
+                            )}
+                            <div>
+                              <details>
+                                <summary className="cursor-pointer text-11 text-tertiary">技术记录</summary>
+                                <div className="mt-2 space-y-2 text-11 text-tertiary">
+                                  <p>{row.process?.defect_code || value.code}</p>{" "}
+                                  {row.rawDetails && (
+                                    <div>
+                                      <dt className="text-tertiary">原始记录</dt>
+                                      <dd className="break-words whitespace-pre-wrap">{row.rawDetails}</dd>
+                                    </div>
+                                  )}
+                                  {(row.process?.run_id || row.process?.command_id) && (
+                                    <div className="space-y-1 border-t border-subtle pt-2 text-11 text-tertiary">
+                                      {row.process.run_id && <p className="break-all">任务ID：{row.process.run_id}</p>}
+                                      {row.process.command_id && (
+                                        <p className="break-all">命令ID：{row.process.command_id}</p>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </details>
+                            </div>
+                          </dl>
+                        </details>
+                      )}
+                    </li>
+                  ));
+                  return group.grouped ? (
+                    <li key={`inspection-${group.items[0].id}`} className="list-none">
+                      <details className="rounded border border-subtle px-3 py-2">
+                        <summary className="cursor-pointer text-12 text-secondary">
+                          检查过程（{group.items.length}项）
+                        </summary>
+                        <ul className="mt-3 list-none space-y-3">{entries}</ul>
                       </details>
-                    )}
-                  </li>
-                ))}
+                    </li>
+                  ) : (
+                    entries[0]
+                  );
+                })}
               </ul>
             </details>
           ))}

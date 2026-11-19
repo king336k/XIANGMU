@@ -1,3 +1,4 @@
+import { groupSuccessfulInspections } from "./timeline-groups-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -14,7 +15,9 @@ function load(name, mocks) {
     }
   ).outputText;
   new Function("require", "exports", code)(
-    (id) => mocks[id] ?? (id === "react/jsx-runtime" ? require(id) : new Proxy({}, { get: () => () => null })),
+    (id) =>
+      (id === "./timeline-inspection-groups" ? { groupSuccessfulInspections } : mocks[id]) ??
+      (id === "react/jsx-runtime" ? require(id) : new Proxy({}, { get: () => () => null })),
     exports
   );
   return exports;

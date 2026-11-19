@@ -1,3 +1,4 @@
+import { groupSuccessfulInspections } from "./timeline-groups-fixture.js";
 import { ConfigurationChangeDiff } from "./configuration-diff-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -36,6 +37,7 @@ function render(events, comments, value = {}) {
     ).outputText
   )((id) => {
     if (id === "./configuration-change-diff") return { ConfigurationChangeDiff };
+    if (id === "./timeline-inspection-groups") return { groupSuccessfulInspections };
     if (id === "react/jsx-runtime") return require(id);
     if (id === "react") return { useState: (v) => [v, () => {}] };
     if (id === "lodash-es") return { sortBy: (rows, key) => rows.toSorted((a, b) => key(a) - key(b)) };
@@ -395,4 +397,31 @@ test("读取配置详情的任务不重复缺陷编号，校验值不误称修�
   assert.doesNotMatch(text, /修改后|BASEKNOW-D-481|95f89e89/);
   assert.match(JSON.stringify(technical), /BASEKNOW-D-481/);
   assert.match(JSON.stringify(technical), /工具执行完成/);
+});
+
+test("连续同任务成功检查默认折叠，失败检查与修复仍在一级且原序保留", () => {
+  const event = (id, stage = "inspect", ok = true) => ({
+    ...events[0],
+    id,
+    remote_process: {
+      summary: `检查${id}`,
+      stage,
+      run_id: "same-run",
+      command: { status: "done", ok, exit_code: ok ? 0 : 1 },
+    },
+  });
+  const tree = render([event("one"), event("two"), event("failed", "inspect", false), event("repair", "repair")], []);
+  const group = nodes(tree).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children]
+        .flat()
+        .some((child) => child?.type === "summary" && JSON.stringify(child.props.children).includes("检查过程"))
+  );
+  assert.ok(group);
+  assert.equal(group.props.open, undefined);
+  assert.ok(JSON.stringify(group).includes("检查one") && JSON.stringify(group).includes("检查two"));
+  assert.ok(!JSON.stringify(group).includes("检查failed") && !JSON.stringify(group).includes("检查repair"));
+  const list = nodes(tree).find((node) => node.props?.["aria-label"] === "处理时间线");
+  assert.equal([list.props.children].flat().flat().length, 3);
 });

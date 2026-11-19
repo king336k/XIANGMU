@@ -1,3 +1,4 @@
+import { groupSuccessfulInspections } from "./timeline-groups-fixture.js";
 import { ConfigurationChangeDiff } from "./configuration-diff-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -18,6 +19,7 @@ function component(file, name, access, config) {
     }).outputText
   )((id) => {
     if (id === "./configuration-change-diff") return { ConfigurationChangeDiff };
+    if (id === "./timeline-inspection-groups") return { groupSuccessfulInspections };
     if (id === "react") return React;
     if (id === "swr")
       return {

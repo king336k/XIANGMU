@@ -1,3 +1,4 @@
+import { groupSuccessfulInspections } from "./timeline-groups-fixture.js";
 import { ConfigurationChangeDiff } from "./configuration-diff-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -83,6 +84,7 @@ function component(
     ).outputText
   )((id) => {
     if (id === "./configuration-change-diff") return { ConfigurationChangeDiff };
+    if (id === "./timeline-inspection-groups") return { groupSuccessfulInspections };
     if (id === "react/jsx-runtime") return require(id);
     if (id === "lodash-es") return { sortBy: (rows, key) => rows.toSorted((a, b) => key(a) - key(b)) };
     if (id === "react")
@@ -426,4 +428,36 @@ test("处理历程只读校验使用文件校验值并把编号原文放二级�
   assert.match(primary, /文件校验值/);
   assert.doesNotMatch(primary, /修改后|BASEKNOW-D-481|95f89e89/);
   assert.match(JSON.stringify(technical), /BASEKNOW-D-481/);
+});
+
+const inspectionEvent = (id, stage) => ({
+  id,
+  label: "现场检查",
+  actor: "成员",
+  date: "2026-11-19T10:00:00Z",
+  note: id,
+  remote_process: { summary: id, stage, run_id: "same-run", command: { status: "done", ok: true, exit_code: 0 } },
+});
+
+test("处理历程只折叠连续且已明确成功的同轮检查，不隐藏复测", () => {
+  const tree = component("timeline", {
+    ...data,
+    events: [
+      inspectionEvent("read-one", "inspect"),
+      inspectionEvent("read-two", "inspect"),
+      inspectionEvent("verify", "verify"),
+    ],
+  }).render();
+  const group = nodes(tree).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children]
+        .flat()
+        .some((child) => child?.type === "summary" && JSON.stringify(child.props.children).includes("检查过程"))
+  );
+  assert.ok(group);
+  assert.equal(group.props.open, undefined);
+  assert.match(JSON.stringify(group), /read-one/);
+  assert.match(JSON.stringify(group), /read-two/);
+  assert.doesNotMatch(JSON.stringify(group), /"children":"verify"/);
 });
