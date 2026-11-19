@@ -108,6 +108,42 @@ def select_reviews(rows, *, defect_id, sources=None):
     return [value for _, value in sorted(selected, key=lambda item: item[0], reverse=True)[:3]]
 
 
+def field_workstation_context(field_run, *, source_link=None, signed_source=None, manual_binding=False):
+    """A signed stable device UUID and the current execution identity answer different questions."""
+    from uuid import UUID
+    from .remote_diagnostics import identity_key
+
+    station = field_run.workstation
+    workstation_id = str(field_run.workstation_id)
+    source_id = None
+    binding = {'kind': 'source_workstation_unknown', 'state': 'unknown'}
+    payload = signed_source.get('payload', {}) if isinstance(signed_source, dict) else {}
+    device = payload.get('device') if isinstance(payload, dict) else None
+    if (source_link is not None and isinstance(device, str) and device
+            and device == source_link.device):
+        try:
+            source_id = str(UUID(device))
+        except (ValueError, TypeError, AttributeError):
+            pass
+    if source_id:
+        binding = {'kind': 'signed_daq_device', 'state': 'verified', 'workstation_id': source_id,
+                   'source_instance': source_link.source_instance}
+    elif manual_binding:
+        binding = {'kind': 'manual_execution_binding', 'state': 'explicit', 'workstation_id': workstation_id}
+    snapshot = field_run.result.get('target_snapshot') if isinstance(field_run.result, dict) else None
+    return {'source_workstation_id': source_id, 'execution_workstation_id': workstation_id,
+            'same_workstation_identity': source_id == workstation_id if source_id else None,
+            'source_device_binding': binding,
+            'execution_target_matches': field_run.identity_key == identity_key(station) if field_run.identity_key else None,
+            'recorded_target_snapshot': snapshot if isinstance(snapshot, dict) else None,
+            'current_collector_identity': {'workstation_id': workstation_id, 'username': station.username,
+                'hostname': station.hostname, 'ip_address': station.capabilities.get('network', {}).get('ip_address', '')},
+            'current_robot_status': station.capabilities.get('robot', {}),
+            'identity_boundary': 'same_workstation_identity 只比较签名上报设备与现场工作站的稳定 UUID；未知来源保持 null。'
+                'execution_target_matches 另比较启动会话、用户名和机器人目标；false 不等于不同电脑。'
+                'recorded_target_snapshot 是执行时快照，current_* 是当前状态；二者不可互作历史证明。'}
+
+
 def diagnostic_context(job, report_only=False, sources=None):
     from .models import DiagnosticJob, PackageFile
     from .daq_incidents import trusted_incident, signed_record
@@ -150,14 +186,18 @@ def diagnostic_context(job, report_only=False, sources=None):
     )
     references = [{"reference": "PLATFORM-RECEIPT", "title": "本项目平台接收回执", "content": receipt_text}]
     from .remote_models import RemoteAgentRun
-    from .remote_diagnostics import identity_key
     field_run = RemoteAgentRun.objects.filter(defect=defect,status="completed",comment__visibility="public").select_related("workstation").order_by("-created_at").first()
     if field_run:
         from django.utils import timezone
         from datetime import timedelta
-        same_identity=field_run.identity_key==identity_key(field_run.workstation)
+        from .remote_models import RemoteFeedbackBinding
+        manual_binding = RemoteFeedbackBinding.objects.filter(
+            defect=defect, workstation=field_run.workstation).exists()
+        identity = field_workstation_context(field_run, source_link=link, signed_source=record,
+                                             manual_binding=manual_binding)
         recent=field_run.created_at>=timezone.now()-timedelta(minutes=30)
-        evidence={"run_id":str(field_run.id),"mode":field_run.mode,"recorded_at":field_run.created_at.isoformat(),"same_workstation_identity":same_identity,"recent_within_30_minutes":recent,"collector_identity":{"username":field_run.workstation.username,"ip_address":field_run.workstation.capabilities.get("network",{}).get("ip_address","")},"robot_identity":field_run.workstation.capabilities.get("robot",{}),"result":field_run.result}
+        evidence={"run_id":str(field_run.id),"mode":field_run.mode,"recorded_at":field_run.created_at.isoformat(),
+                  "recent_within_30_minutes":recent, **identity, "result":field_run.result}
         references.append({"reference":"PLATFORM-FIELD-CHECK","title":"本缺陷现场执行与复测记录","content":redact(json.dumps(evidence,ensure_ascii=False))[:16000]+"\n仅支持此任务记录的时间和对象范围。区分上报时历史故障与较晚现场状态；当前仍正常需重新验证，不把旧复测当永久正常。"})
     if not report_only:
         from .models import DefectVerification
