@@ -109,3 +109,24 @@ test("no binding metadata fails closed and manual binding requires explicit sele
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(explicit.writes[0].device_id, original.id);
 });
+
+test("historical same-computer verify-only binding allows only explicit verification", async () => {
+  const { tree, writes, html } = actions({
+    binding: { kind: "daq", state: "matched", device_id: original.id, execution_scope: "verify_only" },
+    results: [original],
+  });
+  assert.match(html, /历史反馈已关联原电脑，仅支持重新验证/);
+  for (const label of ["重新诊断", "继续处理"]) {
+    const button = nodes(tree).find((node) => node.type === "button" && node.props.children === label);
+    assert.equal(button.props.disabled, true);
+    button.props.onClick();
+  }
+  assert.equal(writes.length, 0);
+  const verify = nodes(tree).find((node) => node.type === "button" && node.props.children === "重新验证");
+  assert.equal(verify.props.disabled, false);
+  verify.props.onClick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].device_id, original.id);
+  assert.equal(writes[0].mode, "verify");
+});

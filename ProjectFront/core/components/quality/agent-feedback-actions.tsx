@@ -35,6 +35,7 @@ export function AgentFeedbackActions({
           state: "matched" | "missing" | "conflict";
           device_id?: string;
           source_instance?: string;
+          execution_scope?: "verify_only";
         };
       }>(url),
     { refreshInterval: active ? 10000 : 0 }
@@ -71,6 +72,7 @@ export function AgentFeedbackActions({
       : undefined;
   const bindingReady = binding?.state === "matched" && !!selected;
   const available = bindingReady && selected?.online === true;
+  const verifyOnly = binding?.execution_scope === "verify_only";
   const connectionLabel =
     binding?.state === "conflict" ||
     (!sourceBound && !manualBound) ||
@@ -81,7 +83,7 @@ export function AgentFeedbackActions({
         : "执行端断连";
   const busy = starting || !!(run && runningAgentStatuses.has(run.status));
   async function start(mode: string) {
-    if (submitting.current || !available || !selected || busy) return;
+    if (submitting.current || !available || !selected || busy || (verifyOnly && mode !== "verify")) return;
     submitting.current = true;
     setStarting(true);
     setError("");
@@ -128,7 +130,7 @@ export function AgentFeedbackActions({
         )}
         <button
           type="button"
-          disabled={busy || !available}
+          disabled={busy || !available || verifyOnly}
           title="重新诊断（只读，不修改现场）"
           onClick={() => void start("diagnose")}
           className="rounded border border-subtle px-3 py-1.5 text-12 disabled:opacity-40"
@@ -137,7 +139,7 @@ export function AgentFeedbackActions({
         </button>
         <button
           type="button"
-          disabled={busy || !available}
+          disabled={busy || !available || verifyOnly}
           title="诊断、授权修复、自动复测和原反馈回写"
           onClick={() => void start("repair")}
           className="rounded bg-accent-primary px-3 py-1.5 text-12 text-on-color disabled:opacity-40"
@@ -176,6 +178,7 @@ export function AgentFeedbackActions({
       <p className="text-11 text-secondary">
         {run && busy ? agentRunStatusLabel(run) : "同一任务完成排查、授权修复与复测；只读操作不修改现场。"}
       </p>
+      {verifyOnly && <p className="text-11 text-secondary">历史反馈已关联原电脑，仅支持重新验证。</p>}
       {sourceBound && (
         <p role="status" className={`text-11 break-words ${available ? "text-secondary" : "text-warning-primary"}`}>
           采集电脑：{selected ? `${selected.username}@${selected.ip_address || "IP待确认"}` : "原采集端"} ·{" "}
