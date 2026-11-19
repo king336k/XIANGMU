@@ -161,3 +161,21 @@ def test_fast_output_gap_falls_back_to_durable_stream_without_skipping(terminal)
             assert outgoing.empty(),'a cache gap must never print future bytes ahead of durable history'
         await stop(incoming,task)
     asyncio.run(scenario())
+
+
+def test_closed_terminal_retains_final_output_in_stream(terminal):
+    from plane.quality.remote_models import RemoteTerminalEvent
+    from plane.quality.terminal_stream import publish_fast_output
+    from plane.quality.remote_diagnostics import close_session
+    import base64
+    row,user=terminal
+    async def scenario():
+        incoming,outgoing,task=run_socket(row,user);await incoming.put({'type':'websocket.connect'});await outgoing.get();await outgoing.get()
+        data=base64.b64encode(b'final output').decode()
+        await publish_fast_output(row.workstation_id,[{'session_id':str(row.id),'kind':'data','id':'final-event','data':data}])
+        await sync_to_async(RemoteTerminalEvent.objects.create)(session=row,source_id='final-event',data=data)
+        await sync_to_async(close_session)(row)
+        frame=json.loads((await asyncio.wait_for(outgoing.get(),3))['text'])
+        assert frame['status']=='closed' and frame['events'][0]['source_id']=='final-event'
+        await stop(incoming,task)
+    asyncio.run(scenario())

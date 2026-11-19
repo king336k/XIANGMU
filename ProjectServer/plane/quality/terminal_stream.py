@@ -177,8 +177,10 @@ class TerminalConsumer(AsyncJsonWebsocketConsumer):
                         if event['source_id']not in self.fast_seen:immediate.append(event)
                 if immediate:
                     status,current=await session_request(self.user,self.pk,after=self.cursor,session_key=self.session_key)
-                    if status!=200 or current.get('status')!='open':
+                    if status!=200:
                         await self.close(code=4403);return
+                    if current.get('status')!='open':
+                        await self.publish(current);return
                     self.fast_seen.update(event['source_id']for event in immediate)
                     if len(self.fast_seen)>512:self.fast_seen={event['source_id']for event in immediate}
                     await self.send_json({'type':'fast_output','events':immediate})
