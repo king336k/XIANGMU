@@ -155,6 +155,65 @@ class GatewayTest(unittest.TestCase):
             with self.assertRaises(ValueError):gateway.patch_file('collector-config.json','a'*64,'new')
         rpc.assert_not_called()
 
+    def test_absolute_patch_alias_is_only_from_successful_allowlisted_read_receipt(self):
+        gateway=runner.Gateway('http://unused','synthetic',repair_argv=['robot-repair'],editable_files=['collector-config.json'])
+        gateway.inspected=True
+        with patch.object(gateway,'rpc',return_value={'ok':True,'content':'before','sha256':'a'*64,
+            'resolved_path':'/approved/collector-config.json'}):
+            gateway.read_file('collector-config.json')
+        with patch.object(gateway,'rpc') as rpc:
+            with self.assertRaises(runner.ToolValidationError):gateway.patch_file('/approved/collector-config.json','c'*64,'after')
+            gateway.repair_allowed=False
+            with self.assertRaises(runner.ToolValidationError):gateway.patch_file('/approved/collector-config.json','a'*64,'after')
+            gateway.repair_allowed=True;gateway.require_knowledge=True
+            with self.assertRaises(runner.ToolValidationError):gateway.patch_file('/approved/collector-config.json','a'*64,'after')
+            gateway.knowledge_searched=True
+        rpc.assert_not_called()
+        with patch.object(gateway,'rpc',return_value={'ok':True,'sha256':'b'*64}) as rpc:
+            gateway.patch_file('/approved/collector-config.json','a'*64,'after')
+        self.assertEqual(rpc.call_args.args[0]['path'],'collector-config.json')
+        self.assertEqual(rpc.call_count,1)
+
+    def test_unapproved_or_failed_read_cannot_grant_an_absolute_patch_alias(self):
+        gateway=runner.Gateway('http://unused','synthetic',repair_argv=['robot-repair'],editable_files=['collector-config.json'])
+        gateway.inspected=True
+        with patch.object(gateway,'rpc',return_value={'ok':True,'content':'before','sha256':'a'*64,
+            'resolved_path':'/unapproved/other.json'}):gateway.read_file('other.json')
+        with patch.object(gateway,'rpc',return_value={'ok':False,'exit_code':1,'content':'failed','sha256':'a'*64,
+            'resolved_path':'/approved/collector-config.json'}):gateway.read_file('collector-config.json')
+        with patch.object(gateway,'rpc') as rpc:
+            for path in ['/unapproved/other.json','/approved/collector-config.json','/unknown/collector-config.json']:
+                with self.assertRaises(runner.ToolValidationError):gateway.patch_file(path,'a'*64,'after')
+        rpc.assert_not_called()
+
+    def test_agent_can_patch_successful_read_absolute_receipt_alias_and_verify(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        turns=[]
+        def respond(body):
+            if body['operation']=='read_file':return {'ok':True,'content':'before','sha256':'a'*64,'resolved_path':'/approved/collector-config.json'}
+            if body['operation']=='patch_file':
+                self.assertEqual(body['path'],'collector-config.json')
+                return {'ok':True,'sha256':'b'*64,'resolved_path':'/approved/collector-config.json'}
+            return {'ok':True,'exit_code':0}
+        self.responder=respond
+        def model(messages,info):
+            index=len(turns);turns.append(index)
+            sequence=[('run_command',{'argv':['inspect']}),('read_file',{'path':'collector-config.json'}),
+                ('patch_file',{'path':'/approved/collector-config.json','expected_sha256':'a'*64,'content':'after'}),
+                ('run_command',{'argv':['check'],'purpose':'verify'})]
+            if index<len(sequence):
+                name,args=sequence[index];return ModelResponse(parts=[ToolCallPart(name,args)])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'已修复并复测','root_cause':'已读取配置异常',
+                'actions':[],'verification':[],'solution':'继续观察','repaired':True})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','problem':'修复',
+                'context':{'inspect_argv':['inspect'],'verify_argv':['check'],'repair_argv':['robot-repair'],
+                    'editable_files':['collector-config.json']}}))
+        self.assertTrue(result['repaired'])
+        self.assertEqual(len(turns),5)
+
     def test_agent_forwards_only_trusted_context_collector_editable_files(self):
         from pydantic_ai.models.function import FunctionModel
         from pydantic_ai.messages import ModelResponse,ToolCallPart

@@ -86,6 +86,7 @@ class Gateway:
         self.successful_mutation = 0
         self.verified_mutation = 0
         self.read_hashes = {}
+        self.path_aliases = {}
         self.repair_allowed = repair_allowed
         self.verify_argv = verify_argv
         self.inspect_argv = inspect_argv
@@ -312,10 +313,15 @@ class Gateway:
             digest = result.get("sha256")
             if isinstance(digest, str) and re.fullmatch("[0-9a-f]{64}", digest):
                 self.read_hashes[path] = digest
+                if path in self.editable_files and not path.startswith('/'):
+                    self.path_aliases={alias:relative for alias,relative in self.path_aliases.items() if relative!=path}
+                    if actual_path.startswith('/'):
+                        self.path_aliases[actual_path]=path
         return result
 
     def patch_file(self, path: str, expected_sha256: str, content: str) -> dict:
         """Patch a previously read remote file using its exact SHA256; requires post-check."""
+        path=self.path_aliases.get(path,path)
         if self.repair_argv is not None and path not in self.editable_files:
             self.reject_tool("use_configured_repair_command_instead_of_generic_patch")
         if not self.inspected or self.read_hashes.get(path) != expected_sha256:
