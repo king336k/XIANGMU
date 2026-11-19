@@ -39,7 +39,7 @@ export type AgentRun = {
   queue?: {
     position?: number | null;
     reason?: "device_busy" | "worker_busy" | "terminal_open" | "transfer_active" | string;
-    stage?: "queued" | "inspect" | "repair" | "verify";
+    stage?: "queued" | "analysis" | "inspect" | "repair" | "verify";
     active_count?: number;
   };
   result?: {
@@ -101,9 +101,12 @@ export function agentRunStatusLabel(run: AgentRun): string {
   }
   if (run.status === "running") {
     return (
-      ({ inspect: "正在诊断", repair: "正在修复", verify: "正在复测" } as Record<string, string>)[
-        run.queue?.stage || ""
-      ] || "正在处理"
+      (
+        { analysis: "模型正在分析现场", inspect: "正在诊断", repair: "正在修复", verify: "正在复测" } as Record<
+          string,
+          string
+        >
+      )[run.queue?.stage || ""] || "正在处理"
     );
   }
   return agentStatusLabel(run.status);
@@ -121,8 +124,9 @@ export function agentRunShortLabel(run: AgentRun): string {
   if (["queued", "pending", "starting"].includes(run.status)) return "排队中";
   if (run.status === "running")
     return (
-      ({ inspect: "排查中", repair: "修复中", verify: "复测中" } as Record<string, string>)[run.queue?.stage || ""] ||
-      "排查中"
+      ({ analysis: "分析中", inspect: "排查中", repair: "修复中", verify: "复测中" } as Record<string, string>)[
+        run.queue?.stage || ""
+      ] || "排查中"
     );
   return "状态待确认";
 }

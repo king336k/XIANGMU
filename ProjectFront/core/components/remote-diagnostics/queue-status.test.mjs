@@ -82,7 +82,15 @@ function actions(run, write = async () => ({ id: "run", status: "queued" }), res
           intervals.push(config.refreshInterval);
           runUrls.push(url);
         }
-        return { data: url?.includes("defect-targets") ? { results: [device], active_run: restoredRun } : run };
+        return {
+          data: url?.includes("defect-targets")
+            ? {
+                results: [device],
+                active_run: restoredRun,
+                binding: { kind: "daq", state: "matched", device_id: device.id },
+              }
+            : run,
+        };
       },
     },
     "./api": { qualityApi: { write }, errorMessage: (error) => error.message },

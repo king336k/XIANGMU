@@ -32,6 +32,7 @@ test("agent badge uses short truthful states and a spinner only during active wo
   const badge = load("quality/agent-processing-badge.tsx").AgentProcessingBadge;
   for (const [state, label] of Object.entries({
     queued: "排队中",
+    analysis: "分析中",
     inspect: "排查中",
     repair: "修复中",
     verify: "复测中",
@@ -48,7 +49,7 @@ test("agent badge uses short truthful states and a spinner only during active wo
     assert.match(html, new RegExp(label));
     assert.match(html, /title="详细实际说明"/);
     assert.doesNotMatch(html, /overly long status/);
-    assert.equal(html.includes("animate-spin"), ["queued", "inspect", "repair", "verify"].includes(state));
+    assert.equal(html.includes("animate-spin"), ["queued", "analysis", "inspect", "repair", "verify"].includes(state));
   }
   assert.equal(renderToStaticMarkup(React.createElement(badge, { value: null })), "");
 });
@@ -199,4 +200,11 @@ test("new follow-up states use the existing repair workflow and never directly a
   }
   assert.match(form, /current && !editing/);
   assert.match(form, /onSuccess:.*snapshot/);
+});
+
+test("model analysis stage is a short spinning status with an explicit analysis hint", () => {
+  const remote = load("remote-diagnostics/types.ts");
+  const run = { status: "running", queue: { stage: "analysis" } };
+  assert.equal(remote.agentRunShortLabel(run), "分析中");
+  assert.equal(remote.agentRunStatusLabel(run), "模型正在分析现场");
 });

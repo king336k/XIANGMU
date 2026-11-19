@@ -108,7 +108,7 @@ export type Plan = {
 };
 export type RemoteProcess = {
   summary: string;
-  stage?: "queued" | "inspect" | "repair" | "verify" | "completed" | "failed";
+  stage?: "queued" | "analysis" | "inspect" | "repair" | "verify" | "completed" | "failed";
   defect_code?: string;
   round?: number;
   target?: { label?: string; username?: string; host?: string };
@@ -147,7 +147,16 @@ export type RemoteProcess = {
   details?: string;
 };
 export type AgentProcessing = {
-  state: "queued" | "inspect" | "repair" | "verify" | "repaired" | "verified" | "unresolved" | "interrupted";
+  state:
+    | "queued"
+    | "analysis"
+    | "inspect"
+    | "repair"
+    | "verify"
+    | "repaired"
+    | "verified"
+    | "unresolved"
+    | "interrupted";
   label?: string;
   run_id: string;
   summary?: string;

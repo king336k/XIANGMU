@@ -43,7 +43,9 @@ export function DefectForm({
   );
   useSWR(current && !editing ? `${base}defects/${current.id}/` : null, (url: string) => qualityApi.read<Defect>(url), {
     refreshInterval: (snapshot) =>
-      ["queued", "inspect", "repair", "verify"].includes(snapshot?.agent_processing?.state || "") ? 5000 : 0,
+      ["queued", "analysis", "inspect", "repair", "verify"].includes(snapshot?.agent_processing?.state || "")
+        ? 5000
+        : 0,
     refreshWhenHidden: false,
     onSuccess: (snapshot) => {
       if (snapshot.id === current?.id && !editing) setCurrent(snapshot);

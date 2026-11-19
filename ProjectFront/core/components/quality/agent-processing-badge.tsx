@@ -3,6 +3,7 @@ import { RotateCw } from "lucide-react";
 import type { AgentProcessing } from "./types";
 const labels: Record<string, string> = {
   queued: "排队中",
+  analysis: "分析中",
   inspect: "排查中",
   repair: "修复中",
   verify: "复测中",
@@ -13,7 +14,7 @@ const labels: Record<string, string> = {
 };
 export function AgentProcessingBadge({ value }: { value?: AgentProcessing | null }) {
   if (!value) return null;
-  const busy = ["queued", "inspect", "repair", "verify"].includes(value.state);
+  const busy = ["queued", "analysis", "inspect", "repair", "verify"].includes(value.state);
   const tone = busy
     ? "border-accent-subtle bg-accent-subtle text-accent-primary"
     : ["repaired", "verified"].includes(value.state)

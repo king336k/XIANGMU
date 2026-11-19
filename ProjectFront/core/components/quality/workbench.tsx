@@ -116,7 +116,7 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
           ? snapshot?.results.some(
               (row) =>
                 "agent_processing" in row &&
-                ["queued", "inspect", "repair", "verify"].includes(row.agent_processing?.state || "")
+                ["queued", "analysis", "inspect", "repair", "verify"].includes(row.agent_processing?.state || "")
             )
             ? 5000
             : 30000
@@ -158,7 +158,9 @@ export function QualityWorkbench({ defectsOnly = false }: { defectsOnly?: boolea
     (url: string) => qualityApi.read<Defect>(url),
     {
       refreshInterval: (snapshot) =>
-        ["queued", "inspect", "repair", "verify"].includes(snapshot?.agent_processing?.state || "") ? 5000 : 0,
+        ["queued", "analysis", "inspect", "repair", "verify"].includes(snapshot?.agent_processing?.state || "")
+          ? 5000
+          : 0,
       refreshWhenHidden: false,
     }
   );

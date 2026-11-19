@@ -26,7 +26,17 @@ export function AgentFeedbackActions({
 }) {
   const { data: targets, error: targetError } = useSWR(
     active ? `${remoteDiagnosticsBase}defect-targets/?defect_id=${defectId}` : null,
-    (url: string) => qualityApi.read<{ results: RemoteDevice[]; active_run?: AgentRun | null }>(url),
+    (url: string) =>
+      qualityApi.read<{
+        results: RemoteDevice[];
+        active_run?: AgentRun | null;
+        binding?: {
+          kind: "daq" | "manual";
+          state: "matched" | "missing" | "conflict";
+          device_id?: string;
+          source_instance?: string;
+        };
+      }>(url),
     { refreshInterval: active ? 10000 : 0 }
   );
   const [deviceId, setDeviceId] = useState("");
@@ -51,10 +61,27 @@ export function AgentFeedbackActions({
     }
   }, [run, onCompleted]);
   const choices = targets?.results || [];
-  const selected = choices.find((device) => device.id === (deviceId || (choices.length === 1 ? choices[0].id : "")));
+  const binding = targets?.binding;
+  const sourceBound = binding?.kind === "daq";
+  const manualBound = binding?.kind === "manual";
+  const selected = sourceBound
+    ? choices.find((device) => device.id === binding.device_id)
+    : manualBound
+      ? choices.find((device) => device.id === deviceId)
+      : undefined;
+  const bindingReady = binding?.state === "matched" && !!selected;
+  const available = bindingReady && selected?.online === true;
+  const connectionLabel =
+    binding?.state === "conflict" ||
+    (!sourceBound && !manualBound) ||
+    (sourceBound && binding?.state === "matched" && !selected)
+      ? "接入信息不一致"
+      : available
+        ? "在线"
+        : "执行端断连";
   const busy = starting || !!(run && runningAgentStatuses.has(run.status));
   async function start(mode: string) {
-    if (submitting.current || !selected?.online || busy) return;
+    if (submitting.current || !available || !selected || busy) return;
     submitting.current = true;
     setStarting(true);
     setError("");
@@ -83,7 +110,7 @@ export function AgentFeedbackActions({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        {choices.length > 1 && (
+        {manualBound && choices.length > 0 && (
           <select
             aria-label="现场采集电脑"
             value={deviceId}
@@ -101,7 +128,7 @@ export function AgentFeedbackActions({
         )}
         <button
           type="button"
-          disabled={busy || !selected?.online}
+          disabled={busy || !available}
           title="重新诊断（只读，不修改现场）"
           onClick={() => void start("diagnose")}
           className="rounded border border-subtle px-3 py-1.5 text-12 disabled:opacity-40"
@@ -110,7 +137,7 @@ export function AgentFeedbackActions({
         </button>
         <button
           type="button"
-          disabled={busy || !selected?.online}
+          disabled={busy || !available}
           title="诊断、授权修复、自动复测和原反馈回写"
           onClick={() => void start("repair")}
           className="rounded bg-accent-primary px-3 py-1.5 text-12 text-on-color disabled:opacity-40"
@@ -119,7 +146,7 @@ export function AgentFeedbackActions({
         </button>
         <button
           type="button"
-          disabled={busy || !selected?.online}
+          disabled={busy || !available}
           title="重新验证（只读，执行固定验证入口）"
           onClick={() => void start("verify")}
           className="rounded border border-subtle px-3 py-1.5 text-12 disabled:opacity-40"
@@ -149,13 +176,27 @@ export function AgentFeedbackActions({
       <p className="text-11 text-secondary">
         {run && busy ? agentRunStatusLabel(run) : "同一任务完成排查、授权修复与复测；只读操作不修改现场。"}
       </p>
-      {selected && (
-        <p className="text-11 text-secondary">
-          现场：{selected.username}@{selected.ip_address || "IP待确认"}
-          {selected.online ? "" : " · 当前离线"}；自动修复仅在已授权范围内执行。
+      {sourceBound && (
+        <p role="status" className={`text-11 break-words ${available ? "text-secondary" : "text-warning-primary"}`}>
+          采集电脑：{selected ? `${selected.username}@${selected.ip_address || "IP待确认"}` : "原采集端"} ·{" "}
+          {connectionLabel}
         </p>
       )}
-      {targets && !choices.length && <p className="text-12 text-secondary">此反馈尚未关联已接入的采集电脑。</p>}
+      {manualBound && selected && (
+        <p className="text-11 break-words text-secondary">
+          采集电脑：{selected.username}@{selected.ip_address || "IP待确认"} · {connectionLabel}
+        </p>
+      )}
+      {targets && !binding && (
+        <p role="status" className="text-11 text-warning-primary">
+          接入信息不一致，请刷新绑定信息。
+        </p>
+      )}
+      {manualBound && !selected && (
+        <p className="text-11 text-secondary">
+          {choices.length ? "请选择已关联的采集电脑。" : "请先在远程诊断中关联采集电脑。"}
+        </p>
+      )}
       {(error || targetError || runError || run?.error) && (
         <p role="alert" className="text-12 text-danger-primary">
           {error || (targetError || runError ? errorMessage(targetError || runError) : run?.error)}

@@ -492,6 +492,7 @@ test("upload rejects a target filename containing a path before any network muta
 test("verify-only result is green only with explicit verification evidence and verified outcome", () => {
   for (const [result, normal] of [
     [{ repaired: false, verification_passed: true, outcome: "verified" }, true],
+    [{ repaired: false, verification_passed: true, outcome: "verified_without_repair" }, true],
     [{ repaired: false, outcome: "verified" }, false],
     [{ repaired: false, verification_passed: false, outcome: "unresolved" }, false],
   ]) {
@@ -511,7 +512,7 @@ test("verify-only result is green only with explicit verification evidence and v
     );
     const tree = exports.AgentPanel({ device });
     const status = nodes(tree).find((node) => node.type === "p" && node.props.role === "status");
-    assert.equal(JSON.stringify(status).includes("验证正常"), normal);
+    assert.equal(JSON.stringify(status).includes("复核通过"), normal);
     assert.equal(JSON.stringify(status).includes("text-success-primary"), normal);
   }
 });
