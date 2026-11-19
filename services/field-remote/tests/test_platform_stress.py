@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from platform_stress import (Http, ApiError, validate_manifest, wait_for_markers, mixed_overlap,
                              submit_diagnostic, submit_signed_feedback, job_lifecycle_summary, operation_statistics)
+from platform_stress import terminal_probe_summary
 
 
 def fixture():
@@ -22,6 +23,25 @@ def fixture():
 
 
 class PlatformStressTests(unittest.TestCase):
+    def test_terminal_probe_requires_real_markers_distinct_users_and_common_open_interval(self):
+        rows=[{'device_id':str(n),'terminal_probe':{'owner_user_id':str(n),'session_id':'s'+str(n),
+               'marker_verified':True,'identity':{'username':'fixture-user','hostname':'station-'+str(n)},
+               'opened_at':1+n*.01,'last_read_at':3,'probe_start':2,'probe_end':4,'closed_at':5}}
+              for n in range(10)]
+        result=terminal_probe_summary(rows)
+        self.assertTrue(result['verified'])
+        self.assertEqual(result['max_concurrent_open'],10)
+        self.assertEqual(result['distinct_users'],10)
+        self.assertGreater(result['common_open_interval']['seconds'],0)
+        rows[1]['terminal_probe']['owner_user_id']='0'
+        self.assertFalse(terminal_probe_summary(rows)['verified'])
+        rows[1]['terminal_probe']['owner_user_id']='1'
+        rows[2]['terminal_probe']['marker_verified']=False
+        self.assertFalse(terminal_probe_summary(rows)['verified'])
+        rows[2]['terminal_probe']['marker_verified']=True
+        rows[9]['terminal_probe'].update(opened_at=6,closed_at=7,probe_start=6,probe_end=7)
+        self.assertFalse(terminal_probe_summary(rows)['verified'])
+
     def test_full_job_capacity_uses_real_lifecycle_and_does_not_count_stages(self):
         jobs=[{'id':str(n),'mode':'repair','status':'completed','worker_started_at':start,
                'worker_completed_at':end,'queued_at':start-.5,

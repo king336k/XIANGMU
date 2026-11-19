@@ -62,6 +62,8 @@ def validate_manifest(value):
         raise ValueError('explicit model_mode required')
     if type(value.get('full_job_lifecycle',False)) is not bool:
         raise ValueError('full_job_lifecycle must be boolean')
+    if type(value.get('terminal_concurrency_probe',False)) is not bool:
+        raise ValueError('terminal_concurrency_probe must be boolean')
     capacity=value.get('expected_worker_concurrency')
     if capacity is not None and (type(capacity) is not int or not 1<=capacity<=16):
         raise ValueError('expected worker concurrency must be 1..16')
@@ -257,6 +259,30 @@ def job_lifecycle_summary(stations,capacity=None):
     return result
 
 
+def terminal_probe_summary(stations):
+    probes=[row['terminal_probe'] for row in stations if row.get('terminal_probe')]
+    # Only count intervals after actual PTY marker verification and before
+    # issuing close; HTTP session creation alone is not a working terminal.
+    intervals=[(epoch(row.get('probe_start')),epoch(row.get('probe_end'))) for row in probes]
+    complete=all(start is not None and end is not None and end>start for start,end in intervals)
+    distinct_users=len({row.get('owner_user_id') for row in probes})
+    distinct_sessions=len({row.get('session_id') for row in probes})
+    distinct_identities=len({json.dumps(row.get('identity'),sort_keys=True) for row in probes})
+    common_start=max((start for start,_ in intervals if start is not None),default=None)
+    common_end=min((end for _,end in intervals if end is not None),default=None)
+    overlap=common_end-common_start if common_start is not None and common_end is not None else None
+    peak=max_overlap(intervals)
+    count=len(stations)
+    return {'requested_stations':count,'observed_probes':len(probes),'distinct_users':distinct_users,
+            'distinct_sessions':distinct_sessions,'distinct_station_identities':distinct_identities,
+            'max_concurrent_open':peak,
+            'common_open_interval':{'started_at':common_start,'completed_at':common_end,'seconds':overlap},
+            'interval_source':'client-observed real PTY marker verified through all-owner confirmation, before close',
+            'verified':bool(count and len(probes)==count and complete and peak==count and overlap and overlap>0
+                            and distinct_users==count and distinct_sessions==count and distinct_identities==count
+                            and all(row.get('marker_verified') is True for row in probes))}
+
+
 def mixed_overlap(stations):
     pairs=[];model_pairs=[]
     for left in stations:
@@ -365,7 +391,7 @@ def station_job(job):
         return {'user_id':identifier,'download_sha_matches':True,'upload_sha_matches':True}
 
     thread=threading.Thread(target=loop,daemon=True)
-    sid=None
+    sid=None;terminal_probe=None
     run_results=[];file_results=[];new_diagnostics=[];new_feedback=[];diagnostics_before={};diagnostics_after={}
     try:
         # Read-only isolation handshake occurs before the station exchange thread.
@@ -375,6 +401,53 @@ def station_job(job):
         barrier=shared/'ready';barrier.mkdir(exist_ok=True)
         (barrier/str(index)).write_text(str(os.getpid()))
         wait_for_markers(barrier,len(manifest['stations']))
+        if manifest.get('terminal_concurrency_probe'):
+            opened=owner.request('POST',BASE,{'action':'open','device_id':station['device_id'],'cols':100,'rows':30},
+                                 expected=(201,),operation='terminal_probe_open')
+            sid=opened['id'];terminal_path=BASE+'sessions/'+sid+'/'
+            terminal_probe={'owner_user_id':station['owner_user_id'],'session_id':sid,'opened_at':time.time(),
+                            'marker_verified':False,'identity':None}
+            suffix=uuid.uuid4().hex;marker='ALL_STATIONS_PTY_'+suffix
+            owner.request('POST',terminal_path,{'action':'input','data':base64.b64encode(
+                ("printf 'ALL_STATIONS_PTY_%s\\n' '"+suffix+"'\n").encode()).decode()},operation='terminal_probe_input')
+            cursor=0;probe_output=bytearray()
+            def probe_read():
+                nonlocal cursor
+                result=owner.request('GET',terminal_path+'?after='+str(cursor),operation='terminal_probe_read')
+                cursor=result['cursor'];terminal_probe['last_read_at']=time.time()
+                for event in result['events']:probe_output.extend(base64.b64decode(event['data']))
+                if result.get('status')=='closed':raise AssertionError('concurrency probe terminal closed prematurely')
+                if result.get('identity'):terminal_probe['server_identity']=result['identity']
+                for field in ('created_at','last_read_at','expires_at'):
+                    if result.get(field) is not None:terminal_probe['server_'+field]=result[field]
+                return marker.encode() in probe_output
+            poll(probe_read,bool,20)
+            terminal_probe['marker_verified']=True;terminal_probe['probe_start']=time.time()
+            terminal_probe['identity']={'username':operator['username'],'hostname':operator['hostname'],'boot_id':operator['boot_id']}
+            for identifier in station.get('allowed_user_ids',[]):
+                if identifier!=station['owner_user_id']:
+                    user(identifier).request('GET',terminal_path,expected=(403,404),operation='terminal_probe_crossowner_expected_deny')
+            all_ready=shared/'terminal-all-ready';all_ready.mkdir(exist_ok=True)
+            (all_ready/str(index)).write_text(sid)
+            deadline=time.monotonic()+60
+            while len(list(all_ready.iterdir()))<len(manifest['stations']):
+                probe_read()
+                if time.monotonic()>deadline:raise TimeoutError('not all real PTY markers became ready')
+                time.sleep(.05)
+            # A second barrier confirms every owner observed the all-open state.
+            all_observed=shared/'terminal-all-observed';all_observed.mkdir(exist_ok=True)
+            probe_read();(all_observed/str(index)).touch()
+            deadline=time.monotonic()+60
+            while len(list(all_observed.iterdir()))<len(manifest['stations']):
+                probe_read()
+                if time.monotonic()>deadline:raise TimeoutError('not all owners confirmed the all-open state')
+                time.sleep(.05)
+            terminal_probe['probe_end']=time.time()
+            owner.request('POST',terminal_path,{'action':'close'},operation='terminal_probe_close')
+            terminal_probe['closed_at']=time.time();sid=None
+            # Keep the workload phase out of this distinct capacity probe.
+            all_closed=shared/'terminal-all-closed';all_closed.mkdir(exist_ok=True)
+            (all_closed/str(index)).touch();wait_for_markers(all_closed,len(manifest['stations']))
         for path in station.get('diagnostic_paths',[]):
             diagnostics_before[path]=hashlib.sha256(json.dumps(owner.request('GET',path,operation='original_diagnostic_before'),sort_keys=True).encode()).hexdigest()
         feedback=owner.request('GET',BASE+'feedback/?'+urllib.parse.urlencode({'device_id':station['device_id']}),operation='feedback_list')
@@ -480,6 +553,7 @@ def station_job(job):
     return {'device_id':station['device_id'],'simulated_uid':os.getuid(),'pid':os.getpid(),
             'ok':not errors and not edge_errors,'errors':errors+edge_errors,'samples':samples,'command_counts':command_counts,
             'users':file_results,'phase_intervals':phase_intervals,
+            'terminal_probe':terminal_probe,
             'new_rules_diagnostics':new_diagnostics,
             'signed_feedback_count':len(new_feedback),'signed_feedback_issue_ids':[row['issue_id'] for row in new_feedback],
             'file_http_intervals':[{'started_at':sample['started_at'],'completed_at':sample['completed_at']}
@@ -518,6 +592,9 @@ def main():
     report['distinct_station_pids']=len({row['pid'] for row in results})
     report['full_job_lifecycle']=manifest.get('full_job_lifecycle',False)
     report['job_lifecycle']=job_lifecycle_summary(results,manifest.get('expected_worker_concurrency'))
+    if manifest.get('terminal_concurrency_probe'):
+        report['terminal_probe']=terminal_probe_summary(results)
+        if not report['terminal_probe']['verified']:report['ok']=False
     if manifest.get('expected_worker_concurrency') is not None and not report['job_lifecycle']['capacity_verified']:
         report['ok']=False
     if report['distinct_station_pids']!=len(results):report['ok']=False
