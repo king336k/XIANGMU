@@ -5,6 +5,7 @@ import hashlib
 import json
 import secrets
 import time
+import uuid
 from datetime import timedelta
 from urllib.parse import urlsplit
 
@@ -91,6 +92,40 @@ def terminal_target_valid(session,station):
     return revision==session.target_revision and target==session.target_identity
 
 
+def daq_binding(defect):
+    """A signed DAQ source owns its execution target; legacy bindings cannot replace it."""
+    from .daq_incidents import signed_record
+    from .models import SourceLink
+
+    links=list(SourceLink.objects.filter(defect=defect,project_id=defect.project_id,
+        source_system='ENGRAM_DAQ',record_type='daq_incident').select_related('defect'))
+    if not links:return {'kind':'manual','state':'matched','device_id':None,'source_instance':''},None
+    accepted=[]
+    for link in links:
+        record=signed_record(link)
+        if (record and record.get('authorityMode')=='report_only' and link.device
+                and record.get('payload',{}).get('device')==link.device):accepted.append(link)
+    devices={(link.device,link.source_instance)for link in accepted}
+    if len(devices)!=1:
+        return {'kind':'daq','state':'conflict','device_id':None,'source_instance':''},None
+    device,source=next(iter(devices))
+    try:device=str(uuid.UUID(str(device)))
+    except (ValueError,TypeError):return {'kind':'daq','state':'conflict','device_id':None,'source_instance':source},None
+    station=RemoteWorkstation.objects.select_related('agent__project__workspace').filter(
+        pk=device,agent__project_id=defect.project_id).first()
+    state='missing' if station is None else 'conflict' if station.agent.source_instance and station.agent.source_instance!=source else 'matched'
+    return {'kind':'daq','state':state,'device_id':device,'source_instance':source},station
+
+
+def defect_agent_availability(defect):
+    binding,station=daq_binding(defect)
+    if binding['kind']!='daq':return None
+    if binding['state']=='conflict':return {'state':'conflict','summary':'反馈接入来源与原执行端不一致，尚未开始现场处理。'}
+    if station is None:return {'state':'missing','summary':'原采集电脑尚未完成远程接入，不能替换为其他电脑执行。'}
+    if not online(station):return {'state':'offline','summary':'原采集电脑执行端心跳中断，等待自动恢复连接。'}
+    return {'state':'ready','summary':'原采集电脑已连接，可开始现场处理。'}
+
+
 def feedback_for(station, defect_id=None):
     from .daq_incidents import signed_record
     from .models import SourceLink, DefectEvent
@@ -102,16 +137,19 @@ def feedback_for(station, defect_id=None):
         "defect__events", queryset=DefectEvent.objects.filter(status="open", previous_status=""),
         to_attr="_incident_signature_events",
     ))
-    if defect_id:
-        links = links.filter(defect_id=defect_id)
-    verified = []
-    for link in links.order_by("-created_at"):
-        record = signed_record(link)
-        if record and record.get("authorityMode") == "report_only" and record.get("payload", {}).get("device") == str(station.id):
+    if defect_id:links=links.filter(defect_id=defect_id)
+    verified=[]
+    for link in links.order_by('-created_at'):
+        record=signed_record(link)
+        if (record and record.get('authorityMode')=='report_only'
+                and record.get('payload',{}).get('device')==str(station.id)
+                and (not station.agent.source_instance or station.agent.source_instance==link.source_instance)):
             verified.append(link.defect_id)
-    return Defect.objects.filter(project_id=station.agent.project_id).filter(
-        Q(pk__in=verified) | Q(remote_bindings__workstation=station)
-    ).distinct()
+    rows=Defect.objects.filter(project_id=station.agent.project_id)
+    if defect_id:rows=rows.filter(pk=defect_id)
+    # Explicit legacy association is only for records without any DAQ provenance.
+    return rows.filter(Q(pk__in=verified)|(
+        Q(remote_bindings__workstation=station)&~Q(sources__source_system='ENGRAM_DAQ',sources__record_type='daq_incident'))).distinct()
 
 
 @transaction.atomic
@@ -652,7 +690,7 @@ def run_queue(run):
     if run.status == "running":
         cached=getattr(run,'_processing_commands',None)
         latest = (cached[0] if cached else None) if cached is not None else run.remotecommand_set.order_by("-created_at", "-id").first()
-        stage = "inspect"
+        stage = "inspect" if latest else "analysis"
         if latest:
             from .remote_event_display import safe_argv
             context = run.result.get('display_policy_snapshot') or station.capabilities.get("agent_context", {})
@@ -721,11 +759,17 @@ class RemoteRuns(BaseAPIView):
 
 class RemoteDefectTargets(BaseAPIView):
     def get(self, request):
-        defect = get_object_or_404(Defect, pk=request.query_params.get("defect_id"))
-        stations = RemoteWorkstation.objects.filter(agent__project_id=defect.project_id).select_related("agent__project__workspace")
-        available=[station for station in stations if permitted(request.user, station) and feedback_for(station, defect.id).exists()]
-        active=RemoteAgentRun.objects.filter(defect=defect,owner=request.user,workstation__in=available,status__in=['queued','running'],expires_at__gt=timezone.now()).select_related('workstation__agent__project__workspace').order_by('-created_at').first()
-        return Response({"results":[card(station,request.user)for station in available],
+        defect=get_object_or_404(Defect,pk=request.query_params.get('defect_id'))
+        if not writable_member(defect.project_id,request.user.id,defect.project.workspace.slug):raise PermissionDenied()
+        binding,fixed=daq_binding(defect)
+        if binding['kind']=='daq':
+            available=[fixed] if fixed is not None and permitted(request.user,fixed) else []
+        else:
+            stations=RemoteWorkstation.objects.filter(agent__project_id=defect.project_id).select_related('agent__project__workspace')
+            available=[station for station in stations if permitted(request.user,station)and feedback_for(station,defect.id).exists()]
+        active=RemoteAgentRun.objects.filter(defect=defect,owner=request.user,workstation__in=available,
+            status__in=['queued','running'],expires_at__gt=timezone.now()).select_related('workstation__agent__project__workspace').order_by('-created_at').first()
+        return Response({'binding':binding,'results':[card(station,request.user)for station in available],
             'active_run':{'id':str(active.id),'status':active.status,'queue':run_queue(active),'error':active.error}if active else None})
 
 

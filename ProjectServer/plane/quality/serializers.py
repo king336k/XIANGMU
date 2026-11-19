@@ -335,6 +335,13 @@ class EventSerializer(serializers.ModelSerializer):
 
 
 class DefectSerializer(AuthoredRecordSerializer):
+    agent_availability = serializers.SerializerMethodField()
+
+    def get_agent_availability(self, obj):
+        if not self.context.get('include_agent_availability'):return None
+        from .remote_diagnostics import defect_agent_availability
+        return defect_agent_availability(obj)
+
     agent_processing = serializers.SerializerMethodField()
 
     def get_agent_processing(self, obj):
@@ -456,4 +463,5 @@ class DefectSerializer(AuthoredRecordSerializer):
             "updated_at",
             "events",
             "agent_processing",
+            "agent_availability",
         ]

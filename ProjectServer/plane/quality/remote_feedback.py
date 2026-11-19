@@ -10,6 +10,19 @@ from .remote_models import RemoteWorkstation, RemoteFeedbackBinding, RemoteAgent
 from .remote_diagnostics import online, permitted, identity_key
 
 
+def blocked_followup(defect_id,station,reason):
+    """Expose a trusted report's blocked intake without inventing field work."""
+    from .models import Defect
+    defect=Defect.objects.select_for_update().select_related('project__workspace').get(pk=defect_id)
+    if defect.archived_at or defect.status!='open' or RemoteAgentRun.objects.filter(defect=defect).exists():return
+    previous=defect.status;defect.status='needs_tech';defect.edit_version+=1
+    defect.save(update_fields=['status','edit_version','updated_at'])
+    DefectEvent.objects.create(project=defect.project,defect=defect,created_by=station.agent.owner,
+        previous_status=previous,status='needs_tech',note='Agent 尚未开始：'+reason)
+    from .notifications import defect_notice,managers
+    defect_notice(defect,station.agent.owner,'现场接入待恢复',receivers=managers(defect.project))
+
+
 def received(defect_id):
     link=SourceLink.objects.filter(defect_id=defect_id,source_system="ENGRAM_DAQ",record_type="daq_incident").first()
     if not link or not link.device:return
@@ -17,10 +30,16 @@ def received(defect_id):
     if not record or record.get("authorityMode")!="report_only" or record.get("payload",{}).get("device")!=link.device:return
     with transaction.atomic():
         station=RemoteWorkstation.objects.select_for_update(of=("self",)).select_related("agent__project__workspace","agent__owner").filter(pk=link.device,agent__project_id=link.project_id,enabled=True).first()
-        if not station or not station.agent.source_instance or station.agent.source_instance!=link.source_instance:return
+        if not station or not permitted(station.agent.owner,station):return
+        if not station.agent.source_instance or station.agent.source_instance!=link.source_instance:
+            blocked_followup(defect_id,station,'接入信息不一致，等待同一采集电脑恢复接入。')
+            return
         RemoteFeedbackBinding.objects.get_or_create(workstation=station,defect_id=defect_id,defaults={"created_by":station.agent.owner})
         context=station.capabilities.get("agent_context",{})
-        if context.get("auto_diagnose") is not True or not online(station) or not permitted(station.agent.owner,station):return
+        if context.get('auto_diagnose') is not True:return
+        if not online(station):
+            blocked_followup(defect_id,station,'执行端断连，等待原采集电脑恢复接入。')
+            return
         if RemoteAgentRun.objects.filter(defect_id=defect_id).exists():return
         if station.remoteagentrun_set.filter(status__in=["queued","running"],expires_at__gt=timezone.now()).count()>=20:return
         from .models import Defect

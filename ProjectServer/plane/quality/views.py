@@ -524,7 +524,7 @@ class DefectList(QualityView):
 
 class DefectDetail(QualityView):
     def get(self, request, pk, **kwargs):
-        return Response(DefectSerializer(get_object_or_404(defect_queryset(), pk=pk, project_id=self.project_id)).data)
+        return Response(DefectSerializer(get_object_or_404(defect_queryset(), pk=pk, project_id=self.project_id),context={"include_agent_availability":True}).data)
 
     @transaction.atomic
     def patch(self, request, pk, **kwargs):
@@ -718,7 +718,7 @@ class DefectDetail(QualityView):
 
         if data:
             defect_notice(defect, request.user, "缺陷处理已更新", [previous_assignee])
-        return Response(DefectSerializer(defect_queryset().get(pk=defect.pk)).data)
+        return Response(DefectSerializer(defect_queryset().get(pk=defect.pk),context={"include_agent_availability":True}).data)
 
 
 class DefectReassignPermission(QualityPermission):

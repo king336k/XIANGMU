@@ -414,3 +414,96 @@ def test_original_diagnostic_can_reference_same_defect_field_repair_evidence(rem
     foreign=Defect.objects.create(project=project,title='foreign',description='foreign')
     job.defect=foreign
     assert not any(r['reference']=='PLATFORM-FIELD-CHECK' for r in diagnostic_context(job))
+
+
+def signed_device_defect(project,device,source='device-source'):
+    from plane.quality.models import Defect,SourceLink,DefectEvent
+    from plane.quality.daq_incidents import SALT,fingerprint
+    from django.core import signing
+    import json
+    defect=Defect.objects.create(project=project,title='signed original device')
+    link=SourceLink.objects.create(project=project,defect=defect,source_system='ENGRAM_DAQ',
+        source_instance=source,record_type='daq_incident',record_id=str(uuid4()),device=device)
+    payload={'device':device}
+    record={'linkId':str(link.id),'defectId':str(defect.id),'projectId':str(project.id),
+        'sourceInstance':source,'recordId':link.record_id,'actorId':str(link.created_by_id),
+        'requestHash':fingerprint(payload),'payload':payload,'authorityMode':'report_only'}
+    DefectEvent.objects.create(project=project,defect=defect,status='open',note=json.dumps({'incidentSignature':signing.dumps(record,salt=SALT)}))
+    return defect
+
+
+def test_daq_defect_targets_are_fixed_even_when_other_station_has_legacy_bindings(remote):
+    from plane.quality.remote_models import RemoteFeedbackBinding
+    from plane.quality.models import Defect
+    client,edge,device,project=remote
+    heartbeat(edge)
+    original=RemoteWorkstation.objects.get(pk=device);original.agent.source_instance='device-source';original.agent.save()
+    defect=signed_device_defect(project,device)
+    other_id=client.post(BASE,{'action':'register','project_id':str(project.id),'name':'other'},format='json').data['id']
+    other=RemoteWorkstation.objects.get(pk=other_id)
+    other.last_seen_at=timezone.now();other.save(update_fields=['last_seen_at'])
+    unrelated=Defect.objects.create(project=project,title='unrelated legacy report')
+    RemoteFeedbackBinding.objects.create(workstation=other,defect=unrelated,created_by=original.agent.owner)
+    # A same-project legacy association must never grant this signed report to the other device.
+    RemoteFeedbackBinding.objects.create(workstation=other,defect=defect,created_by=original.agent.owner)
+    response=client.get(BASE+'defect-targets/',{'defect_id':str(defect.id)})
+    assert response.status_code==200
+    assert [r['id']for r in response.data['results']]==[device]
+    assert response.data['binding']=={'kind':'daq','state':'matched','device_id':device,'source_instance':'device-source'}
+    from plane.quality.remote_diagnostics import feedback_for
+    assert not feedback_for(other,defect.id).exists()
+    denied=client.post(BASE+'agent-runs/',{'device_id':other_id,'defect_id':str(defect.id),'problem':'wrong target'},format='json')
+    assert denied.status_code==404
+
+
+def test_daq_binding_source_drift_is_explicit_and_cannot_execute(remote):
+    client,edge,device,project=remote;heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device);station.agent.source_instance='original-source';station.agent.save()
+    defect=signed_device_defect(project,device,source='rotated-source')
+    response=client.get(BASE+'defect-targets/',{'defect_id':str(defect.id)})
+    assert response.data['binding']['state']=='conflict'
+    assert response.data['binding']['device_id']==device
+    assert [r['id']for r in response.data['results']]==[device]
+    from plane.quality.remote_diagnostics import feedback_for
+    assert not feedback_for(station,defect.id).exists()
+
+
+def test_manual_feedback_target_only_includes_its_own_explicit_association(remote):
+    from plane.quality.models import Defect
+    from plane.quality.remote_models import RemoteFeedbackBinding
+    client,edge,device,project=remote;heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device)
+    unrelated=Defect.objects.create(project=project,title='unrelated')
+    wanted=Defect.objects.create(project=project,title='unbound')
+    RemoteFeedbackBinding.objects.create(workstation=station,defect=unrelated,created_by=station.agent.owner)
+    response=client.get(BASE+'defect-targets/',{'defect_id':str(wanted.id)})
+    assert response.data['results']==[]
+    assert response.data['binding']['kind']=='manual'
+
+
+def test_running_without_first_command_is_model_analysis(remote):
+    from plane.quality.models import Defect
+    from plane.quality.remote_models import RemoteAgentRun
+    from plane.quality.remote_diagnostics import run_queue
+    client,edge,device,project=remote;heartbeat(edge)
+    s=RemoteWorkstation.objects.get(pk=device);d=Defect.objects.create(project=project,title='analysis')
+    run=RemoteAgentRun.objects.create(workstation=s,defect=d,owner=s.agent.owner,status='running',expires_at=timezone.now()+timedelta(minutes=2))
+    assert run_queue(run)['stage']=='analysis'
+
+
+def test_signed_source_conflict_gets_one_technical_followup_without_faking_an_agent_run(remote):
+    from plane.quality.remote_feedback import received
+    from plane.quality.remote_models import RemoteAgentRun
+    client,edge,device,project=remote;heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device);station.agent.source_instance='original';station.agent.save()
+    defect=signed_device_defect(project,device,source='rotated')
+    received(defect.pk);defect.refresh_from_db()
+    assert defect.status=='needs_tech'
+    assert not RemoteAgentRun.objects.filter(defect=defect).exists()
+    events=defect.events.filter(note__startswith='Agent 尚未开始：')
+    assert events.count()==1
+    assert '接入信息不一致'in events.get().note
+    version=defect.edit_version;received(defect.pk);defect.refresh_from_db()
+    assert defect.edit_version==version and events.count()==1
+    from plane.quality.remote_diagnostics import defect_agent_availability
+    assert defect_agent_availability(defect)=={'state':'conflict','summary':'反馈接入来源与原执行端不一致，尚未开始现场处理。'}

@@ -14,7 +14,7 @@ DEFECT_STATUSES = ('open', 'in_progress', 'pending_tech', 'needs_tech', 'resolve
 ACTIVE_DEFECT_STATUSES = DEFECT_STATUSES[:-1]
 STATUS_LABELS = {'open':'待处理','in_progress':'处理中','pending_tech':'待技术确认',
     'needs_tech':'待技术处理','resolved':'待回归','closed':'已关闭'}
-PROCESS_LABELS = {'queued':'排队中','inspect':'排查中','repair':'修复中','verify':'复测中',
+PROCESS_LABELS = {'analysis':'分析中','queued':'排队中','inspect':'排查中','repair':'修复中','verify':'复测中',
     'repaired':'已修复','verified':'复核通过','unresolved':'未解决','interrupted':'已中断'}
 
 
