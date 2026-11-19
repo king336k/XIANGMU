@@ -1,5 +1,8 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import base64
+import hashlib
+import hmac
 from pathlib import Path
 import sys
 import threading
@@ -23,6 +26,45 @@ def fixture():
 
 
 class PlatformStressTests(unittest.TestCase):
+    def test_signing_material_stays_in_memory_and_is_signed_at_actual_submission_time(self):
+        requests=[];issue_id=str(uuid.uuid4())
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self,*_args):pass
+            def do_POST(self):
+                raw=self.rfile.read(int(self.headers['Content-Length']))
+                requests.append({'headers':dict(self.headers),'raw':raw})
+                self.send_response(201);self.send_header('X-Remote-Stress-Isolation','synthetic-isolation')
+                self.end_headers();self.wfile.write(json.dumps({'issueId':issue_id,'issueCode':'Q-ONLY-TEST'}).encode())
+        server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            samples=[];client=Http('http://127.0.0.1:'+str(server.server_address[1]),'synthetic-isolation',samples=samples)
+            request={'path':'/api/quality-auth/daq-reports/','payload':{'description':'测试载荷','device':'test-only'},
+                     'signing':{'key_id':'test-key','audience':'project-feedback','secret':'synthetic-not-a-real-secret',
+                                'principal':{'id':123,'username':'test-user'}},
+                     'headers':{'X-Issue-Principal-Timestamp':'1'}}
+            for timestamp in (1000,1125):
+                with patch('platform_stress.time.time',return_value=timestamp):
+                    result=submit_signed_feedback(client,request)
+                self.assertEqual(result,{'issue_id':issue_id})
+            for captured,stamp in zip(requests,('1000','1125')):
+                headers={key.lower():value for key,value in captured['headers'].items()}
+                self.assertEqual(headers['x-issue-principal-timestamp'],stamp)
+                digest=hashlib.sha256(captured['raw']).hexdigest()
+                self.assertEqual(headers['x-issue-content-sha256'],digest)
+                encode=lambda value:base64.urlsafe_b64encode(value.encode()).decode().rstrip('=')
+                canonical='\n'.join(['ISSUE-IDENTITY-V2',encode('project-feedback'),encode('test-key'),stamp,
+                                     encode(headers['x-issue-principal-nonce']),'POST',encode(request['path']),digest,
+                                     encode(headers['x-issue-principal'])])
+                signature=base64.urlsafe_b64encode(hmac.new(request['signing']['secret'].encode(),canonical.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+                self.assertEqual(signature,headers['x-issue-principal-signature'])
+            nonces=[{key.lower():value for key,value in row['headers'].items()}['x-issue-principal-nonce'] for row in requests]
+            self.assertNotEqual(*nonces)
+            self.assertNotIn('synthetic-not-a-real-secret',json.dumps(samples))
+            self.assertNotIn('测试载荷',json.dumps(samples,ensure_ascii=False))
+            self.assertNotIn('X-Issue',json.dumps(samples))
+        finally:server.shutdown();server.server_close();thread.join()
+
     def test_terminal_probe_requires_real_markers_distinct_users_and_common_open_interval(self):
         rows=[{'device_id':str(n),'terminal_probe':{'owner_user_id':str(n),'session_id':'s'+str(n),
                'marker_verified':True,'identity':{'username':'fixture-user','hostname':'station-'+str(n)},

@@ -13,6 +13,7 @@ import argparse
 import base64
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import hashlib
+import hmac
 import ipaddress
 import json
 import math
@@ -92,9 +93,12 @@ def validate_manifest(value):
         signed=row.get('signed_feedback_requests',[])
         if not isinstance(signed,list) or len(signed)>8 or any(
             not isinstance(item,dict) or item.get('path')!='/api/quality-auth/daq-reports/'
-            or not isinstance(item.get('payload'),dict) or not isinstance(item.get('headers'),dict)
+            or not isinstance(item.get('payload'),dict) or not isinstance(item.get('headers',{}),dict)
+            or ('signing' not in item and 'headers' not in item)
             for item in signed):
             raise ValueError('bounded signed feedback fixture requests required')
+        for item in signed:
+            if 'signing' in item:validate_signing(item['signing'])
     if value['model_mode']=='real_model_e2e' and len(stations)!=1:
         raise ValueError('real model evidence must be a separate single-station run')
     return value
@@ -104,11 +108,17 @@ class Http:
     def __init__(self,url,isolation,headers=None,samples=None):
         self.url=url.rstrip('/');self.isolation=isolation;self.headers=headers or {};self.samples=samples if samples is not None else []
 
-    def request(self,method,path,payload=None,expected=(200,),operation=None):
+    def request(self,method,path,payload=None,expected=(200,),operation=None,signing=None):
         if not path.startswith('/api/') or path.startswith('//'):raise ValueError('relative local API path required')
         started=time.perf_counter();started_at=time.time();status=0;ok=False
         headers={**self.headers,'Content-Type':'application/json'}
-        request=urllib.request.Request(self.url+path,data=None if payload is None else json.dumps(payload).encode(),
+        body=None if payload is None else json.dumps(payload).encode()
+        if signing:
+            # Sign the exact bytes handed to urllib, immediately before send;
+            # fixture creation and queue delays must not age the timestamp.
+            headers={key:value for key,value in headers.items() if not key.lower().startswith('x-issue-')}
+            headers.update(fresh_signature(signing,method,path,body or b''))
+        request=urllib.request.Request(self.url+path,data=body,
                                        headers=headers,method=method)
         opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect)
         try:
@@ -156,13 +166,39 @@ def submit_diagnostic(client,path):
 
 
 def submit_signed_feedback(client,request):
-    response=client.request('POST',request['path'],request['payload'],expected=(200,201),operation='signed_feedback_submit')
+    options={'signing':request['signing']} if 'signing' in request else {}
+    response=client.request('POST',request['path'],request['payload'],expected=(200,201),operation='signed_feedback_submit',**options)
     issue_id=response.get('issueId');issue_code=response.get('issueCode')
     try:uuid.UUID(str(issue_id))
     except (ValueError,TypeError,AttributeError):raise AssertionError('signed feedback returned no valid issueId')
     if not isinstance(issue_code,str) or not issue_code.strip():raise AssertionError('signed feedback returned no issueCode')
     # Persist only the returned identifier; no signatures, request payload or code.
     return {'issue_id':str(issue_id)}
+
+
+def validate_signing(signing):
+    if (not isinstance(signing,dict) or set(signing)!={'key_id','audience','secret','principal'}
+            or any(not isinstance(signing.get(key),str) or not 1<=len(signing[key])<=4096
+                   for key in ('key_id','audience','secret'))
+            or not isinstance(signing.get('principal'),dict)):
+        raise ValueError('invalid in-memory fixture signing material')
+    principal=signing['principal']
+    if type(principal.get('id')) is not int or principal['id']<=0 or len(json.dumps(principal))>2000:
+        raise ValueError('invalid fixture principal')
+
+
+def fresh_signature(signing,method,path,body):
+    validate_signing(signing)
+    encode=lambda value:base64.urlsafe_b64encode(value.encode()).decode().rstrip('=')
+    principal=json.dumps(signing['principal'],ensure_ascii=True,separators=(',',':'))
+    stamp=str(int(time.time()));nonce=secrets.token_urlsafe(24)
+    digest='-' if method in ('GET','HEAD') else hashlib.sha256(body).hexdigest()
+    canonical='\n'.join(['ISSUE-IDENTITY-V2',encode(signing['audience']),encode(signing['key_id']),stamp,
+                         encode(nonce),method.upper(),encode(path),digest,encode(principal)])
+    signature=base64.urlsafe_b64encode(hmac.new(signing['secret'].encode(),canonical.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+    return {'X-Issue-Identity-Version':'2','X-Issue-Key-Id':signing['key_id'],'X-Issue-Audience':signing['audience'],
+            'X-Issue-Principal':principal,'X-Issue-Principal-Timestamp':stamp,'X-Issue-Principal-Nonce':nonce,
+            'X-Issue-Content-SHA256':digest,'X-Issue-Principal-Signature':signature}
 
 
 def fixture_root(output):
@@ -466,7 +502,7 @@ def station_job(job):
             with ThreadPoolExecutor(max_workers=len(participants)+len(signed)) as pool:
                 file_futures=[pool.submit(files_for_user,identifier) for identifier in participants]
                 feedback_futures=[pool.submit(submit_signed_feedback,
-                    Http(manifest['base_url'],manifest['isolation_id'],request['headers'],samples),request)
+                    Http(manifest['base_url'],manifest['isolation_id'],request.get('headers',{}),samples),request)
                     for request in signed]
                 file_results=[future.result() for future in file_futures]
                 new_feedback.extend(future.result() for future in feedback_futures)
