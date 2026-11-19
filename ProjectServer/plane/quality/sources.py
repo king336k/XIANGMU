@@ -145,9 +145,17 @@ class CommentSerializer(serializers.ModelSerializer):
                 if not isinstance(location,dict):continue
                 actual=dict(location)
                 identity={'target_kind':location.get('target_kind'),'target_username':location.get('username'),'target_ip':location.get('ip_address')}
-                matches=[change for change in observed if isinstance(change,dict) and all(identity.values())
-                    and all(change.get(key)==value for key,value in identity.items()) and all(
-                        change.get(key)==location.get(key) for key in ['path','key','before','after'])]
+                # Parent summaries can omit receipt identity; match facts before display labels.
+                location_kind=location.get('target_kind') or ('collector' if str(location.get('target','')).startswith('采集电脑')
+                    else 'robot' if str(location.get('target','')).startswith('机器人') else None)
+                matches=[change for change in observed if isinstance(change,dict)
+                    and all(not value or change.get(key)==value for key,value in identity.items())
+                    and (not location_kind or change.get('target_kind')==location_kind)
+                    and all((key in change,change.get(key))==(key in location,location.get(key))
+                        for key in ['path','key','before','after'])]
+                if matches and len({(item.get('target_kind'),item.get('target_username'),item.get('target_ip')) for item in matches})==1:
+                    # The rich command receipt below owns this fact and its actual identity.
+                    continue
                 for field in ['before_line','after_line','before_exists','after_exists']:
                     values=[change[field] for change in matches if field in change]
                     if values and all(value==values[0] for value in values):actual[field]=values[0]
@@ -169,9 +177,9 @@ class CommentSerializer(serializers.ModelSerializer):
                 actual_host=actual.get('target_ip')
                 actual_target=(('机器人：' if kind=='robot' else '采集电脑：')+actual_user+'@'+actual_host
                     if kind in {'collector','robot'} and isinstance(actual_user,str) and actual_user and isinstance(actual_host,str) and actual_host else target)
-                identity=(fact.get('path'),fact.get('key'),actual_target)
                 existing=next((index for index,item in enumerate(changes)
-                    if (item.get('path'),item.get('key'),item.get('target'))==identity),None)
+                    if item.get('target')==actual_target and all((key in item,item.get(key))==(key in fact,fact.get(key))
+                        for key in ['path','key','before','after'])),None)
                 entry={**fact,'target':safe_output(actual_target)[:300]}
                 if existing is None:changes.append(entry)
                 else:changes[existing]=entry

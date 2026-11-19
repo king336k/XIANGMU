@@ -230,11 +230,17 @@ def test_real_file_receipt_overrides_command_classification_and_public_reply_kee
     assert actual['after_line']==2 and 'before_line' not in actual
     assert actual['before_file_exists'] is False and actual['before_source_role']=='effective'
     assert actual['before_source_path']=='/runtime/effective.yaml'
+    # Parent summaries may omit execution identity and rich file metadata.
+    run.result={**run.result,'repair_locations':[{'target':'采集电脑',**{key:change[key] for key in ['path','key','before','after']}}]};run.save()
     public=CommentSerializer(comment).data
+    assert len(public['repair_changes'])==1
+    assert public['repair_changes'][0]['after_line']==2
+    assert public['repair_changes'][0]['before_file_exists'] is False
     assert public['repair_changes'][0]['after']==.3065
     assert public['repair_changes'][0]['target']=='采集电脑：collector@10.0.0.195'
     assert public['command_operations'][0]['argv']==['unknown-wrapper','repair']
     assert public['command_operations'][0]['has_file_changes'] is True
+    assert len(public['command_operations'])==1
     # A failed verification after a real write must retain both the diff and failure.
     command.result={**command.result,'ok':False,'exit_code':1};command.save()
     partial=CommentSerializer(comment).data
