@@ -25,6 +25,7 @@ def test_historical_event_projects_actual_task_command_with_no_credentials(remot
     assert '第1轮诊断修复' in value['remote_process']['summary']
     assert str(run.id) not in value['remote_process']['summary']
     assert value['remote_process']['command']['argv']==['fixed','inspect']
+    assert value['remote_process']['command']['ok'] is True and value['remote_process']['command']['status']=='done'
     assert value['remote_process']['target']['username']==station.username
     assert value['remote_process']['target']['host']=='10.10.10.195'
     assert value['remote_process']['target']['identity_source']=='current_registration'

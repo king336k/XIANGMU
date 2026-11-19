@@ -150,6 +150,7 @@ def event_process(event,context):
                 elif value_part is None or type(value_part) in {bool,int}:safe[field]=value_part
             if safe:changes.append(safe)
         command={'argv':safe_argv(argv),'path':redact(str(path))if path else None,'exit_code':row.result.get('exit_code'),
+            'ok':row.result.get('ok') if type(row.result.get('ok')) is bool else None,'status':row.status,
             'kind':kind,'changes':changes,'backup':redact(str(receipt.get('backup',''))),
             'expected_sha256':row.payload.get('expected_sha256'),'sha256':row.result.get('sha256')}
         value.update(summary=f'{task} · {label}：'+('完成'if success else'失败'),stage=stage,target=target,
