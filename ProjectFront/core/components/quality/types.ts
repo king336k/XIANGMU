@@ -119,6 +119,7 @@ export type RemoteProcess = {
     stdout?: string;
     stderr?: string;
     timed_out?: boolean;
+    execution_steps?: import("./command-execution-result").CommandExecution[];
     kind?: string;
     ok?: boolean | null;
     status?: string;
