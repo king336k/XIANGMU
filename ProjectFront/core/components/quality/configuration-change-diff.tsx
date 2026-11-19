@@ -10,6 +10,8 @@ function fieldText(change: Change, side: "before" | "after") {
   if (!Object.hasOwn(change, side) || change[side] === undefined) return "字段值未记录";
   return `${JSON.stringify(change.key)}: ${JSON.stringify(change[side], null, 2)}`;
 }
+const backupCaption = (path: string) =>
+  path.replace(/(\.backup)[-_](?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i, "$1…");
 export function ConfigurationChangeDiff({ command }: { command: Command }) {
   const groups = new Map<string, Change[]>();
   for (const change of command.changes || []) {
@@ -57,21 +59,29 @@ export function ConfigurationChangeDiff({ command }: { command: Command }) {
                     回执位置：{lineNumber(change.line)}（未区分修改前后）
                   </p>
                 )}
-              {(change.backup || change.before_sha256 || change.after_sha256) && (
+              {(change.backup || command.backup || change.before_sha256 || change.after_sha256) && (
                 <details className="px-3 py-2 text-11 text-tertiary">
                   <summary className="cursor-pointer">备份与校验信息</summary>
-                  {change.backup && (
-                    <p className="mt-1">
-                      {command.status === "done" && command.ok === true && command.exit_code === 0
-                        ? "备份已保存"
-                        : "备份路径已记录"}
+                  <div className="mt-2 space-y-1">
+                    <p>
+                      备份 / 修改前：
+                      {change.backup || command.backup ? (
+                        <span title={change.backup || command.backup}>
+                          {backupCaption(change.backup || command.backup!)}
+                        </span>
+                      ) : (
+                        "修改前文件未记录"
+                      )}
                     </p>
-                  )}
-                  {change.before_sha256 && <p className="mt-1">修改前校验值已记录</p>}
-                  {change.after_sha256 && <p className="mt-1">修改后校验值已记录</p>}
+                    <p>
+                      修改后：<span title={path}>{path}</span>
+                    </p>
+                  </div>
                   <details className="mt-2">
                     <summary className="cursor-pointer">技术信息</summary>
-                    {change.backup && <p className="mt-1 break-all">{change.backup}</p>}
+                    {(change.backup || command.backup) && (
+                      <p className="mt-1 break-all">{change.backup || command.backup}</p>
+                    )}
                     {change.before_sha256 && <p className="mt-1 break-all">修改前：{change.before_sha256}</p>}
                     {change.after_sha256 && <p className="mt-1 break-all">修改后：{change.after_sha256}</p>}
                   </details>

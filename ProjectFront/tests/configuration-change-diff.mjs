@@ -61,7 +61,7 @@ test("new deleted null boolean and object values stay factual without invented s
   assert.doesNotMatch(text(before), /第7行/);
 });
 
-test("backup and checksum display friendly recorded states while long values stay in nested technical information", () => {
+test("backup positions use real receipt paths with explicit UUID suffix ellipsis and SHA only in technical information", () => {
   const before = "a".repeat(64),
     after = "b".repeat(64),
     backup = "/home/robot/config.json.backup-95f89e89-3d92-4f6c-a6aa-9b95fddfcd88";
@@ -87,13 +87,41 @@ test("backup and checksum display friendly recorded states while long values sta
   });
   const check = nodes(tree).find((node) => node.type === "details");
   const primary = [check.props.children].flat().filter((node) => node?.type !== "details");
-  assert.match(text(primary), /备份已保存/);
-  assert.match(text(primary), /修改前校验值已记录/);
-  assert.match(text(primary), /修改后校验值已记录/);
+  assert.match(text(primary), /备份 \/ 修改前/);
+  assert.match(text(primary), /\/home\/robot\/config.json.backup…/);
+  assert.match(text(primary), /修改后/);
+  assert.ok(nodes(primary).some((node) => node.props?.title === backup));
+  assert.ok(nodes(primary).some((node) => node.props?.children === "/home/robot/config.json"));
   assert.ok(!text(primary).includes(before) && !text(primary).includes(after) && !text(primary).includes(backup));
   assert.doesNotMatch(text(primary), /校验通过/);
   const technical = nodes(check).find((node) => node !== check && node.type === "details");
   assert.equal(technical.props.open, undefined);
   assert.match(text(technical), /config.json.backup-/);
   assert.ok(text(technical).includes(before) && text(technical).includes(after));
+});
+
+test("missing backup does not invent a before file while after location comes from receipt path", () => {
+  const tree = ConfigurationChangeDiff({
+    command: {
+      path: "/real/config.json",
+      changes: [
+        { key: "port", before: 1, after: 2, before_exists: true, after_exists: true, before_sha256: "a".repeat(64) },
+      ],
+    },
+  });
+  const check = nodes(tree).find((node) => node.type === "details");
+  const primary = [check.props.children].flat().filter((node) => node?.type !== "details");
+  assert.match(text(primary), /修改前文件未记录/);
+  assert.ok(nodes(primary).some((node) => node.props?.children === "/real/config.json"));
+  assert.doesNotMatch(text(primary), /config.json.backup/);
+});
+
+test("connector 32 character unique backup suffix also stays explicitly abbreviated with full real path in title", () => {
+  const backup = "/real/config.json.backup-" + "a".repeat(32);
+  const tree = ConfigurationChangeDiff({
+    command: { path: "/real/config.json", changes: [{ key: "port", before: 1, after: 2, backup }] },
+  });
+  const caption = nodes(tree).find((node) => node.type === "span" && node.props.title === backup);
+  assert.equal(caption.props.children, "/real/config.json.backup…");
+  assert.ok(text(tree).includes(backup));
 });

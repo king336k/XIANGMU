@@ -1,3 +1,4 @@
+import { AgentReportText } from "./agent-report-text-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -13,7 +14,15 @@ function load() {
       readFileSync(new URL("../core/components/quality/collaboration-panel.tsx", import.meta.url), "utf8"),
       { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }
     ).outputText
-  )((id) => (id === "react/jsx-runtime" ? require(id) : new Proxy({}, { get: () => () => null })), exports);
+  )(
+    (id) =>
+      id === "./agent-report-text"
+        ? { AgentReportText }
+        : id === "react/jsx-runtime"
+          ? require(id)
+          : new Proxy({}, { get: () => () => null }),
+    exports
+  );
   return exports;
 }
 function text(node) {

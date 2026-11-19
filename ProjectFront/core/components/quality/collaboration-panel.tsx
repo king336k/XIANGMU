@@ -5,6 +5,7 @@ import { can, statusNames, resultNames } from "./types";
 import { useState } from "react";
 import { ConfigurationChangeDiff } from "./configuration-change-diff";
 import { groupSuccessfulInspections } from "./timeline-inspection-groups";
+import { AgentReportText } from "./agent-report-text";
 import useSWR from "swr";
 import { Button } from "@plane/ui";
 import { qualityApi, errorMessage } from "./api";
@@ -276,10 +277,22 @@ export function CollaborationPanel({
                         (row.content.length > 180 || row.content.split("\n").length > 3 ? (
                           <details className="mt-1">
                             <summary className="cursor-pointer text-secondary">查看详细内容</summary>
-                            <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>
+                            <div className="mt-1 text-secondary">
+                              {row.content.startsWith("Agent 远程处理：") ? (
+                                <AgentReportText content={row.content} />
+                              ) : (
+                                <p className="break-words whitespace-pre-wrap">{row.content}</p>
+                              )}
+                            </div>
                           </details>
                         ) : (
-                          <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>
+                          <div className="mt-1 text-secondary">
+                            {row.content.startsWith("Agent 远程处理：") ? (
+                              <AgentReportText content={row.content} />
+                            ) : (
+                              <p className="break-words whitespace-pre-wrap">{row.content}</p>
+                            )}
+                          </div>
                         ))}
                       {(row.process || row.rawDetails) && (
                         <details className="mt-2 text-secondary">

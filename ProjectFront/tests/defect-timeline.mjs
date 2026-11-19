@@ -1,3 +1,4 @@
+import { AgentReportText } from "./agent-report-text-fixture.js";
 import { groupSuccessfulInspections } from "./timeline-groups-fixture.js";
 import { ConfigurationChangeDiff } from "./configuration-diff-fixture.js";
 import assert from "node:assert/strict";
@@ -39,6 +40,7 @@ function render(events, comments, value = {}) {
     if (id === "./configuration-change-diff") return { ConfigurationChangeDiff };
     if (id === "./timeline-inspection-groups") return { groupSuccessfulInspections };
     if (id === "react/jsx-runtime") return require(id);
+    if (id === "./agent-report-text") return { AgentReportText };
     if (id === "react") return { useState: (v) => [v, () => {}] };
     if (id === "lodash-es") return { sortBy: (rows, key) => rows.toSorted((a, b) => key(a) - key(b)) };
     if (id === "@plane/utils") return { renderNumericDateTime: String };

@@ -1,3 +1,4 @@
+import { AgentReportText } from "./agent-report-text-fixture.js";
 import { groupSuccessfulInspections } from "./timeline-groups-fixture.js";
 import { ConfigurationChangeDiff } from "./configuration-diff-fixture.js";
 import assert from "node:assert/strict";
@@ -20,6 +21,7 @@ function component(file, name, access, config) {
   )((id) => {
     if (id === "./configuration-change-diff") return { ConfigurationChangeDiff };
     if (id === "./timeline-inspection-groups") return { groupSuccessfulInspections };
+    if (id === "./agent-report-text") return { AgentReportText };
     if (id === "react") return React;
     if (id === "swr")
       return {
