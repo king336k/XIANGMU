@@ -145,3 +145,65 @@ def test_worker_freezes_only_safe_display_policy_and_finish_preserves_it(remote)
     display=EventSerializer(event,context={}).data['remote_process']
     assert display['target']['host']=='10.10.10.177' and display['command']['changes'][0]['after_line']==4
     assert 'synthetic-policy-secret' not in str(display)
+
+
+def test_public_reply_projects_only_its_observed_repair_locations(remote):
+    from plane.quality.models import DefectComment
+    from plane.quality.sources import CommentSerializer
+    _,edge,device,project=remote;heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device)
+    defect=Defect.objects.create(project=project,title='reply diff',description='reply diff')
+    comment=DefectComment.objects.create(project=project,defect=defect,created_by=station.agent.owner,visibility='public',content='Agent 远程处理：已修复')
+    run=RemoteAgentRun.objects.create(workstation=station,defect=defect,owner=station.agent.owner,comment=comment,expires_at=timezone.now()+timedelta(minutes=5),
+        result={'repair_locations':[{'target':'采集电脑：collector@10.0.0.195','path':'/approved/config.json','key':'robot_port','before':18778,'after':18777,'line':4,'before_line':4,'backup':'/approved/config.json.backup-actual'},
+        {'target':'采集电脑','path':'/approved/config.json','key':'robot_password','before':'synthetic-old-secret','after':'synthetic-new-secret'}]})
+    value=CommentSerializer(comment).data
+    assert value['repair_changes'][0]['before']==18778 and value['repair_changes'][0]['after']==18777
+    assert value['repair_changes'][0]['line']==4 and 'after_line' not in value['repair_changes'][0]
+    assert 'synthetic-old-secret' not in str(value) and 'synthetic-new-secret' not in str(value)
+    run.defect=Defect.objects.create(project=project,title='other feedback',description='other feedback');run.save()
+    assert CommentSerializer(comment).data['repair_changes']==[]
+
+
+def test_command_output_is_actual_bounded_and_redacted(remote):
+    from plane.quality.models import DefectComment
+    from plane.quality.sources import CommentSerializer
+    from plane.quality.remote_event_display import safe_output
+    client,edge,device,project=remote;heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device)
+    defect=Defect.objects.create(project=project,title='command output',description='command output')
+    comment=DefectComment.objects.create(project=project,defect=defect,created_by=station.agent.owner,visibility='public',content='Agent 远程处理：未自动修复')
+    run=RemoteAgentRun.objects.create(workstation=station,defect=defect,owner=station.agent.owner,comment=comment,expires_at=timezone.now()+timedelta(minutes=5))
+    RemoteCommand.objects.create(workstation=station,run=run,payload={'kind':'run','argv':['pip','check']},result={'ok':False,'exit_code':1,'stdout':'dependency check ran','stderr':'missing package'},status='done',expires_at=run.expires_at)
+    value=CommentSerializer(comment).data
+    command=value['command_operations'][0]
+    assert command['argv']==['pip','check'] and command['stdout']=='dependency check ran'
+    assert command['exit_code']==1 and command['ok'] is False and command['stderr']=='missing package'
+    assert 'synthetic-value' not in safe_output('{"robot":{"ssh_password":"synthetic-value"}}')
+    assert 'synthetic-value' not in safe_output('ssh_password=synthetic-value')
+    assert 'synthetic-value' not in safe_output('+ sshpass -p synthetic-value ssh robot')
+    assert 'synthetic-value' not in safe_output('ssh_password:\n  synthetic-value\nstatus: stopped')
+    assert len(safe_output('x'*70000))<=8192
+    response=client.get(f'/api/workspaces/{project.workspace.slug}/projects/{project.id}/quality/defects/{defect.id}/collaboration/')
+    assert response.status_code==200,response.data
+    assert response.data['results'][0]['command_operations'][0]['exit_code']==1
+
+
+def test_reply_line_evidence_never_crosses_targets_and_robot_command_target_is_actual(remote):
+    import json
+    from plane.quality.models import DefectComment
+    from plane.quality.sources import CommentSerializer
+    _,edge,device,project=remote;heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device)
+    defect=Defect.objects.create(project=project,title='target scoped lines',description='target scoped lines')
+    comment=DefectComment.objects.create(project=project,defect=defect,created_by=station.agent.owner,visibility='public',content='Agent 远程处理：已修复')
+    location={'target':'采集电脑：collector@10.0.0.195','target_kind':'collector','username':'collector','ip_address':'10.0.0.195','path':'/shared/config.json','key':'port','before':2,'after':1}
+    run=RemoteAgentRun.objects.create(workstation=station,defect=defect,owner=station.agent.owner,comment=comment,expires_at=timezone.now()+timedelta(minutes=5),result={'repair_locations':[location]})
+    change={'target_kind':'robot','target_username':'robot','target_ip':'10.0.0.177','path':'/shared/config.json','key':'port','before':2,'after':1,'after_line':10}
+    command=RemoteCommand.objects.create(workstation=station,run=run,payload={'kind':'run','argv':['fixed','repair']},status='done',result={'ok':True,'exit_code':0,'stdout':json.dumps({'simulation':True,'changes':[change]})},expires_at=run.expires_at)
+    value=CommentSerializer(comment).data
+    assert 'after_line' not in value['repair_changes'][0]
+    assert value['command_operations'][0]['target']=='机器人：robot@10.0.0.177'
+    change.update(target_kind='collector',target_username='collector',target_ip='10.0.0.195',after_line=4)
+    command.result={'ok':True,'exit_code':0,'changes':[change]};command.save()
+    assert CommentSerializer(comment).data['repair_changes'][0]['after_line']==4

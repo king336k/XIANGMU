@@ -116,10 +116,87 @@ class CollaborationInput(serializers.Serializer):
 
 class CommentSerializer(serializers.ModelSerializer):
     actor = serializers.CharField(source="created_by.display_name", default="成员")
+    repair_changes = serializers.SerializerMethodField()
+    command_operations = serializers.SerializerMethodField()
+
+    def agent_receipts(self, obj):
+        cache=self.context.setdefault('comment_agent_receipts',{})
+        if obj.id in cache:return cache[obj.id]
+        changes=[];operations=[]
+        from django.core.exceptions import ObjectDoesNotExist
+        from .remote_event_display import safe_changes,safe_argv,safe_output,execution_steps
+        try:run=obj.remoteagentrun
+        except ObjectDoesNotExist:run=None
+        if run is not None and run.defect_id==obj.defect_id and run.defect.project_id==obj.project_id:
+            from types import SimpleNamespace
+            prepared=getattr(run,'display_commands',None)
+            rows=list(run.remotecommand_set.all()) if prepared is None else [SimpleNamespace(
+                id=row.id,created_at=row.created_at,status=row.status,
+                payload=row.display_payload,result=row.display_result) for row in prepared]
+            rows.sort(key=lambda row:(row.created_at,str(row.id)))
+            observed=[];receipts={}
+            for row in rows:
+                if row.status!='done' or row.result.get('ok') is not True or row.result.get('exit_code',0)!=0:continue
+                receipt=row.result
+                if row.payload.get('kind')=='run' and isinstance(receipt.get('stdout'),str) and len(receipt['stdout'])<=65536:
+                    try:
+                        parsed=json.loads(receipt['stdout'])
+                        if isinstance(parsed,dict) and parsed.get('simulation') is True:receipt=parsed
+                    except (ValueError,TypeError):pass
+                if isinstance(receipt.get('changes'),list):observed.extend(receipt['changes'][:20])
+                receipts[row.id]=receipt
+            locations=run.result.get('repair_locations',[]) if isinstance(run.result,dict) else []
+            for location in locations[:10] if isinstance(locations,list) else []:
+                if not isinstance(location,dict):continue
+                actual=dict(location)
+                identity={'target_kind':location.get('target_kind'),'target_username':location.get('username'),'target_ip':location.get('ip_address')}
+                matches=[change for change in observed if isinstance(change,dict) and all(identity.values())
+                    and all(change.get(key)==value for key,value in identity.items()) and all(
+                        change.get(key)==location.get(key) for key in ['path','key','before','after'])]
+                for field in ['before_line','after_line','before_exists','after_exists']:
+                    values=[change[field] for change in matches if field in change]
+                    if values and all(value==values[0] for value in values):actual[field]=values[0]
+                cleaned=safe_changes([actual])
+                if cleaned and cleaned[0].get('path') and cleaned[0].get('key'):
+                    changes.append({**cleaned[0],'target':safe_output(location.get('target','现场'))[:300]})
+            snapshot=run.result.get('target_snapshot',{}).get('collector',{})
+            frozen=bool(snapshot.get('username') and snapshot.get('host'))
+            user=snapshot.get('username') or run.workstation.username
+            host=snapshot.get('host') or run.workstation.capabilities.get('network',{}).get('ip_address','')
+            target=('采集电脑：' if frozen else '采集电脑（当前登记信息）：')+user+('@'+host if host else '')
+            policy=run.result.get('display_policy_snapshot') or run.workstation.capabilities.get('agent_context',{})
+            # Public summaries retain a bounded tail; all events remain available separately.
+            for row in [row for row in rows if row.payload.get('kind')=='run'][-12:]:
+                result=row.result if isinstance(row.result,dict) else {}
+                argv=safe_argv(row.payload.get('argv'))
+                if argv==safe_argv(policy.get('inspect_argv')) or (len(argv)>=2 and argv[-2] in {'rosa','rai'} and argv[-1] in {'health','inspect'}):continue
+                repair=safe_argv(policy.get('repair_argv'))
+                stage='verify' if argv==safe_argv(policy.get('verify_argv')) else 'repair' if repair and argv[:len(repair)]==repair else 'command'
+                command_target=target
+                receipt=receipts.get(row.id,{})
+                receipt_changes=receipt.get('changes',[])
+                actual_targets={(item.get('target_kind'),item.get('target_username'),item.get('target_ip'))
+                    for item in (receipt_changes if isinstance(receipt_changes,list) else []) if isinstance(item,dict)
+                    and item.get('target_kind') in {'robot','collector'}
+                    and isinstance(item.get('target_username'),str) and isinstance(item.get('target_ip'),str)}
+                if len(actual_targets)==1:
+                    kind,username,host=next(iter(actual_targets))
+                    command_target=('机器人：' if kind=='robot' else '采集电脑：')+username+'@'+host
+                operations.append({'target':safe_output(command_target)[:300],
+                    'argv':argv,'stage':stage,'stdout':safe_output(result.get('stdout'))[-4096:],'execution_steps':execution_steps(result),
+                    'stderr':safe_output(result.get('stderr'))[-4096:],'status':row.status,
+                    'ok':result.get('ok') if type(result.get('ok')) is bool else None,
+                    'exit_code':result.get('exit_code'),'timed_out':result.get('timed_out') is True})
+        cache[obj.id]=(changes,operations)
+        return cache[obj.id]
+
+    def get_repair_changes(self,obj):return self.agent_receipts(obj)[0]
+
+    def get_command_operations(self,obj):return self.agent_receipts(obj)[1]
 
     class Meta:
         model = DefectComment
-        fields = ["id", "content", "visibility", "actor", "created_at"]
+        fields = ["id", "content", "visibility", "actor", "created_at", "repair_changes", "command_operations"]
 
 
 class DefectCollaboration(QualityView):
@@ -128,7 +205,19 @@ class DefectCollaboration(QualityView):
         from .collaboration_admin import internal_access
 
         # Rich discussions have their own tab; retain only legacy notes/public replies in operation history.
-        comments = defect.comments.filter(request_id__isnull=True).select_related("created_by")
+        from django.db.models import Prefetch,F
+        from django.db.models.functions import JSONObject,Substr
+        from django.db.models.fields.json import KeyTextTransform
+        from .remote_models import RemoteCommand
+        commands=RemoteCommand.objects.only('id','run_id','created_at','status').annotate(
+            display_payload=JSONObject(kind=F('payload__kind'),argv=F('payload__argv')),
+            display_result=JSONObject(ok=F('result__ok'),exit_code=F('result__exit_code'),
+                timed_out=F('result__timed_out'),changes=F('result__changes'),
+                stdout=Substr(KeyTextTransform('stdout','result'),1,65536),stderr=Substr(KeyTextTransform('stderr','result'),1,65536))
+        ).order_by('created_at','id')[:32]
+        comments = defect.comments.filter(request_id__isnull=True).select_related(
+            "created_by", "remoteagentrun__workstation", "remoteagentrun__defect"
+        ).prefetch_related(Prefetch('remoteagentrun__remotecommand_set',queryset=commands,to_attr='display_commands'))
         if not internal_access(self.project_id, request.user, self.workspace_slug):
             comments = comments.filter(visibility="public")
         return self.listing(comments, CommentSerializer)

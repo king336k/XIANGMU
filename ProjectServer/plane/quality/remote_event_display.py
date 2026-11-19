@@ -48,6 +48,66 @@ def safe_change_value(value,depth=0):
     return value
 
 
+def safe_changes(values):
+    changes=[]
+    for change in values:
+        if not isinstance(change,dict):continue
+        safe={}
+        for field in ['key','before','after','before_exists','after_exists','line','before_line','after_line','path','backup','before_sha256','after_sha256']:
+            if field not in change:continue
+            value_part=change[field]
+            if field in {'before','after'} and sensitive_name(change.get('key','')):
+                safe[field]='[已隐藏]'
+            elif field in {'before','after'}:
+                # String redaction and key-based JSON sanitizing protect credentials.
+                try:
+                    cleaned=json.loads(redact(json.dumps({str(change.get('key','value')):safe_change_value(value_part)},ensure_ascii=False)))
+                    safe[field]=next(iter(cleaned.values())) if isinstance(cleaned,dict) else '[已隐藏]'
+                except (ValueError,TypeError):
+                    safe[field]='[已隐藏]'
+            elif isinstance(value_part,str):safe[field]=redact(value_part)[:2000]
+            elif value_part is None or type(value_part) in {bool,int}:safe[field]=value_part
+        if safe:changes.append(safe)
+    return changes
+
+
+def safe_output(value):
+    if not isinstance(value,str):return ''
+    bounded=value[:65536]
+    try:
+        parsed=json.loads(bounded)
+        cleaned=json.dumps(safe_change_value(parsed),ensure_ascii=False,indent=2)
+    except (ValueError,TypeError,RecursionError):
+        # Redact common configuration aliases even when output is not JSON.
+        cleaned=re.sub(r'(?im)^([^\n:=]*(?:password|passwd|token|secret|api[_-]?key)[^\n:=]*[:=])[ \t]*\n(?:[ \t]+[^\n]*(?:\n|$))+',r'\1[已隐藏]\n',bounded)
+        cleaned=re.sub(r'(?im)^([^\n:=]*(?:password|passwd|token|secret|api[_-]?key)[^\n:=]*[:=])[^\n]*',r'\1[已隐藏]',cleaned)
+        lines=[]
+        for line in cleaned.splitlines():
+            if re.search(r'(?i)(?:sshpass|--?\S*(?:password|passwd|token|secret|api[_-]?key)|\bmysql\b)',line):
+                # Shell xtrace may omit key=value syntax; never publish credential-bearing command lines.
+                lines.append('[含凭据的命令输出已隐藏]')
+            else:lines.append(line)
+        cleaned='\n'.join(lines)
+    return redact(cleaned)[-8192:]
+
+
+def execution_steps(result):
+    if not isinstance(result,dict):return []
+    value=result.get('stdout')
+    if not isinstance(value,str) or len(value)>65536:return []
+    try:receipt=json.loads(value)
+    except (ValueError,TypeError):return []
+    if not isinstance(receipt,dict) or not isinstance(receipt.get('execution_steps'),list):return []
+    steps=[]
+    for item in receipt['execution_steps'][:8]:
+        if not isinstance(item,dict) or not isinstance(item.get('argv'),list):continue
+        steps.append({'argv':safe_argv(item['argv']),'stdout':safe_output(item.get('stdout')),
+            'stderr':safe_output(item.get('stderr')),'status':item.get('status') if item.get('status') in {'done','failed','pending','delivered'} else '',
+            'exit_code':item.get('exit_code') if type(item.get('exit_code')) is int else None,
+            'ok':item.get('ok') if type(item.get('ok')) is bool else None,'timed_out':item.get('timed_out') is True})
+    return steps
+
+
 def readable_assignment(note):
     """Names already in the historical note remain; opaque IDs move to details."""
     if not isinstance(note,str):return note
@@ -130,27 +190,12 @@ def event_process(event,context):
         if len(robot_targets)==1:
             username,host=next(iter(robot_targets))
             target={'label':'机器人','username':redact(username),'host':redact(host),'identity_source':'execution_receipt'}
-        changes=[]
-        for change in raw_changes:
-            if not isinstance(change,dict):continue
-            safe={}
-            for field in ['key','before','after','before_exists','after_exists','line','before_line','after_line','path','backup','before_sha256','after_sha256']:
-                if field not in change:continue
-                value_part=change[field]
-                if field in {'before','after'} and sensitive_name(change.get('key','')):
-                    safe[field]='[已隐藏]'
-                elif field in {'before','after'}:
-                    # String redaction and key-based JSON sanitizing protect credentials.
-                    try:
-                        cleaned=json.loads(redact(json.dumps({str(change.get('key','value')):safe_change_value(value_part)},ensure_ascii=False)))
-                        safe[field]=next(iter(cleaned.values())) if isinstance(cleaned,dict) else '[已隐藏]'
-                    except (ValueError,TypeError):
-                        safe[field]='[已隐藏]'
-                elif isinstance(value_part,str):safe[field]=redact(value_part)[:2000]
-                elif value_part is None or type(value_part) in {bool,int}:safe[field]=value_part
-            if safe:changes.append(safe)
+        changes=safe_changes(raw_changes)
         command={'argv':safe_argv(argv),'path':redact(str(path))if path else None,'exit_code':row.result.get('exit_code'),
             'ok':row.result.get('ok') if type(row.result.get('ok')) is bool else None,'status':row.status,
+            'stdout':safe_output(row.result.get('stdout')),'stderr':safe_output(row.result.get('stderr')),
+            'execution_steps':execution_steps(row.result),
+            'timed_out':row.result.get('timed_out') is True,
             'kind':kind,'changes':changes,'backup':redact(str(receipt.get('backup',''))),
             'expected_sha256':row.payload.get('expected_sha256'),'sha256':row.result.get('sha256')}
         value.update(summary=f'{task} · {label}：'+('完成'if success else'失败'),stage=stage,target=target,
