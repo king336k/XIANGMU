@@ -103,14 +103,20 @@ def run_diagnostic(job_id):
             inspect(job, materials, coverage=coverage) if job.mode in {"llm", "auto"} else inspect(job)
         )
         incomplete_scan = any(row.get("scan_incomplete") for row in sources)
+        unread_coverage = [row for row in coverage if row.get("semantic_scan_complete") is False
+                           and row.get("status") in {"not_read", "unsupported"}]
+        partial_coverage = incomplete_scan or bool(unread_coverage)
         integrity_failed = any(row.get("integrity_verified", row.get("verified")) is False for row in coverage) or any(
             row.get("integrity_verified") is False for row in sources)
-        verified_subset = (incomplete_scan and not integrity_failed and bool(sources)
+        verified_subset = (partial_coverage and not integrity_failed and bool(sources)
             and all(row.get("integrity_verified") is True for row in sources)
             and any(row.get("read_bytes", 0) > 0 and row.get("scanned_bytes", 0) > 0 for row in sources))
         partial_warning = {"unread_sources": [
             {key: row.get(key) for key in ("file_id", "archive_entry", "scanned_bytes", "file_bytes", "selection_scope")}
-            for row in sources if row.get("scan_incomplete")],
+            for row in sources if row.get("scan_incomplete")] + [
+            {key: row.get(key) for key in ("file_id", "name", "kind", "status", "reason")}
+            for row in unread_coverage if row.get("file_id") not in {
+                source.get("file_id") for source in sources if source.get("scan_incomplete")}],
             "constraints": ["只陈述已读取原始事实", "不得以未见推断不存在、完整覆盖或已修复", "建议列明待验证步骤，不自动执行"]}
         facts = meta.get("input", {}).get("context", {})
         findings = [*findings, *evaluate(facts)]
@@ -124,10 +130,10 @@ def run_diagnostic(job_id):
             timeout_seconds=timeout_seconds(),
             progress={"stage": "rule_check", "at": timezone.now().isoformat()},
             materials_status="partial" if verified_subset else "read" if sources else "awaiting_materials",
-            analysis_scope="verified_read_subset" if verified_subset else "full_evidence_scan",
-            material_coverage_status="partial" if incomplete_scan else "complete",
+            analysis_scope="verified_read_subset" if verified_subset else "insufficient_read_materials" if partial_coverage else "full_evidence_scan",
+            material_coverage_status="partial" if partial_coverage else "complete",
             integrity_verified=not integrity_failed,
-            semantic_scan_complete=not incomplete_scan,
+            semantic_scan_complete=not partial_coverage,
             read_bytes=sum(row["read_bytes"] for row in sources),
             input_scope={
                 "model_text_chars": min(len(text), 12000),

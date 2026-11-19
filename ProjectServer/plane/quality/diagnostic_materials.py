@@ -215,7 +215,7 @@ def inspect(job, materials=None, *, coverage=None):
                         "truncated": len(clean) < len(extracted["text"]),
                     }
                 )
-                coverage_entry.update(status="analyzed", reason="已提取图片文字，需核对原图")
+                coverage_entry.update(status="analyzed", reason="已提取图片文字，需核对原图", semantic_scan_complete=True)
                 continue
             if suffix not in TEXT_TYPES | {".zip"}:
                 if coverage_entry is not None:
