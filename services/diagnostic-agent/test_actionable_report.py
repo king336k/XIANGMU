@@ -64,6 +64,30 @@ class ActionableReportTests(unittest.TestCase):
         from pydantic import ValidationError
         with self.assertRaises(ValidationError):runner.Report.model_validate({**report(), 'evidence_details':'x'*10001})
 
+    def test_new_short_generation_contract_keeps_legacy_report_readable(self):
+        from pydantic import ValidationError
+        old={**report(['核查同事件证据。'],['按原操作复测。']), 'answer':'旧报告内容'*100,'evidence_details':'旧详细依据'*300}
+        self.assertEqual(runner.Report.model_validate(old).answer,old['answer'])
+        with self.assertRaises(ValidationError):runner.ActionableReport.model_validate(old)
+        schema=runner.create_agent(None,payload()).output_type.model_json_schema()
+        self.assertEqual(schema['properties']['answer']['maxLength'],220)
+        self.assertEqual(schema['properties']['evidence_details']['maxLength'],800)
+
+    def test_short_three_part_report_preserves_before_after_and_structured_source_ids(self):
+        answer='**故障**：复位目标超限，原始日志直接说明失败环节。\n**已处理**：按批准计划将右臂初值3.3065改为0.3065，配置复查通过。\n**待验证**：由现场人员在安全条件下执行复位，确认成功且不再报同类错误。'
+        source='FILE-11111111-2222-4333-8444-555555555555'
+        def respond(messages,info):
+            value=report(['由现场人员执行原复位操作。'],['复位完成且无同类错误，才通过业务验收。'])
+            value.update(answer=answer,evidence_details='节点日志：reset goal is invalid: joint limit violation。',citations=[source])
+            return ModelResponse(parts=[ToolCallPart('final_result',value)])
+        data=payload();data['evidence']=[{'reference':source,'title':'复位节点原始日志','content':'reset goal is invalid: joint limit violation'}]
+        result=runner.create_agent(FunctionModel(respond),data).run_sync('分析')
+        self.assertEqual(result.output.answer,answer)
+        self.assertEqual(result.output.citations,[source])
+        self.assertLessEqual(len(result.output.answer),220)
+        self.assertNotIn(source,result.output.answer+result.output.evidence_details)
+        self.assertIn('3.3065改为0.3065',result.output.answer)
+
     def test_schema_exposes_minimum_nonblank_steps_for_production(self):
         schema = runner.create_agent(None, payload()).output_type.model_json_schema()
         for key in ["suggested_actions", "verification_steps"]:
