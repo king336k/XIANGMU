@@ -408,3 +408,96 @@ def test_successful_finalizer_keeps_only_fixed_reason_metadata():
     assert safe["finalizer"]["validation_categories"] == ["severity_reference_not_file"]
     trace["finalizer"]["reason"] = "PRIVATE_ERROR_BODY"
     assert "PRIVATE" not in json.dumps(validated_evidence_trace(trace, {}))
+
+
+def test_zip_small_entries_and_each_attachment_get_evidence_before_large_warning_flood(material_case, mocker):
+    import io
+    import zipfile
+    from plane.quality.diagnostic_materials import inspect
+
+    add, job = material_case
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as output:
+        output.writestr('large.log', b'WARNING periodic heartbeat\n' * 30000)
+        for index in range(6):
+            output.writestr(f'node-{index}.log', b'INFO service healthy\n' * 10000 + f'ERROR E-NODE-{index} fault\n'.encode())
+    row = add(archive.getvalue(), 'diagnostics.zip')
+    materials, coverage = {}, []
+    _, sources, _ = inspect(job([row.id]), materials, coverage=coverage)
+    for index in range(6):
+        assert f'E-NODE-{index}' in materials[f'FILE-{row.id}:node-{index}.log']['content']
+    assert all(source['scanned_bytes'] == source['file_bytes'] and not source['scan_incomplete'] for source in sources)
+    assert coverage[0]['status'] == 'analyzed'
+
+
+def test_zip_crc_failure_never_exposes_preceding_valid_entry(material_case):
+    import io
+    import struct
+    import zipfile
+    from plane.quality.diagnostic_materials import inspect
+
+    add, job = material_case
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as output:
+        output.writestr('valid.log', b'ERROR preceding valid log\n')
+        output.writestr('bad.log', b'ERROR corrupt me\n')
+    raw = bytearray(buffer.getvalue())
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        info = archive.getinfo('bad.log')
+        name_length, extra_length = struct.unpack_from('<HH', raw, info.header_offset + 26)
+        offset = info.header_offset + 30 + name_length + extra_length
+        raw[offset] ^= 1
+    row = add(bytes(raw), 'corrupt.zip')
+    materials, coverage = {}, []
+    _, sources, _ = inspect(job([row.id]), materials, coverage=coverage)
+    assert not materials
+    assert sources[0]['scan_incomplete'] is True
+    assert coverage[0]['status'] == 'not_read'
+
+
+def test_real_large_capture_zip_scans_completely_with_digest_and_crc(material_case):
+    import time
+    from plane.quality.diagnostic_materials import inspect
+
+    fixture = os.environ.get('TD498_REPLAY_ZIP')
+    if not fixture:
+        pytest.skip('optional incident ZIP replay fixture not installed')
+    add, job = material_case
+    raw = Path(fixture).read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == 'cfcb6b5ce0c660cebdbddaa0b59365a56e13ce8dd80cc12452f41cf4e109a29d'
+    row = add(raw, 'incident.zip')
+    materials, coverage = {}, []
+    started = time.monotonic()
+    _, sources, _ = inspect(job([row.id]), materials, coverage=coverage)
+    elapsed = time.monotonic() - started
+    print(json.dumps({'elapsed': round(elapsed, 3), 'sources': [{key: source.get(key) for key in ('archive_entry', 'file_bytes', 'scanned_bytes', 'scan_incomplete')} for source in sources]}))
+    assert len(sources) == 7
+    assert all(source['scanned_bytes'] == source['file_bytes'] and not source['scan_incomplete'] for source in sources)
+    assert coverage[0]['status'] == 'analyzed' and coverage[0]['verified']
+    capture = next(source for source in sources if 'capture_service' in source['archive_entry'])
+    assert capture['scanned_bytes'] == 194189145
+    print(json.dumps({'real_zip_inspect_seconds': round(elapsed, 3), 'entries': len(sources),
+                      'scanned_bytes': sum(source['scanned_bytes'] for source in sources)}))
+    assert elapsed < 18
+
+
+def test_real_uploaded_observations_preserve_planning_failure_through_material_preview(material_case):
+    from plane.quality.diagnostic_materials import inspect
+    from plane.quality.log_evidence import summarize
+
+    fixture = os.environ.get('TD498_REPLAY_OBSERVATIONS')
+    if not fixture:
+        pytest.skip('optional incident observations replay fixture not installed')
+    data = json.loads(Path(fixture).read_text().split('MATERIALS_JSON=', 1)[1])[1]
+    document = {'sourceSystem': 'ENGRAM_TELEOP_DAQ', 'evidence': {'observations': data['observations']}}
+    add, job = material_case
+    row = add(json.dumps(document, ensure_ascii=False), 'feedback.json')
+    materials, coverage = {}, []
+    text, sources, _ = inspect(job([row.id]), materials, coverage=coverage)
+    content = materials[f'FILE-{row.id}']['content']
+    summary = summarize(text, 12000)
+    for value in (content, summary, sources[0]['excerpt']):
+        assert 'joint limit violation' in value and 'planning_failed' in value
+        assert '/api/launcher/feedback-context' in value
+        assert '2026-11-19T12:45:29.777Z' in value
+    assert sources[0]['scanned_bytes'] == row.size and not sources[0]['scan_incomplete']

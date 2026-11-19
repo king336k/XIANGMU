@@ -302,3 +302,91 @@ def test_feedback_summary_retains_dirty_and_source_identity():
     rows = feedback_observations(json.dumps(document), 4000)
     row = next(json.loads(item) for item in rows if json.loads(item).get("observation") == "deploymentSnapshot")
     assert all(row["components"][0][key] == value for key, value in identity.items())
+
+
+def test_feedback_larger_than_sample_retains_fault_from_any_process_through_collect_and_resummary():
+    import json
+    from plane.quality.log_evidence import collect, summarize
+
+    fault = '[2026-11-19 20:44:14.597] RESET_ERROR type=planning_failed reset goal is invalid: joint limit violation'
+    processes = [{"name": f"healthy_{i}", "lines": ["INFO healthy " + "x" * 1000] * 30} for i in range(20)]
+    processes.append({"name": "arbitrary_motion_node", "log_file": "/runtime/motion.log", "offset": 200, "total": 213, "truncated": True, "lines": [fault] + ["INFO ready"] * 12})
+    document = {"sourceSystem": "ENGRAM_TELEOP_DAQ", "eventId": "fault-case", "evidence": {"observations": {
+        "teleop": {"source": "/api/launcher/feedback-context", "capturedAt": "2026-11-19T20:44:15Z", "data": {
+            "observations": {"nodes": {"source": "/api/nodes/logs", "capturedAt": "2026-11-19T20:44:14Z", "data": {"processes": processes}}}}}}}}
+    raw = json.dumps(document).encode()
+    assert len(raw) > 256 * 1024
+    sample, scanned, incomplete = collect(io.BytesIO(raw), len(raw))
+    result = summarize(summarize(sample.decode(), 8000) + '\n' + 'WARNING unrelated\n' * 1000, 8000)
+    rows = []
+    for line in result.splitlines():
+        try: rows.append(json.loads(line))
+        except ValueError: pass
+    node = next(row for row in rows if row.get("process") == "arbitrary_motion_node")
+    assert fault in node["fault_lines"]
+    assert node["source"] == "/api/launcher/feedback-context"
+    assert node["captured_at"] == "2026-11-19T20:44:15Z"
+    assert node["node_source"] == "/api/nodes/logs"
+    assert node["log_file"] == "/runtime/motion.log"
+    assert node["line_offset"] == 200 and node["line_total"] == 213
+    assert node["producer_truncated"] is True and node["fault_line_numbers"] == [1]
+    assert scanned == len(raw) and not incomplete
+    assert len(sample) <= 256 * 1024 and len(result) <= 8000
+
+
+def test_dense_warning_scan_reads_in_blocks_and_keeps_early_and_late_faults():
+    from plane.quality.log_evidence import collect
+
+    class BlockStream(io.BytesIO):
+        def readline(self, *args):
+            raise AssertionError("dense logs must not dispatch one stream read per log line")
+
+    raw = b"ERROR E-FIRST root cause\n" + b"WARNING repeated queue heartbeat\n" * 100000 + b"ERROR E-LAST final fault\n"
+    sample, scanned, incomplete = collect(BlockStream(raw), len(raw))
+    assert scanned == len(raw) and not incomplete
+    assert b"E-FIRST" in sample and b"E-LAST" in sample
+
+
+def test_fault_split_across_block_boundary_in_long_record_is_retained():
+    from plane.quality.log_evidence import collect
+
+    raw = b'x' * (256 * 1024 - 3) + b' ERROR unique_boundary_record ' + b'x' * 100000
+    sample, scanned, incomplete = collect(io.BytesIO(raw), len(raw))
+    assert b'unique_boundary_record' in sample
+    assert scanned == len(raw) and not incomplete
+
+
+def test_expired_scan_deadline_never_claims_unread_bytes_are_complete():
+    import time
+    from plane.quality.log_evidence import collect
+
+    sample, scanned, incomplete = collect(io.BytesIO(b'ERROR unseen'), 12, time.monotonic() - 1)
+    assert scanned == 0 and incomplete
+    assert b'unseen' not in sample
+
+
+def test_producer_fault_flood_keeps_first_cause_latest_failure_and_explicit_omission():
+    import json
+    from plane.quality.log_evidence import feedback_observations
+
+    faults = ['2026-11-19T20:00:00Z ERROR first_cause joint limit violation']
+    faults += [f'2026-11-19T20:00:{i:02d}Z ERROR retried {i}' for i in range(1, 19)]
+    faults += ['2026-11-19T20:00:20Z ERROR final_failure planning_failed']
+    document = {'sourceSystem': 'ENGRAM_TELEOP_DAQ', 'evidence': {'observations': {'teleop': {'data': {
+        'observations': {'nodes': {'data': {'processes': [{'name': 'any_node', 'lines': faults}]}}}}}}}}
+    rows = [json.loads(row) for row in feedback_observations(json.dumps(document), 4000)]
+    node = next(row for row in rows if row.get('process') == 'any_node')
+    assert faults[0] in node['fault_lines'] and faults[-1] in node['fault_lines']
+    assert node['omitted_fault_lines'] == 14
+    assert node['fault_line_numbers'] == [1, 2, 3, 18, 19, 20]
+
+
+def test_long_record_overlap_cannot_invent_a_fault_word_boundary():
+    from plane.quality.log_evidence import collect
+
+    for shift in (0, 1):
+        raw = b'x' * (256 * 1024 - 4096 - 3 - shift) + b'noterror unique_normal_record ' + b'x' * 100000
+        sample, scanned, incomplete = collect(io.BytesIO(raw), len(raw))
+        fault_context = sample.split(b'[fault context]\n', 1)[1].split(b'[matched error context]\n', 1)[0]
+        assert b'unique_normal_record' not in fault_context
+        assert scanned == len(raw) and not incomplete

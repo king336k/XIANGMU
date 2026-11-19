@@ -9,6 +9,7 @@ from .attachments import directory, validate_archive
 from rest_framework.exceptions import ValidationError
 from .models import PackageFile
 from .log_evidence import collect, summarize
+from .diagnostic_time_window import event_context, select_sample
 from .attachment_chunks import MAX_DIAGNOSTIC_BYTES, digest_stream
 from plane.knowledge.retrieval import scan_content
 import re
@@ -88,6 +89,7 @@ def inspect(job, materials=None, *, coverage=None):
     snapshot = job.result.get("input", {})
     text = redact(snapshot.get("title", job.defect.title) + "\n" + snapshot.get("description", job.defect.description))
     sources = []
+    window = event_context(redact(snapshot.get("title", job.defect.title)))
     remaining = TOTAL_BYTES
     deadline = time.monotonic() + 18
     query = PackageFile.objects.filter(project=job.project, package__defect=job.defect)
@@ -119,8 +121,8 @@ def inspect(job, materials=None, *, coverage=None):
             coverage.append(entry)
     ocr_attempts = 0
     # Scan text first so optional OCR cannot evict a usable log from this task's budget.
-    files.sort(key=lambda file: Path(file.name).suffix.lower() == ".png")
-    for file in files:
+    files.sort(key=lambda file: (Path(file.name).suffix.lower() == ".png", file.size))
+    for file_index, file in enumerate(files):
         coverage_entry = entries.get(str(file.id))
         source_start = len(sources)
         if time.monotonic() >= deadline:
@@ -221,15 +223,31 @@ def inspect(job, materials=None, *, coverage=None):
                 with path.open("rb") as handle:
                     validate_archive(handle, file.name)
                 with zipfile.ZipFile(path) as archive:
-                    for entry in archive.infolist():
+                    readable = sorted(
+                        (entry for entry in archive.infolist()
+                         if not entry.is_dir() and Path(entry.filename).suffix.lower() in TEXT_TYPES),
+                        key=lambda entry: entry.file_size,
+                    )
+                    for entry_index, entry in enumerate(readable):
+                        # Reserve output for every remaining entry/attachment.
+                        # Small metadata and node logs cannot be starved by the
+                        # first high-volume capture stream in ZIP insertion order.
+                        slots = len(readable) - entry_index + len(files) - file_index - 1
+                        entry_budget = remaining // max(1, slots)
                         if time.monotonic() >= deadline:
-                            sources.append(incomplete(file, "ZIP材料扫描总时间预算耗尽"))
-                            break
-                        if entry.is_dir() or Path(entry.filename).suffix.lower() not in TEXT_TYPES:
+                            source = incomplete(file, "ZIP材料扫描总时间预算耗尽")
+                            source.update(archive_entry=entry.filename, file_bytes=entry.file_size)
+                            sources.append(source)
                             continue
                         with archive.open(entry) as stream:
-                            sample, scanned, scan_incomplete = collect(stream, entry.file_size, deadline)
-                            sample = bounded_preview(sample.decode("utf-8", errors="replace"), remaining)
+                            bytes_left = sum(item.file_size for item in readable[entry_index:])
+                            now = time.monotonic()
+                            entry_deadline = min(deadline, now + max(0.05, max(0, deadline - now) * entry.file_size / max(1, bytes_left)))
+                            sample, scanned, scan_incomplete = collect(stream, entry.file_size, entry_deadline, window=window)
+                            sample, selection = select_sample(sample, window)
+                            selection.update(integrity_scan_scope='incomplete' if scan_incomplete else 'full_sequential',
+                                             integrity_scanned_bytes=scanned, model_selected_bytes=len(sample))
+                            sample = bounded_preview(sample.decode("utf-8", errors="replace"), entry_budget)
                         clean = redact(sample.decode("utf-8", errors="replace"))
                         clean_bytes = clean.encode()
                         clean = clean_bytes[: min(FILE_BYTES, remaining)].decode("utf-8", errors="ignore")
@@ -241,12 +259,13 @@ def inspect(job, materials=None, *, coverage=None):
                                 or entry.file_size > len(sample)
                                 or len(clean.encode()) < len(clean_bytes),
                             }
-                        text += "\n[" + f"FILE-{file.id}:{entry.filename}" + "]\n" + summarize(clean, 8000)
+                        text += "\n[" + f"FILE-{file.id}:{entry.filename}" + "]\n" + json.dumps({'evidence_selection': selection}, ensure_ascii=False) + "\n" + summarize(clean, 8000)
                         sources.append(
                             {
                                 "file_id": str(file.id),
                                 "name": file.name,
                                 "archive_entry": entry.filename,
+                                **selection,
                                 "excerpt": summarize(clean),
                                 "sha256": file.sha256,
                                 "read_bytes": len(sample),
@@ -259,8 +278,12 @@ def inspect(job, materials=None, *, coverage=None):
                         )
             else:
                 with path.open("rb") as handle:
-                    sample, scanned, scan_incomplete = collect(handle, file.size, deadline)
-                    sample = bounded_preview(sample.decode("utf-8", errors="replace"), remaining)
+                    sample, scanned, scan_incomplete = collect(handle, file.size, deadline, window=window)
+                    sample, selection = select_sample(sample, window)
+                    selection.update(integrity_scan_scope='incomplete' if scan_incomplete else 'full_sequential',
+                                     integrity_scanned_bytes=scanned, model_selected_bytes=len(sample))
+                    file_budget = remaining // max(1, len(files) - file_index)
+                    sample = bounded_preview(sample.decode("utf-8", errors="replace"), file_budget)
                 clean = redact(sample.decode("utf-8", errors="replace"))
                 clean_bytes = clean.encode()
                 clean = clean_bytes[: min(FILE_BYTES, remaining)].decode("utf-8", errors="ignore")
@@ -272,7 +295,7 @@ def inspect(job, materials=None, *, coverage=None):
                         or file.size > len(sample)
                         or len(clean.encode()) < len(clean_bytes),
                     }
-                text += "\n[" + f"FILE-{file.id}" + "]\n" + summarize(clean, 8000)
+                text += "\n[" + f"FILE-{file.id}" + "]\n" + json.dumps({'evidence_selection': selection}, ensure_ascii=False) + "\n" + summarize(clean, 8000)
                 sources.append(
                     {
                         "file_id": str(file.id),
@@ -282,6 +305,7 @@ def inspect(job, materials=None, *, coverage=None):
                         "read_bytes": len(sample),
                         "file_bytes": file.size,
                         "scanned_bytes": scanned,
+                        **selection,
                         "scan_incomplete": scan_incomplete,
                         "preview_truncated": len(clean) > 8000,
                         "truncated": file.size > len(sample),
