@@ -113,7 +113,7 @@ test("detail shows independent short agent status and safe role-gated workflow a
       ].map((name) => ["./" + name, new Proxy({}, { get: (_, key) => (key === "resolutionNames" ? {} : () => null) })])
     ),
   });
-  const render = (status, manager = false, writable = true) =>
+  const render = (status, manager = false, writable = true, extra = {}) =>
     DefectDetail({
       base: "/q/",
       projectUrl: "/p",
@@ -124,6 +124,7 @@ test("detail shows independent short agent status and safe role-gated workflow a
         assignee_id: "tech",
         resolution_kind: "fixed",
         agent_processing: { state: "repaired", run_id: "run" },
+        ...extra,
       },
       context: { can_write: writable, user_id: "tech", is_manager: manager, members: [] },
       onEdit: (mode) => edits.push(mode),
@@ -133,8 +134,9 @@ test("detail shows independent short agent status and safe role-gated workflow a
   let tree = render("pending_tech");
   assert.ok(nodes(tree).some((node) => node.type === badge.AgentProcessingBadge));
   nodes(tree)
-    .find((node) => node.type === "button" && node.props.children === "查看处理")
+    .find((node) => node.type === badge.AgentProcessingBadge)
     .props.onClick();
+  assert.ok(!nodes(tree).some((node) => node.type === "button" && node.props.children === "查看处理"));
   assert.ok(state.includes("diagnosis"));
   nodes(tree)
     .find((node) => node.type === "button" && node.props.children === "继续处理")
@@ -147,6 +149,12 @@ test("detail shows independent short agent status and safe role-gated workflow a
     .props.onClick();
   assert.ok(state.includes("regression"));
   assert.deepEqual(edits, ["workflow"]);
+  const emptyDAQ = render("pending_tech", false, true, { source_kind: "daq", agent_processing: null });
+  const emptyAgent = nodes(emptyDAQ).find((node) => node.type === badge.AgentProcessingBadge);
+  assert.ok(emptyAgent);
+  assert.equal(emptyAgent.props.showEmpty, true);
+  const manual = render("open", false, true, { source_kind: "manual", agent_processing: null });
+  assert.ok(!nodes(manual).some((node) => node.type === badge.AgentProcessingBadge));
   tree = render("pending_tech", false, false);
   assert.ok(
     !nodes(tree).some((node) => node.type === "button" && ["继续处理", "确认关闭"].includes(node.props.children))
@@ -207,4 +215,39 @@ test("model analysis stage is a short spinning status with an explicit analysis 
   const run = { status: "running", queue: { stage: "analysis" } };
   assert.equal(remote.agentRunShortLabel(run), "分析中");
   assert.equal(remote.agentRunStatusLabel(run), "模型正在分析现场");
+});
+
+test("DAQ detail uses a native clickable Agent status button while list badges remain spans", () => {
+  const badge = load("quality/agent-processing-badge.tsx").AgentProcessingBadge;
+  for (const [state, label] of [
+    ["ready", "未开始"],
+    ["offline", "待连接"],
+    ["missing", "待连接"],
+    ["conflict", "接入异常"],
+  ]) {
+    const html = renderToStaticMarkup(
+      React.createElement(badge, {
+        value: null,
+        showEmpty: true,
+        availability: { state, summary: "当前执行端说明" },
+        onClick() {},
+      })
+    );
+    assert.match(html, /<button/);
+    assert.match(html, /type="button"/);
+    assert.match(html, new RegExp("Agent · " + label));
+    assert.match(html, /title="当前执行端说明"/);
+  }
+  const list = renderToStaticMarkup(
+    React.createElement(badge, {
+      value: { state: "unresolved", summary: "原轮次结果", run_id: "run" },
+      availability: { state: "offline", summary: "已断连" },
+    })
+  );
+  assert.match(list, /<span/);
+  assert.doesNotMatch(list, /role="button"/);
+  assert.doesNotMatch(list, /<button|待连接/);
+  assert.match(list, /Agent · 未解决/);
+  assert.match(list, /title="原轮次结果"/);
+  assert.equal(renderToStaticMarkup(React.createElement(badge, { value: null, onClick() {} })), "");
 });

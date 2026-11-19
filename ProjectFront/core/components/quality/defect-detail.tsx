@@ -161,15 +161,13 @@ export function DefectDetail({
                   编辑缺陷
                 </button>
               )}
-              <AgentProcessingBadge value={value.agent_processing} />
-              {value.agent_processing && (
-                <button
-                  type="button"
+              {(value.agent_processing || value.source_kind === "daq") && (
+                <AgentProcessingBadge
+                  value={value.agent_processing}
+                  availability={value.agent_availability}
+                  showEmpty={value.source_kind === "daq"}
                   onClick={() => setActiveTab("diagnosis")}
-                  className="rounded-md border border-subtle px-3 py-1.5 text-12 font-medium text-accent-primary hover:bg-accent-subtle"
-                >
-                  查看处理
-                </button>
+                />
               )}
               {activeTab !== "regression" && canEdit && (
                 <button

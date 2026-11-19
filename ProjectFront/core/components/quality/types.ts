@@ -164,6 +164,7 @@ export type AgentProcessing = {
 };
 export type Defect = {
   agent_processing?: AgentProcessing | null;
+  agent_availability?: { state: "offline" | "conflict" | "missing" | "ready"; summary?: string } | null;
   module?: { key: string; name: string } | null;
   assignment_origin?: "manual" | "diagnostic" | "initial" | "triage" | "";
   assignment_reason?: string;
