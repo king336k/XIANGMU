@@ -597,6 +597,31 @@ def test_diagnostic_refines_initial_triage_but_manual_selection_is_final(routing
     assert route(job).assignee_id == routing[4][1].id
 
 
+def test_completed_diagnostic_refreshes_triage_reason_once_without_forcing_valid_owners(routing):
+    from plane.quality.module_routing import initial_assign
+
+    assert bind(routing,key='daq').status_code == 200
+    assert bind(routing,user=routing[4][1],key='teleop').status_code == 200
+    job=ready_job(routing,'ERROR generic service failed','问题范围：遥操与 DAQ')
+    initial_assign(job.defect,routing[3])
+    job.defect.refresh_from_db()
+    initial_owner=job.defect.assignee_id
+    initial_event_count=job.defect.events.count()
+    defect=route(job)
+    assert defect.assignee_id==initial_owner and defect.assignment_origin=='triage'
+    assert defect.module_id is None
+    assert defect.assignment_reason=='现场证据未能高可信确认单一模块，待人工指派。'
+    reason_events=defect.events.filter(note__startswith='诊断待分诊原因：')
+    assert reason_events.count()==1
+    assert defect.assignment_reason in reason_events.get().note
+    assert defect.events.count()==initial_event_count+1
+    version=defect.edit_version
+    for _ in range(5):route(job)
+    defect.refresh_from_db()
+    assert defect.edit_version==version
+    assert reason_events.count()==1 and defect.events.count()==initial_event_count+1
+
+
 def test_admin_notification_exposes_only_current_record_metadata(routing):
     from types import SimpleNamespace
     from plane.quality.notifications import defect_notice, serialize_with_current_status

@@ -535,6 +535,18 @@ def route_completed(job, materials=None):
     if not target and defect.assignee_id:
         # Unconfirmed automatic module claims return to triage; manual choices are guarded above.
         if defect.assignment_origin == "triage":
+            if module:
+                reason += " 该模块尚无当前项目的有效技术负责人，待人工指派。"
+            reason = reason[:2000]
+            if defect.assignment_reason != reason:
+                defect.assignment_reason = reason
+                defect.edit_version += 1
+                defect.save(update_fields=["assignment_reason", "edit_version", "updated_at"])
+                DefectEvent.objects.create(
+                    project=defect.project, defect=defect, created_by=job.created_by,
+                    previous_status=defect.status, status=defect.status,
+                    note=f"诊断待分诊原因：{reason} 保留现有分诊负责人，未自动改派。",
+                )
             return
         triager = triage_user(defect.project)
         if not triager:
