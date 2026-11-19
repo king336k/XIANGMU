@@ -63,6 +63,28 @@ def test_uploaded_producer_error_reaches_actual_runner_input(remote, settings, t
     assert context["repair_allowed"] is False
 
 
+def test_configuration_target_is_derived_from_verified_feedback_not_model_input(remote, settings, tmp_path):
+    settings.QUALITY_ATTACHMENT_ROOT = str(tmp_path)
+    project, defect, run = create_run(remote)
+    body = json.dumps({'sourceSystem':'ENGRAM_TELEOP_DAQ','evidence':{'observations':{
+        'runtimeConfig':{'status':'available','data':{'robot':'profile-a','password':'never-return'}}}}})
+    add_file(project, defect, tmp_path, body)
+    from plane.quality.remote_materials import feedback_configuration_target
+    assert feedback_configuration_target(run) == 'profile-a'
+    add_file(project, defect, tmp_path, body.replace('profile-a','profile-b'))
+    assert feedback_configuration_target(run) is None
+
+
+def test_configuration_target_rejects_paths_bad_hash_and_unknown_source(remote, settings, tmp_path):
+    settings.QUALITY_ATTACHMENT_ROOT = str(tmp_path)
+    project, defect, run = create_run(remote)
+    body = json.dumps({'sourceSystem':'ENGRAM_TELEOP_DAQ','evidence':{'observations':{
+        'runtimeConfig':{'status':'available','data':{'robot':'../secret'}}}}})
+    add_file(project, defect, tmp_path, body)
+    from plane.quality.remote_materials import feedback_configuration_target
+    assert feedback_configuration_target(run) is None
+
+
 def test_materials_are_defect_project_verified_and_snapshot_scoped(remote, settings, tmp_path):
     settings.QUALITY_ATTACHMENT_ROOT = str(tmp_path)
     project, defect, run = create_run(remote)

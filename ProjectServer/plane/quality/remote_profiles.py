@@ -14,7 +14,7 @@ def daq_profile(context, capabilities):
                   repair_allowed=ready)
     if ready:
         result['repair_argv'] = ['daq-local-diagnostics-v1', 'repair']
-        result['repair_scope'] = 'Only restore semantically invalid initial joint states from verified release baseline through the local configuration adapter. Do not change joint limits, execute motion, restart services or infer values.'
+        result['repair_scope'] = 'Only apply the device-approved repair plan to semantically invalid initial joint states through the local configuration adapter. Release defaults are candidates, not device calibration authority. Do not change joint limits, execute motion, restart services or infer values.'
     else:
         result.pop('repair_argv', None)
         result.pop('repair_scope', None)

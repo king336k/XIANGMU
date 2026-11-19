@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import json
+import re
 import secrets
 import time
 import uuid
@@ -886,8 +887,24 @@ class RemoteTool(BaseAPIView):
             tool_context = dict(station.capabilities.get("agent_context", {}))
             tool_context["repair_allowed"] = tool_context.get("repair_allowed") is True and run.mode == "repair"
             check_tool(tool_context, op, payload)
-            if op == 'run' and payload.get('argv', [])[:2] == ['daq-local-diagnostics-v1', 'repair']:
-                _, payload['expected_target_revision'] = robot_target(station)
+            fixed_argv = payload.get('argv', [])
+            if op == 'run' and fixed_argv[:1] == ['daq-local-diagnostics-v1']:
+                target=run.result.get('configuration_target')
+                if isinstance(target,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,80}',target):
+                    payload['configuration_target']=target
+                    if fixed_argv[1:2] == ['repair']:
+                        observed=run.remotecommand_set.filter(status='done',payload__argv=['daq-local-diagnostics-v1','inspect'],
+                            payload__configuration_target=target).order_by('-created_at','-id').first()
+                        try:
+                            configuration=json.loads(observed.result.get('stdout','{}')).get('configuration',{}) if observed else {}
+                        except (ValueError,TypeError,AttributeError):configuration={}
+                        revision=configuration.get('target_revision')
+                        if (not isinstance(revision,str) or not re.fullmatch(r'[a-f0-9]{64}',revision)
+                                or configuration.get('snapshot_sha256') != fixed_argv[-1]):
+                            raise Conflict('请先读取本轮目标配置，再按当前快照执行修复。')
+                        payload['expected_configuration_revision']=revision
+                elif fixed_argv[1:2] == ['repair']:
+                    _, payload['expected_target_revision'] = robot_target(station)
             if run.remotecommand_set.filter(status__in=["pending", "delivered"],expires_at__gt=timezone.now()).exists():
                 raise Conflict("上一个现场操作尚未完成，请等待结果。")
             if run.remotecommand_set.count() >= 20:

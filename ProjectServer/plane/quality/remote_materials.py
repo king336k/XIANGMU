@@ -1,11 +1,40 @@
 """Verified uploaded evidence for the same defect, with explicit historical scope."""
 from types import SimpleNamespace
+import hashlib
+import json
+import re
 
 from django.utils import timezone
 
 from .diagnostic_materials import inspect, redact
 from .log_evidence import summarize
 from .models import PackageFile
+
+
+def feedback_configuration_target(run):
+    """Resolve a robot profile from original verified DAQ evidence, never model arguments."""
+    from .attachments import directory
+    cutoff=run.started_at or timezone.now()
+    targets=set()
+    files=PackageFile.objects.filter(project_id=run.defect.project_id,package__project_id=run.defect.project_id,
+        package__defect_id=run.defect_id,package__status='files_verified',created_at__lte=cutoff,
+        name__iendswith='.json').order_by('-created_at')[:64]
+    for file in files:
+        if file.size>1024*1024:continue
+        path=directory()/file.storage_key
+        if path.parent!=directory() or path.is_symlink():continue
+        try:
+            data=path.read_bytes()
+            if len(data)!=file.size or hashlib.sha256(data).hexdigest()!=file.sha256:continue
+            document=json.loads(data)
+            if document.get('sourceSystem')!='ENGRAM_TELEOP_DAQ':continue
+            observed=document.get('evidence',{}).get('observations',{}).get('runtimeConfig',{})
+            if observed.get('status')!='available':continue
+            name=observed.get('data',{}).get('robot')
+            if isinstance(name,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,80}',name):targets.add(name)
+        except (OSError,ValueError,TypeError,AttributeError):
+            continue
+    return next(iter(targets)) if len(targets)==1 else None
 
 
 def feedback_materials(run):

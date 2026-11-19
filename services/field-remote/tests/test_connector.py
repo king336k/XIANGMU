@@ -375,7 +375,7 @@ class ConnectorTests(unittest.TestCase):
     def test_discovery_advertises_only_observed_fixed_configuration_adapter(self):
         self.policy.daq_local_api={'url':'http://127.0.0.1:11452/api/launcher/remote-robot-files','token_file':'/private'}
         caps={'protocol':'daq-configuration-v1','baseline_verified':True,'repair_allowed':True,
-              'supported_repairs':['restore_invalid_initial_joint_states']}
+              'semantic_validation':True,'supported_repairs':['restore_invalid_initial_joint_states']}
         with patch('file_browser.local_launcher_request',return_value={'capabilities':caps}), \
              patch('file_browser.robot_status',return_value={'connected':False}):
             result=identity(self.policy)['capabilities']
@@ -385,6 +385,19 @@ class ConnectorTests(unittest.TestCase):
         with patch('file_browser.local_launcher_request',return_value={'verified':True}), \
              patch('file_browser.robot_status',return_value={'connected':False}):
             self.assertNotIn('diagnostics',identity(self.policy)['capabilities'])
+
+    def test_feedback_target_configuration_can_be_checked_and_repaired_without_robot_connection(self):
+        self.policy.daq_local_api={'url':'http://127.0.0.1:11452/api/launcher/remote-robot-files','token_file':'/private'}
+        receipt={'configuration':{'repair':{'state':'applied'}},'verified':True}
+        with patch('file_browser.local_launcher_request',return_value=receipt)as call, \
+             patch('file_browser.robot_status')as robot:
+            run_command(self.policy,['daq-local-diagnostics-v1','inspect'],'.',2,configuration_target='profile-a')
+            self.assertEqual(call.call_args.args[1],{'action':'inspect','configuration_target':'profile-a'})
+            run_command(self.policy,['daq-local-diagnostics-v1','repair','a'*64],'.',2,
+                        configuration_target='profile-a',expected_configuration_revision='b'*64)
+        robot.assert_not_called()
+        self.assertEqual(call.call_args.args[1],{'action':'repair','configuration_target':'profile-a',
+            'expected_sha256':'a'*64,'expected_configuration_revision':'b'*64})
 
     def test_terminal_duplicate_input_and_late_open_refused(self):
         opened = self.command('terminal_open', session_id='dedup', cols=80, rows=24)

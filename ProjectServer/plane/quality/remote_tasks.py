@@ -173,8 +173,12 @@ def remote_repair(self, run_id):
         context["collector_identity"]["ip_address"]=run.workstation.capabilities.get("network",{}).get("ip_address","")
         context["robot_identity"]={"username":run.workstation.capabilities.get("robot",{}).get("username",""),"ip_address":run.workstation.capabilities.get("robot",{}).get("host",""),"label":"机器人"}
         context["feedback"] = {"id":str(run.defect_id),"code":run.defect.code,"title":run.defect.title,"description":run.defect.description}
-        from .remote_materials import feedback_materials
+        from .remote_materials import feedback_materials, feedback_configuration_target
         context["feedback_materials"] = feedback_materials(run)
+        configuration_target=feedback_configuration_target(run)
+        if configuration_target:
+            context['configuration_target']=configuration_target
+            RemoteAgentRun.objects.filter(pk=run.pk,status='running').update(result={**run.result,'configuration_target':configuration_target})
         context["repair_allowed"] = context.get("repair_allowed") is True and run.mode == "repair"
         from .remote_models import RemoteUploadedFile
         context["uploaded_files"] = list(RemoteUploadedFile.objects.filter(workstation=run.workstation,defect=run.defect,owner=run.owner,identity_key=identity_key(run.workstation),status="uploaded").order_by("-created_at").values("target","path","filename","sha256","size")[:10])
