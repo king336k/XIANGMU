@@ -279,7 +279,7 @@ def _view():
                 return Response(result)
             if operation == 'catalog':
                 return Response(source_catalog(run.workstation.agent.project_id))
-            if operation not in {'read_source','list_source_paths','search_source'}:
+            if operation not in {'read_source','list_source_paths','search_source','code_repair_start','code_repair_status'}:
                 raise ValidationError('研究操作无效。')
             if not cache.get('remote-research-kb:' + str(run.pk)):
                 raise PermissionDenied('先检索本项目知识库，再按缺口读取批准的外部来源。')
@@ -295,6 +295,13 @@ def _view():
                 raise PermissionDenied('先获取本轮现场证据，再读取外部来源。')
             if not isinstance(request.data.get('gap'),str) or not 1 <= len(request.data['gap'].strip()) <= 1000:
                 raise ValidationError('请说明现场证据和知识库仍未解决的具体缺口。')
+            if operation in {'code_repair_start','code_repair_status'}:
+                from .remote_code_repair import start, status
+                if operation == 'code_repair_start':
+                    result = start(run, request.data.get('source_id'), request.data.get('problem'))
+                else:
+                    result = status(run, request.data.get('job_id'))
+                return Response(result)
             try:
                 arguments = {}
                 if operation == 'search_source':
