@@ -1,6 +1,7 @@
 import { reportSummary } from "./report-summary-fixture.js";
 import { ConfigurationChangeDiff } from "./configuration-diff-fixture.js";
 import { AgentReportText } from "./agent-report-text-fixture.js";
+import { CommandExecutionResult } from "./command-execution-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -24,6 +25,7 @@ function render(data, error, expanded = null) {
   )((name) => {
     if (name === "./configuration-change-diff") return { ConfigurationChangeDiff };
     if (name === "./agent-report-text") return { AgentReportText };
+    if (name === "./command-execution-result") return { CommandExecutionResult };
     if (name === "react") return { ...React, useState: () => [expanded, () => {}] };
     if (name === "./agent-feedback-actions") return { AgentFeedbackActions: () => null };
     if (name === "swr") return { default: () => ({ data, error, mutate() {} }) };
@@ -198,4 +200,37 @@ test("空结构化变更保留旧结果的位置原文且不生成diff", () => {
   assert.match(html, /<dt[^>]*>位置<\/dt>/);
   assert.doesNotMatch(html, /aria-label="配置差异"/);
   assert.ok(html.indexOf("机器人配置第3行") < html.indexOf("详细证据与处理过程"));
+});
+
+test("现场结果的实际命令与执行回执并列展示，不从报告臆测命令", () => {
+  const reply = {
+    id: "command",
+    visibility: "public",
+    content: "Agent 远程处理：验证通过\n结论：链路正常",
+    created_at: "2026-11-19",
+  };
+  const html = render([
+    {
+      ...reply,
+      command_operations: [
+        {
+          target: "机器人：engram@10.0.0.177",
+          stage: "verify",
+          argv: ["robot_peer", "verify"],
+          stdout: "verified=true",
+          stderr: "",
+          exit_code: 0,
+          ok: true,
+          status: "done",
+          timed_out: false,
+        },
+      ],
+    },
+  ]);
+  assert.match(html, /aria-label="命令执行记录"/);
+  assert.match(html, /机器人：engram@10\.0\.0\.177/);
+  assert.match(html, /robot_peer verify/);
+  assert.match(html, /verified=true/);
+  assert.ok(html.indexOf("verified=true") < html.indexOf("详细证据与处理过程"));
+  assert.doesNotMatch(render([reply]), /aria-label="命令执行记录"/);
 });

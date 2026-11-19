@@ -116,6 +116,9 @@ export type RemoteProcess = {
     argv?: string[];
     path?: string;
     exit_code?: number | null;
+    stdout?: string;
+    stderr?: string;
+    timed_out?: boolean;
     kind?: string;
     ok?: boolean | null;
     status?: string;

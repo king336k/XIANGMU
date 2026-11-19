@@ -1,5 +1,6 @@
 import { groupSuccessfulInspections } from "./timeline-groups-fixture.js";
 import { ConfigurationChangeDiff } from "./configuration-diff-fixture.js";
+import { CommandExecutionResult } from "./command-execution-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -7,13 +8,15 @@ import test from "node:test";
 const require = createRequire(new URL("../package.json", import.meta.url)),
   ts = require("typescript");
 const nodes = (t) =>
-  t?.type === ConfigurationChangeDiff
-    ? nodes(ConfigurationChangeDiff(t.props))
-    : !t || typeof t !== "object"
-      ? []
-      : Array.isArray(t)
-        ? t.flatMap(nodes)
-        : [t, ...nodes(t.props?.children)];
+  t?.type === CommandExecutionResult
+    ? nodes(CommandExecutionResult(t.props))
+    : t?.type === ConfigurationChangeDiff
+      ? nodes(ConfigurationChangeDiff(t.props))
+      : !t || typeof t !== "object"
+        ? []
+        : Array.isArray(t)
+          ? t.flatMap(nodes)
+          : [t, ...nodes(t.props?.children)];
 const Menu = () => null,
   Item = () => null,
   Modal = () => null,
@@ -84,6 +87,7 @@ function component(
     ).outputText
   )((id) => {
     if (id === "./configuration-change-diff") return { ConfigurationChangeDiff };
+    if (id === "./command-execution-result") return { CommandExecutionResult };
     if (id === "./timeline-inspection-groups") return { groupSuccessfulInspections };
     if (id === "react/jsx-runtime") return require(id);
     if (id === "lodash-es") return { sortBy: (rows, key) => rows.toSorted((a, b) => key(a) - key(b)) };
@@ -485,4 +489,44 @@ test("处理历程读取的长校验值默认折叠，正常退出码与工具�
       [node.props.children].flat().some((child) => child?.type === "summary" && child.props.children === "技术记录")
   );
   assert.match(JSON.stringify(technical), /读取配置文件/);
+});
+
+test("实际run回执复用命令结果分栏，说明保留技术记录，配置diff优先", () => {
+  const process = {
+    summary: "验证完成",
+    stage: "verify",
+    command: {
+      kind: "run",
+      argv: ["robot_peer", "verify"],
+      stdout: "verified=true",
+      stderr: "",
+      exit_code: 0,
+      status: "done",
+      ok: true,
+    },
+    details: "完整旧执行说明",
+  };
+  const tree = component("timeline", {
+    ...data,
+    events: [{ id: "command", label: "执行现场操作", actor: "Agent", date: "2026-11-19", remote_process: process }],
+  }).render();
+  const execution = nodes(tree).find((node) => node.props?.["aria-label"] === "命令执行记录");
+  assert.ok(execution);
+  assert.match(JSON.stringify(execution), /robot_peer verify/);
+  assert.match(JSON.stringify(execution), /verified=true/);
+  assert.ok(!nodes(tree).some((node) => node.type === "dt" && node.props.children === "命令参数"));
+  assert.ok(!nodes(tree).some((node) => node.type === "dt" && node.props.children === "执行说明"));
+  const technical = nodes(tree).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children].flat().some((child) => child?.type === "summary" && child.props.children === "技术记录")
+  );
+  assert.match(JSON.stringify(technical), /完整旧执行说明/);
+  process.command.changes = [{ path: "/config.json", key: "enabled", before: false, after: true }];
+  const changed = component("timeline", {
+    ...data,
+    events: [{ id: "diff", label: "配置变更", date: "2026-11-19", remote_process: process }],
+  }).render();
+  assert.ok(nodes(changed).some((node) => node.props?.["aria-label"] === "配置差异"));
+  assert.ok(!nodes(changed).some((node) => node.props?.["aria-label"] === "命令执行记录"));
 });

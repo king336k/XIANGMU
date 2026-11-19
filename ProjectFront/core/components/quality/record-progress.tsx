@@ -2,6 +2,7 @@ import { ProjectRouteLink as Link } from "@/components/common/project-route-link
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useState } from "react";
 import { ConfigurationChangeDiff } from "./configuration-change-diff";
+import { CommandExecutionResult } from "./command-execution-result";
 import { groupSuccessfulInspections } from "./timeline-inspection-groups";
 import { sortBy } from "lodash-es";
 import useSWR from "swr";
@@ -266,15 +267,25 @@ export function RecordProgress({
                                     </dd>
                                   </div>
                                 )}
-                                {!!item.remote_process?.command?.argv?.length && (
+                                {item.remote_process?.command?.kind === "run" &&
+                                !item.remote_process.command.changes?.length ? (
                                   <div>
-                                    <dt className="text-tertiary">命令参数</dt>
-                                    <dd>
-                                      <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
-                                        {JSON.stringify(item.remote_process.command.argv, null, 2)}
-                                      </pre>
+                                    <dt className="text-tertiary">执行记录</dt>
+                                    <dd className="mt-2">
+                                      <CommandExecutionResult command={item.remote_process.command} />
                                     </dd>
                                   </div>
+                                ) : (
+                                  !!item.remote_process?.command?.argv?.length && (
+                                    <div>
+                                      <dt className="text-tertiary">命令参数</dt>
+                                      <dd>
+                                        <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
+                                          {JSON.stringify(item.remote_process.command.argv, null, 2)}
+                                        </pre>
+                                      </dd>
+                                    </div>
+                                  )
                                 )}
                                 {item.remote_process?.command?.path && !item.remote_process.command.changes?.length && (
                                   <div>
@@ -290,13 +301,17 @@ export function RecordProgress({
                                     </dd>
                                   </div>
                                 )}
-                                {typeof item.remote_process?.command?.exit_code === "number" &&
+                                {(item.remote_process?.command?.kind !== "run" ||
+                                  !!item.remote_process.command.changes?.length) &&
+                                  typeof item.remote_process?.command?.exit_code === "number" &&
                                   item.remote_process.command.exit_code !== 0 && (
                                     <p className="text-danger-primary">
                                       命令执行失败 · 退出码 {item.remote_process.command.exit_code}
                                     </p>
                                   )}
-                                {item.remote_process?.details &&
+                                {(item.remote_process?.command?.kind !== "run" ||
+                                  !!item.remote_process.command.changes?.length) &&
+                                  item.remote_process?.details &&
                                   !["读取配置文件", "修改配置文件", "执行现场命令", "执行现场操作"].includes(
                                     item.remote_process.details
                                   ) && (

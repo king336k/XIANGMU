@@ -4,6 +4,7 @@ import { renderNumericDateTime } from "@plane/utils";
 import { can, statusNames, resultNames } from "./types";
 import { useState } from "react";
 import { ConfigurationChangeDiff } from "./configuration-change-diff";
+import { CommandExecutionResult } from "./command-execution-result";
 import { groupSuccessfulInspections } from "./timeline-inspection-groups";
 import { AgentReportText } from "./agent-report-text";
 import useSWR from "swr";
@@ -319,15 +320,24 @@ export function CollaborationPanel({
                                 </dd>
                               </div>
                             )}
-                            {!!row.process?.command?.argv?.length && (
+                            {row.process?.command?.kind === "run" && !row.process.command.changes?.length ? (
                               <div>
-                                <dt className="text-tertiary">命令参数</dt>
-                                <dd>
-                                  <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
-                                    {JSON.stringify(row.process.command.argv, null, 2)}
-                                  </pre>
+                                <dt className="text-tertiary">执行记录</dt>
+                                <dd className="mt-2">
+                                  <CommandExecutionResult command={row.process.command} />
                                 </dd>
                               </div>
+                            ) : (
+                              !!row.process?.command?.argv?.length && (
+                                <div>
+                                  <dt className="text-tertiary">命令参数</dt>
+                                  <dd>
+                                    <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
+                                      {JSON.stringify(row.process.command.argv, null, 2)}
+                                    </pre>
+                                  </dd>
+                                </div>
+                              )
                             )}
                             {row.process?.command?.path && !row.process.command.changes?.length && (
                               <div>
@@ -373,13 +383,15 @@ export function CollaborationPanel({
                                   )}
                                 </div>
                               )}
-                            {typeof row.process?.command?.exit_code === "number" &&
+                            {(row.process?.command?.kind !== "run" || !!row.process.command.changes?.length) &&
+                              typeof row.process?.command?.exit_code === "number" &&
                               row.process.command.exit_code !== 0 && (
                                 <p className="text-danger-primary">
                                   命令执行失败 · 退出码 {row.process.command.exit_code}
                                 </p>
                               )}
-                            {row.process?.details &&
+                            {(row.process?.command?.kind !== "run" || !!row.process.command.changes?.length) &&
+                              row.process?.details &&
                               !["读取配置文件", "修改配置文件", "执行现场命令", "执行现场操作"].includes(
                                 row.process.details
                               ) && (

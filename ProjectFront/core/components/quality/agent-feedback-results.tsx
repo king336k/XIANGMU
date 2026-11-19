@@ -7,6 +7,8 @@ import { qualityApi, errorMessage } from "./api";
 import { AgentFeedbackActions } from "./agent-feedback-actions";
 import { AgentReportText } from "./agent-report-text";
 import { ConfigurationChangeDiff } from "./configuration-change-diff";
+import { CommandExecutionResult } from "./command-execution-result";
+import type { CommandExecution } from "./command-execution-result";
 import { reportSections } from "./report-summary";
 import type { RemoteProcess } from "./types";
 
@@ -17,6 +19,7 @@ type Reply = {
   content: string;
   created_at: string;
   repair_changes?: (Change & { target: string })[];
+  command_operations?: (CommandExecution & { target: string; stage?: string })[];
 };
 const prefix = "Agent 远程处理：";
 
@@ -81,6 +84,7 @@ export function AgentFeedbackResults({
           for (const change of reply.repair_changes || []) {
             changesByTarget.set(change.target, [...(changesByTarget.get(change.target) || []), change]);
           }
+          const commandOccurrences = new Map<string, number>();
           return (
             <div key={reply.id} className="rounded border border-subtle px-3 py-2">
               <button
@@ -118,6 +122,14 @@ export function AgentFeedbackResults({
                       <ConfigurationChangeDiff command={{ changes }} />
                     </section>
                   ))}
+                  {reply.command_operations?.map((command) => {
+                    const key = JSON.stringify(command);
+                    const occurrence = (commandOccurrences.get(key) || 0) + 1;
+                    commandOccurrences.set(key, occurrence);
+                    return (
+                      <CommandExecutionResult key={`${key}:${occurrence}`} target={command.target} command={command} />
+                    );
+                  })}
                   <details className="border-t border-subtle pt-2">
                     <summary className="cursor-pointer text-12 text-secondary">详细证据与处理过程</summary>
                     <div className="mt-2 max-h-96 overflow-auto">

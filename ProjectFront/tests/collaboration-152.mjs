@@ -1,6 +1,7 @@
 import { AgentReportText } from "./agent-report-text-fixture.js";
 import { groupSuccessfulInspections } from "./timeline-groups-fixture.js";
 import { ConfigurationChangeDiff } from "./configuration-diff-fixture.js";
+import { CommandExecutionResult } from "./command-execution-fixture.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -20,6 +21,7 @@ function component(file, name, access, config) {
     }).outputText
   )((id) => {
     if (id === "./configuration-change-diff") return { ConfigurationChangeDiff };
+    if (id === "./command-execution-result") return { CommandExecutionResult };
     if (id === "./timeline-inspection-groups") return { groupSuccessfulInspections };
     if (id === "./agent-report-text") return { AgentReportText };
     if (id === "react") return React;
