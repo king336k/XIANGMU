@@ -160,8 +160,9 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
             "requires_review": row.get("requires_review", False),
             "scanned_bytes": row.get("scanned_bytes"),
             "content": row.get("excerpt", ""),
+            **{key: row[key] for key in ("scan_incomplete", "truncated", "integrity_verified", "semantic_scan_complete", "selection_scope") if key in row},
         }
-        for row in sources
+        for row in sources if row.get("read_bytes", 0) > 0
     ]
     allowed = {row["reference"]: row for row in [*evidence, *references]}
     allowed["DESCRIPTION"] = {"reference": "DESCRIPTION", "title": "上报描述"}
@@ -189,7 +190,8 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
             remaining -= len(retained.encode())
             approved_materials[reference] = {
                 "content": retained,
-                "truncated": bool(material.get("truncated")) or len(retained.encode()) < len(encoded),
+                "truncated": bool(material.get("truncated")) or bool(row.get("truncated")) or bool(row.get("scan_incomplete")) or len(retained.encode()) < len(encoded),
+                **{key: row[key] for key in ("scan_incomplete", "integrity_verified", "semantic_scan_complete", "selection_scope") if key in row},
             }
         try:
             process = subprocess.run(
@@ -276,6 +278,11 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
             raise ValueError("AGENT_FAILED") from error
         content = process.stdout
     else:
+        material_scope = (
+            "本轮范围是已通过完整性校验且实际读取的材料片段；MATERIAL-COVERAGE标明未读范围。"
+            "只陈述已读取事实，不能以未见推断不存在，不能声称全面排除、全部覆盖或问题已修复。"
+            "仍可依据已读证据定位和建议下一检查；未读内容与待验证项简述一次，不重复免责声明。"
+        ) if config.get("analysis_scope") == "verified_read_subset" else ""
         with OpenAI(api_key=config["api_key"], base_url=config["base_url"], timeout=budget, max_retries=0) as client:
             response = client.chat.completions.create(
                 model=config["model"],
@@ -284,7 +291,7 @@ def analyze_diagnostic(config, text, sources, references, materials=None):
                 messages=[
                     {
                         "role": "system",
-                        "content": (
+                        "content": (material_scope +
                             "answer默认三短段：**故障**：…\n**已处理**：…\n**待验证**：…。每段一句，100至180中文字符为目标、最多220字符，简单问题可省无内容的段落，不再固定填四块。"
                             "先说当前状态；历史故障与当前已处理结果分开一句；原因区分已确认和推测，处理区分实际操作与建议，验证只认真实检查覆盖范围。"
                             "主段不堆VR未活动、Session未关联、平台收据或版本清单，只有直接影响根因或避免误验收才简述；evidence_details只2至4条关键日志或源码依据，最多800字符，完整证据已有附件，不重新写取证过程。"

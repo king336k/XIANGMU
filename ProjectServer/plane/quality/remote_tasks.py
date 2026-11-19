@@ -83,7 +83,7 @@ def finish(run_id, result, status="completed", error=""):
             if "before" in location and "after" in location:change+=" "+str(location["before"])+" → "+str(location["after"])
             lines.append("修改位置："+redact(address+" · "+change)[:2000])
         if isinstance(result.get('evidence_details'),str) and result['evidence_details'].strip():
-            lines.append('详细依据：'+redact(result['evidence_details'])[:6000])
+            lines.append('详细依据：\n'+redact(result['evidence_details'])[:6000])
         # Public replies are already displayed by the reporting DAQ client.
         comment = DefectComment.objects.create(
             project_id=run.defect.project_id,
