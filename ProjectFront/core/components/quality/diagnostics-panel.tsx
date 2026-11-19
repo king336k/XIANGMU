@@ -12,7 +12,7 @@ import { AssistantMarkdown } from "@/components/knowledge/assistant-markdown";
 import { DeploymentSnapshots } from "./deployment-snapshots";
 import { FileText, ChevronRight, RotateCw, CircleCheck, Download } from "lucide-react";
 import type { Context } from "./types";
-import { compactReportText } from "./report-summary";
+import { compactReportText, reportEvidence } from "./report-summary";
 type FailureMetadata = {
   source?: string;
   transport_phase?: string;
@@ -431,14 +431,32 @@ export function DiagnosticsPanel({
               </div>
             )}
             {job.result.answer && (
-              <div className="max-h-80 overflow-y-auto rounded-md bg-layer-1 p-3 text-13 leading-6">
-                <AssistantMarkdown content={job.result.answer} />
-              </div>
+              <details className="rounded-md border border-subtle p-3 text-13 leading-6">
+                <summary className="cursor-pointer">原始报告</summary>
+                <div className="mt-2 max-h-80 overflow-y-auto">
+                  <AssistantMarkdown content={reportEvidence(job.result.answer).readable} />
+                </div>
+                {reportEvidence(job.result.answer).hasTechnical && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer">技术追踪</summary>
+                    <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap">{job.result.answer}</pre>
+                  </details>
+                )}
+              </details>
             )}
             {job.result.evidence_details && (
-              <div className="max-h-80 overflow-y-auto rounded-md bg-layer-1 p-3 text-13 leading-6">
-                <AssistantMarkdown content={job.result.evidence_details} />
-              </div>
+              <details className="rounded-md border border-subtle p-3 text-13 leading-6">
+                <summary className="cursor-pointer">关键依据</summary>
+                <div className="mt-2 max-h-80 overflow-y-auto">
+                  <AssistantMarkdown content={reportEvidence(job.result.evidence_details).readable} />
+                </div>
+                {reportEvidence(job.result.evidence_details).hasTechnical && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer">技术追踪</summary>
+                    <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap">{job.result.evidence_details}</pre>
+                  </details>
+                )}
+              </details>
             )}
             {job.result.model_status === "completed" &&
               typeof job.result.model_confidence === "number" &&

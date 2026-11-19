@@ -24,3 +24,16 @@ test("only known report headings are bold, numeric entries have their own lines 
   assert.match(html, /&lt;script&gt;unsafe\(\)&lt;\/script&gt;/);
   assert.match(html, /config.json:42/);
 });
+test("public summary and readable basis keep technical identifiers in a separate closed disclosure", () => {
+  const id = "95f89e89-3d92-4f6c-a6aa-9b95fddfcd88";
+  const original = `Agent 远程处理：已修复\n故障：初始化失败\n已处理：初值由3.3改为0.3\n待验证：实际遥操作\n详细依据：\n日志：joint limit violation\nrun_id=${id}`;
+  const html = renderToStaticMarkup(React.createElement(AgentReportText, { content: original }));
+  assert.match(html, /<summary[^>]*>关键依据<\/summary>/);
+  assert.match(html, /<summary[^>]*>技术追踪<\/summary>/);
+  assert.doesNotMatch(html, /<details[^>]*open/);
+  const primary = html.split("<details")[0];
+  assert.doesNotMatch(primary, new RegExp(id));
+  assert.doesNotMatch(primary, /joint limit violation/);
+  assert.match(html, /joint limit violation/);
+  assert.match(html, new RegExp(id));
+});

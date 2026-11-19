@@ -122,3 +122,18 @@ test("失败记录最多四条，旧报告缺字段不补造失败，关闭进�
   assert.ok(!collapsed.includes("此前尝试"));
   assert.ok(collapsed.includes('aria-expanded="false"'));
 });
+
+test("diagnostic evidence and raw technical tracing remain independently folded beneath the concise result", () => {
+  const id = "95f89e89-3d92-4f6c-a6aa-9b95fddfcd88";
+  const html = render({
+    answer: "**故障**：初始化失败。\n**已处理**：初值3.3改为0.3。\n**待验证**：实际遥操作。",
+    evidence_details: "日志：joint limit violation\nrun_id=" + id,
+  });
+  assert.match(html, /<summary[^>]*>关键依据<\/summary>/);
+  assert.match(html, /<summary[^>]*>技术追踪<\/summary>/);
+  assert.match(html, /<summary[^>]*>原始报告<\/summary>/);
+  const basis = html.slice(html.indexOf("关键依据"));
+  assert.ok(basis.indexOf("joint limit violation") < basis.indexOf("技术追踪"));
+  assert.ok(basis.indexOf(id) > basis.indexOf("技术追踪"));
+  assert.doesNotMatch(basis.split("技术追踪")[0], /95f89e89/);
+});

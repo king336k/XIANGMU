@@ -88,9 +88,9 @@ test("backup positions use real receipt paths with explicit UUID suffix ellipsis
   const check = nodes(tree).find((node) => node.type === "details");
   const primary = [check.props.children].flat().filter((node) => node?.type !== "details");
   assert.match(text(primary), /备份 \/ 修改前/);
-  assert.match(text(primary), /\/home\/robot\/config.json.backup…/);
+  assert.match(text(primary), /已备份/);
   assert.match(text(primary), /修改后/);
-  assert.ok(nodes(primary).some((node) => node.props?.title === backup));
+  assert.ok(!nodes(primary).some((node) => node.props?.title === backup));
   assert.ok(nodes(primary).some((node) => node.props?.children === "/home/robot/config.json"));
   assert.ok(!text(primary).includes(before) && !text(primary).includes(after) && !text(primary).includes(backup));
   assert.doesNotMatch(text(primary), /校验通过/);
@@ -121,8 +121,8 @@ test("connector 32 character unique backup suffix also stays explicitly abbrevia
   const tree = ConfigurationChangeDiff({
     command: { path: "/real/config.json", changes: [{ key: "port", before: 1, after: 2, backup }] },
   });
-  const caption = nodes(tree).find((node) => node.type === "span" && node.props.title === backup);
-  assert.equal(caption.props.children, "/real/config.json.backup…");
+  const caption = nodes(tree).find((node) => node.type === "span" && node.props.children === "已备份");
+  assert.ok(caption);
   assert.ok(text(tree).includes(backup));
 });
 

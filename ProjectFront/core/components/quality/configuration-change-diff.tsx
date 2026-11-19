@@ -10,8 +10,6 @@ function fieldText(change: Change, side: "before" | "after") {
   if (!Object.hasOwn(change, side) || change[side] === undefined) return "字段值未记录";
   return `${JSON.stringify(change.key)}: ${JSON.stringify(change[side], null, 2)}`;
 }
-const backupCaption = (path: string) =>
-  path.replace(/(\.backup)[-_](?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i, "$1…");
 export function ConfigurationChangeDiff({ command }: { command: Command }) {
   const groups = new Map<string, Change[]>();
   for (const change of command.changes || []) {
@@ -73,20 +71,14 @@ export function ConfigurationChangeDiff({ command }: { command: Command }) {
                   <div className="mt-2 space-y-1">
                     <p>
                       {change.before_file_exists === false ? "空备份标记（原文件不存在）：" : "备份 / 修改前："}
-                      {change.backup || command.backup ? (
-                        <span title={change.backup || command.backup}>
-                          {backupCaption(change.backup || command.backup!)}
-                        </span>
-                      ) : (
-                        "修改前文件未记录"
-                      )}
+                      {change.backup || command.backup ? <span>已备份</span> : "修改前文件未记录"}
                     </p>
                     <p>
                       修改后：<span title={path}>{path}</span>
                     </p>
                   </div>
                   <details className="mt-2">
-                    <summary className="cursor-pointer">技术信息</summary>
+                    <summary className="cursor-pointer">技术追踪</summary>
                     {(change.backup || command.backup) && (
                       <p className="mt-1 break-all">{change.backup || command.backup}</p>
                     )}
