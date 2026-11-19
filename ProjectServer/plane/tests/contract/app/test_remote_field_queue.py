@@ -63,3 +63,17 @@ def test_invalidation_ends_job_but_does_not_invent_worker_release(remote):
     run.refresh_from_db()
     assert run.status=='failed' and run.result['worker_completed_at'] is not None
     assert run.result.get('repaired') is not True and run.comment_id is None
+
+
+def test_actual_collector_patch_location_survives_relay(remote):
+    _,edge,device,project=remote;heartbeat(edge)
+    station=RemoteWorkstation.objects.get(pk=device)
+    defect=Defect.objects.create(project=project,title='collector location',description='collector location')
+    run=RemoteAgentRun.objects.create(workstation=station,defect=defect,owner=station.agent.owner,status='running',started_at=timezone.now(),identity_key=identity_key(station),expires_at=timezone.now()+timedelta(minutes=5))
+    from plane.quality.remote_models import RemoteCommand
+    command=RemoteCommand.objects.create(workstation=station,run=run,payload={'kind':'patch_file','path':'collector-config.json'},expires_at=run.expires_at)
+    change={'path':'/approved/collector-config.json','target_kind':'collector','target_username':'collector','target_ip':'10.1.2.3','key':'robot_port','before':18778,'after':18777,'backup':'/approved/collector-config.json.backup-synthetic'}
+    response=heartbeat(edge,results=[{'id':str(command.id),'ok':True,'exit_code':0,'resolved_path':change['path'],'changes':[change],'target_kind':'collector','target_username':'collector','target_ip':'10.1.2.3'}])
+    assert response.status_code==200
+    command.refresh_from_db()
+    assert command.result['changes']==[change] and command.result['resolved_path']==change['path']

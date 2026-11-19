@@ -4,10 +4,12 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
+from contextlib import contextmanager
+from urllib.parse import urlsplit,urlunsplit
 from uuid import uuid4
 
 import pytest
-from celery.contrib.testing.worker import start_worker
 from django.conf import settings as django_settings
 from django.db import close_old_connections
 from django.test import Client
@@ -23,6 +25,41 @@ from plane.quality.remote_diagnostics import digest
 from plane.tests.contract.app.test_daq_incidents import signature
 
 pytestmark=[pytest.mark.contract, pytest.mark.django_db(transaction=True), pytest.mark.skipif(not os.environ.get("REMOTE_STRESS_BROKER"),reason="isolated Redis/HTTP mixed harness is opt-in")]
+
+
+@contextmanager
+def isolated_workers(origin,output):
+    """Separate OS processes avoid Celery's shared global thread shutdown state."""
+    from django.db import connection
+    env=dict(os.environ)
+    url=urlsplit(env['DATABASE_URL'])
+    env['DATABASE_URL']=urlunsplit(url._replace(path='/'+connection.settings_dict['NAME']))
+    env['AMQP_URL']=env['REMOTE_STRESS_BROKER']
+    env['REMOTE_TOOL_ORIGIN']=origin
+    env['REMOTE_AGENT_SCRIPT']='/code/plane/tests/remote_stress/controlled_runner.py'
+    env['DIAGNOSTIC_AGENT_PYTHON']=sys.executable
+    processes=[];logs=[]
+    try:
+        for queue,concurrency in [('field-repairs',4),('diagnostics',2)]:
+            marker=output.with_name(output.stem+'-'+queue+'.ready')
+            log=output.with_name(output.stem+'-'+queue+'.log').open('w');logs.append(log)
+            process=subprocess.Popen([sys.executable,'-m','plane.tests.remote_stress.celery_worker',
+                '--queue',queue,'--concurrency',str(concurrency),'--ready-file',str(marker)],
+                env=env,stdout=log,stderr=subprocess.STDOUT)
+            processes.append(process);deadline=time.monotonic()+30
+            while not marker.exists():
+                if process.poll() is not None:raise RuntimeError('isolated worker startup failed')
+                if time.monotonic()>deadline:raise TimeoutError('isolated worker not ready')
+                time.sleep(.05)
+        yield
+    finally:
+        for process in processes:process.terminate()
+        for process in processes:
+            try:process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill();process.wait()
+                raise RuntimeError('isolated worker failed graceful shutdown')
+        for log in logs:log.close()
 
 
 @pytest.fixture
@@ -92,12 +129,9 @@ def test_isolated_mixed_http(station_count, settings, isolated_server, monkeypat
     monkeypatch.setenv('REMOTE_AGENT_SCRIPT','/code/plane/tests/remote_stress/controlled_runner.py')
     monkeypatch.setenv('DIAGNOSTIC_AGENT_PYTHON',sys.executable)
     app.conf.update(broker_url=os.environ['REMOTE_STRESS_BROKER'],worker_prefetch_multiplier=1,task_default_queue='diagnostics')
-    manifest={'test_environment':True,'isolation_id':isolation,'base_url':server_url,'model_mode':'controlled_stub','users':users,'stations':stations,'full_job_lifecycle':full_job,'terminal_concurrency_probe':full_job,**({'expected_worker_concurrency':4} if full_job else {})}
+    manifest={'test_environment':True,'isolation_id':isolation,'base_url':server_url,'model_mode':'controlled_stub','users':users,'stations':stations,'full_job_lifecycle':full_job,'terminal_concurrency_probe':full_job,'terminal_probe_hold_seconds':60 if full_job else 0,**({'expected_worker_concurrency':4} if full_job else {})}
     close_old_connections()
-    from contextlib import ExitStack
-    with ExitStack() as workers:
-        workers.enter_context(start_worker(app,pool='threads',concurrency=4,queues=['field-repairs'],perform_ping_check=False,shutdown_timeout=30,loglevel='ERROR'))
-        workers.enter_context(start_worker(app,pool='threads',concurrency=2,queues=['diagnostics'],perform_ping_check=False,shutdown_timeout=30,loglevel='ERROR'))
+    with isolated_workers(server_url,output):
         result=subprocess.run([sys.executable,'/repo/services/field-remote/platform_stress.py','--manifest','-','--output',str(output)],input=json.dumps(manifest),text=True,capture_output=True,timeout=720)
     # Credential payload is never included in an assertion or report.
     assert result.returncode==0, f'isolated client failed; inspect {output}'

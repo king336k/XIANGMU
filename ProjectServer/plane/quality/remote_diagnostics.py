@@ -501,6 +501,11 @@ class RemoteExchange(BaseAPIView):
                     "timed_out",
                     "truncated",
                     "file_result",
+                    "resolved_path",
+                    "changes",
+                    "target_username",
+                    "target_ip",
+                    "target_kind",
                 }
             }
             if len(json.dumps(safe)) > 280000:
