@@ -79,3 +79,29 @@ def test_source_catalog_lists_and_reads_real_repository_files(tmp_path):
     source=case.source_rpc({'operation':'read_source','path':path})
     assert source['content'] and source['path']==path
     assert source['sha256']
+
+
+def test_real499_private_fixture_uses_actual_source_and_only_model_content_repairs(tmp_path):
+    case=StrictCase(tmp_path/'case',Path(os.environ['DAQ_REPO']),True,fixture='real499')
+    catalog=json.dumps(case.raw_inspect())
+    assert 'real499' not in catalog and 'right_arm[0]' not in catalog and '0.3065' not in catalog
+    assert case.yaml.safe_load(case.current_path.read_text())['initial_joint_states']['right_arm'][0]==3.3065
+    baseline=case.read_raw('baseline/'+str(case.relative))
+    assert case.yaml.safe_load(baseline['content'])['initial_joint_states']['right_arm'][0]==0.3065
+    current=case.read_raw(case.current_alias)
+    proposal=case.yaml.safe_load(current['content']);proposal['initial_joint_states']['right_arm'][0]=0.3065
+    receipt=case.patch_model_content(case.current_alias,current['sha256'],case.yaml.safe_dump(proposal,sort_keys=False))
+    assert receipt['state']=='applied'
+    assert [row['key'] for row in receipt['changes']]==['initial_joint_states.right_arm[0]']
+    assert case.yaml.safe_load(case.current_path.read_text())['initial_joint_states']['right_arm'][0]==0.3065
+
+
+def test_real499_candidate_has_same_raw_index_but_cannot_write_unapproved_value(tmp_path):
+    case=StrictCase(tmp_path/'case',Path(os.environ['DAQ_REPO']),False,fixture='real499')
+    assert len(case.raw_inspect()['file_index'])==4
+    current=case.read_raw(case.current_alias)
+    candidate=case.read_raw('baseline/'+str(case.relative))
+    receipt=case.patch_model_content(case.current_alias,current['sha256'],candidate['content'])
+    assert receipt['error']=='baseline_not_approved_for_device'
+    assert not (case.state/'robot_config_overrides').exists()
+    assert case.yaml.safe_load(case.current_path.read_text())['initial_joint_states']['right_arm'][0]==3.3065

@@ -4,6 +4,11 @@
 默认只运行一个已认可基线案例，模型执行限时 295 秒，SDK task 限时 305 秒。
 `--case candidate` 为仅发布候选，`--case both` 顺序运行两者；
 `--fault limit|type|dimension` 可选择故障类别，实际组和索引仍随机。
+`--fixture real499` 是评测控制器私有选项：从实际源码读取已记录的参考配置，将
+`right_arm[0]` 注错为 `3.3065`。此场景名、注入字段和预期值不传入模型 prompt，
+inspect 不返回语义答案。模型只能从独立认可的原始基线文件确认恢复值来源，
+不能将结果表述为凭空推算。默认 `--fixture random` 保留随机场景；仅候选来源
+的 real499 案例仍禁止写入。
 
 本模式中 inspect 不返回语义 validator findings、建议变更、正确替换值或评分目标。
 它只提供原始节点日志、通用只读根、文件索引和实际源码目录。模型需通过 read_file

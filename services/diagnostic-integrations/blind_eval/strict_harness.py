@@ -15,8 +15,27 @@ from harness import IsolatedCase, digest, load_module, save, utc
 
 
 class StrictCase(IsolatedCase):
-    def __init__(self,root,daq,approved=True,fault_kind=None):
+    def __init__(self,root,daq,approved=True,fault_kind=None,fixture='random'):
         super().__init__(root,daq,approved,fault_kind)
+        if fixture not in {'random','real499'}:raise ValueError('unsupported_private_fixture')
+        self.fixture_name=fixture
+        if fixture=='real499':
+            # Evaluation-only selection: never forwarded into prompts/catalogs.
+            # The reference value must come from the actual source document.
+            if self.good['initial_joint_states']['right_arm'][0]!=0.3065:
+                raise ValueError('real499_source_baseline_does_not_match_recorded_fixture')
+            self.bad=copy.deepcopy(self.good)
+            self.bad['initial_joint_states']['right_arm'][0]=3.3065
+            (self.artifact/self.relative).write_text(self.yaml.safe_dump(self.bad,sort_keys=False))
+            self.refresh()
+            self.source_after_fault=(self.artifact/self.relative).read_bytes()
+            self.oracle.update(fixture='real499',fault_injected_at=utc(),kind='limit',group='right_arm',index=0,
+                field='initial_joint_states.right_arm[0]',expected_states=self.good['initial_joint_states'],
+                runtime_error='reset goal validation failed')
+            save(self.root/'hidden-objective.json',self.oracle)
+            self.prepare_device_execution_policy()
+            self.before=self.service.inspect(self.robot)
+            save(self.root/'inspect-before.json',self.before)
         # The raw scenario describes the failure stage, never a YAML key,
         # group or index. The model must discover all configuration facts.
         self.log=[f'{utc()} [INFO] reset requested',f'{utc()} [ERROR] reset goal validation failed',
@@ -55,7 +74,7 @@ class StrictCase(IsolatedCase):
             'editable_files':[self.current_alias],
             'source_catalog':[{'id':'teleop-source','kind':'approved_local_git_snapshot',
                                'repository_commit':self.source_revision}],
-            'node_observations':[{'name':'unified_ik','running':True,'source_path':str(self.root/'fixture-node.log'),
+            'node_observations':[{'name':'unified_ik','running':True,'source_path':'runtime/node.log',
                                   'lines':self.log}],
             'business_not_evaluated':['robot_reset','motion','collection'],'verified':False,'exit_code':0}
 
@@ -63,7 +82,7 @@ class StrictCase(IsolatedCase):
         if path not in self.allowed_reads:return {'error':'raw_file_not_allowlisted'}
         raw=self.allowed_reads[path].read_bytes()
         self.reads[path]=digest(raw)
-        return {'path':path,'resolved_path':str(self.allowed_reads[path]),'content':raw.decode(),
+        return {'path':path,'path_semantics':'isolated_fixture_alias','content':raw.decode(),
             'sha256':digest(raw),'line':1,'ok':True}
 
     def patch_model_content(self,path,sha,content):
@@ -197,6 +216,7 @@ class StrictCase(IsolatedCase):
         base['progress']['actual_configuration_write']=successful
         base['progress']['model_patch_submission_count']=len(submitted)
         base['evaluation_scope']='strict_raw_evidence_model_authored_patch_no_robot_reset'
+        base['fixture']=self.fixture_name
         base['passed']=all(base['checks'].values())
         return base
 

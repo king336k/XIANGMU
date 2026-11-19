@@ -30,8 +30,11 @@ async def main():
     parser.add_argument('--output',required=True,type=Path)
     parser.add_argument('--case',choices=['approved','candidate','both'],default='approved')
     parser.add_argument('--fault',choices=['limit','type','dimension'])
+    parser.add_argument('--fixture',choices=['random','real499'],default='random')
     parser.add_argument('--selfcheck',action='store_true')
     args=parser.parse_args()
+    if args.fixture=='real499' and args.fault not in (None,'limit'):
+        parser.error('real499 fixture has a fixed corruption category')
     if version('pydantic-evals')!='2.66.0' or version('pydantic-ai-slim')!='2.66.0':
         raise ValueError('evaluation_and_model_sdk_versions_must_match')
     args.output.mkdir(parents=True,exist_ok=False)
@@ -39,7 +42,7 @@ async def main():
     fixtures={}
     for approved in selected:
         identifier='case-'+uuid.uuid4().hex[:8]
-        fixtures[identifier]=StrictCase(args.output/identifier,Path(os.environ['DAQ_REPO']),approved,args.fault)
+        fixtures[identifier]=StrictCase(args.output/identifier,Path(os.environ['DAQ_REPO']),approved,args.fault,fixture=args.fixture)
     config=None;runner=None
     if not args.selfcheck:
         raw=json.loads(sys.stdin.buffer.read(1024*1024+1));config=raw.get('config',raw)
@@ -71,6 +74,7 @@ async def main():
     save(args.output/'pydantic-evals-report.json',EvaluationReportAdapter.dump_python(report,mode='json'))
     assertions=[evaluation.value for case in report.cases for evaluation in case.assertions.values()]
     summary={'scope':'strict_raw_evidence_model_authored_patch','framework':'pydantic-evals',
+        'fixture':args.fixture,
         'framework_version':version('pydantic-evals'),'case_count':len(report.cases),
         'failure_count':len(report.failures),'selfcheck_only':args.selfcheck,
         'confirmed_model_case_count':sum(case.output.get('model_called') is True for case in report.cases),
