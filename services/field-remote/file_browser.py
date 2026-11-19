@@ -344,7 +344,7 @@ def file_request(root, spool_fd, request):
         os.unlink(ticket, dir_fd=spool_fd); raise
 
 
-def local_launcher_request(local,request,terminal=False,diagnostics=False):
+def local_launcher_request(local,request,terminal=False,diagnostics=False,timeout=None):
     if not isinstance(local,dict) or local.get('url')!='http://127.0.0.1:11452/api/launcher/remote-robot-files':
         raise ValueError('invalid_local_launcher_endpoint')
     fd=os.open(local['token_file'],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
@@ -359,7 +359,7 @@ def local_launcher_request(local,request,terminal=False,diagnostics=False):
     if diagnostics:url=local['url'].replace('/remote-robot-files','/remote-diagnostics')
     outgoing=Request(url,data=json.dumps(request).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+token},method='POST')
     try:
-        with build_opener(ProxyHandler({}),NoRedirect()).open(outgoing,timeout=3 if terminal else 105) as response:
+        with build_opener(ProxyHandler({}),NoRedirect()).open(outgoing,timeout=timeout if timeout is not None else 3 if terminal else 105) as response:
             raw=response.read(250001)
         if len(raw)>250000:raise ValueError('local_launcher_response_too_large')
         result=json.loads(raw)

@@ -339,6 +339,53 @@ class ConnectorTests(unittest.TestCase):
         self.assertNotIn('after', state)
         self.assertEqual((self.root / '.field-remote-state.json').stat().st_mode & 0o777, 0o600)
 
+    def test_fixed_configuration_repair_uses_snapshot_and_robot_revision_without_shell(self):
+        self.policy.daq_local_api={'url':'http://127.0.0.1:11452/api/launcher/remote-robot-files','token_file':'/private'}
+        expected='a'*64
+        self.assertEqual(self.policy.argv(['daq-local-diagnostics-v1','repair',expected]),
+                         ['daq-local-diagnostics-v1','repair',expected])
+        for argv in (['daq-local-diagnostics-v1','repair'],
+                     ['daq-local-diagnostics-v1','repair',expected,'extra'],
+                     ['daq-local-diagnostics-v1','repair','/etc/passwd']):
+            with self.assertRaises(ValueError):self.policy.argv(argv)
+        receipt={'scope':'configuration_validation','verified':False,
+                 'configuration':{'repair':{'state':'applied','changed':True}},
+                 'changes':[{'path':'/runtime/override.yaml','key':'initial_joint_states.arm[0]',
+                             'before':3.3,'after':.3,'line':2}]}
+        with patch('file_browser.robot_status',return_value={'connected':True,'target_revision':'b'*64}), \
+             patch('file_browser.local_launcher_request',return_value=receipt) as call, \
+             patch('connector.subprocess.Popen') as process:
+            result=run_command(self.policy,['daq-local-diagnostics-v1','repair',expected],'.',2,
+                               expected_target_revision='b'*64)
+        process.assert_not_called()
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['changes'],receipt['changes'])
+        self.assertEqual(call.call_args.args[1],{'action':'repair','expected_sha256':expected,
+                                               'expected_target_revision':'b'*64})
+
+    def test_configuration_repair_rejects_changed_robot_before_any_write(self):
+        self.policy.daq_local_api={'url':'http://127.0.0.1:11452/api/launcher/remote-robot-files','token_file':'/private'}
+        with patch('file_browser.robot_status',return_value={'connected':True,'target_revision':'c'*64}), \
+             patch('file_browser.local_launcher_request') as call:
+            with self.assertRaises(ValueError):
+                run_command(self.policy,['daq-local-diagnostics-v1','repair','a'*64],'.',2,
+                            expected_target_revision='b'*64)
+        call.assert_not_called()
+
+    def test_discovery_advertises_only_observed_fixed_configuration_adapter(self):
+        self.policy.daq_local_api={'url':'http://127.0.0.1:11452/api/launcher/remote-robot-files','token_file':'/private'}
+        caps={'protocol':'daq-configuration-v1','baseline_verified':True,'repair_allowed':True,
+              'supported_repairs':['restore_invalid_initial_joint_states']}
+        with patch('file_browser.local_launcher_request',return_value={'capabilities':caps}), \
+             patch('file_browser.robot_status',return_value={'connected':False}):
+            result=identity(self.policy)['capabilities']
+        self.assertEqual(result['diagnostics']['protocol'],'daq-configuration-v1')
+        self.assertTrue(result['diagnostics']['ready'])
+        self.assertNotIn('repair_argv',result['diagnostics'])
+        with patch('file_browser.local_launcher_request',return_value={'verified':True}), \
+             patch('file_browser.robot_status',return_value={'connected':False}):
+            self.assertNotIn('diagnostics',identity(self.policy)['capabilities'])
+
     def test_terminal_duplicate_input_and_late_open_refused(self):
         opened = self.command('terminal_open', session_id='dedup', cols=80, rows=24)
         self.engine.accept(opened)

@@ -158,8 +158,10 @@ class Policy:
                 or any(not isinstance(arg, str) or '\x00' in arg or len(arg) > MAX_FILE for arg in argv)):
             raise ValueError('bounded argv list required')
         if argv[0]=='daq-local-diagnostics-v1':
-            if argv not in (['daq-local-diagnostics-v1','inspect'],['daq-local-diagnostics-v1','verify']) or self.daq_local_api is None:
-                raise ValueError('only exact local read-only diagnostic operations are permitted')
+            repair = len(argv)==3 and argv[1]=='repair' and re.fullmatch(r'[a-f0-9]{64}',argv[2])
+            if (argv not in (['daq-local-diagnostics-v1','inspect'],['daq-local-diagnostics-v1','verify'])
+                    and not repair) or self.daq_local_api is None:
+                raise ValueError('only exact local diagnostic operations with a snapshot are permitted')
             return argv
         if not any(argv[:len(prefix)] == prefix for prefix in self.allowed):
             raise ValueError('command prefix is not approved locally')
@@ -218,15 +220,29 @@ def kill_group(process):
     process.wait()
 
 
-def run_command(policy, argv, cwd, timeout, max_output=MAX_OUTPUT, stopping=None):
+def run_command(policy, argv, cwd, timeout, max_output=MAX_OUTPUT, stopping=None, expected_target_revision=None):
     argv = policy.argv(argv)
     if argv[0]=='daq-local-diagnostics-v1':
         from file_browser import local_launcher_request
-        response=local_launcher_request(policy.daq_local_api,{'action':argv[1]},diagnostics=True)
-        ok=response.get('ok') is not False if argv[1]=='inspect' else response.get('verified') is True
+        payload={'action':argv[1]}
+        if argv[1]=='repair':
+            from file_browser import robot_status
+            current=robot_status(policy.daq_local_api)
+            if (not isinstance(expected_target_revision,str) or not re.fullmatch(r'[a-f0-9]{64}',expected_target_revision)
+                    or current.get('connected') is not True or current.get('target_revision')!=expected_target_revision):
+                raise ValueError('robot target changed; configuration repair was not executed')
+            payload.update(expected_sha256=argv[2],expected_target_revision=expected_target_revision)
+        response=local_launcher_request(policy.daq_local_api,payload,diagnostics=True)
+        if argv[1]=='repair':
+            state=response.get('configuration',{}).get('repair',{}).get('state')
+            ok=state in {'applied','not_needed'}
+        else:
+            ok=response.get('ok') is not False if argv[1]=='inspect' else response.get('verified') is True
         output=json.dumps(response,ensure_ascii=False)
         if len(output.encode())>max_output:raise ValueError('local diagnostics response too large')
-        return {'ok':ok,'stdout':output,'stderr':'','exit_code':0 if ok else 1,'timed_out':False,'truncated':False}
+        result={'ok':ok,'stdout':output,'stderr':'','exit_code':0 if ok else 1,'timed_out':False,'truncated':False}
+        if isinstance(response.get('changes'),list):result['changes']=response['changes']
+        return result
     timeout = float(timeout)
     if not math.isfinite(timeout) or not 0 < timeout <= 60:
         raise ValueError('timeout must be between 0 and 60 seconds')
@@ -487,7 +503,8 @@ class Engine:
                 self.journal(command_id, self.seen[command_id])
                 self.tasks[command_id] = self.executor.submit(
                     run_command, self.policy, command['argv'], command.get('cwd', '.'),
-                    command.get('timeout', 15), stopping=self.stopping)
+                    command.get('timeout', 15), stopping=self.stopping,
+                    expected_target_revision=command.get('expected_target_revision'))
                 return
             elif kind == 'read_file':
                 data = self.policy.read(command['path'])
@@ -645,6 +662,22 @@ def routed_host_ip(server_url):
     return None
 
 
+def diagnostic_capability(local):
+    """Only advertise the fixed adapter actually present in the running DAQ."""
+    if local is None:return None
+    from file_browser import local_launcher_request
+    try:
+        result=local_launcher_request(local,{'action':'inspect'},diagnostics=True,timeout=3)
+        capability=result.get('capabilities',{})
+        if (isinstance(capability,dict) and capability.get('protocol')=='daq-configuration-v1'
+                and capability.get('baseline_verified') is True
+                and capability.get('supported_repairs')==['restore_invalid_initial_joint_states']):
+            return {'protocol':'daq-configuration-v1','ready':True}
+    except (OSError, ValueError, TypeError):
+        pass
+    return None
+
+
 def identity(policy=None, server_url=None):
     try:
         boot_id = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
@@ -666,6 +699,8 @@ def identity(policy=None, server_url=None):
         }
         from file_browser import robot_status
         result['capabilities']['robot']=robot_status(policy.daq_local_api)
+        diagnostic=diagnostic_capability(policy.daq_local_api)
+        if diagnostic:result['capabilities']['diagnostics']=diagnostic
         try:
             peer = json.loads((policy.root / 'robot-peer.json').read_text())
             username = peer.get('username', '')
@@ -777,6 +812,8 @@ def main():
     last_stream_heartbeat = 0.0
     next_robot_refresh=0.0
     robot_refresh = None
+    next_diagnostic_refresh=0.0
+    diagnostic_refresh=None
     status_executor = ThreadPoolExecutor(max_workers=1)
     try:
         while True:
@@ -787,6 +824,14 @@ def main():
                 from file_browser import robot_status
                 robot_refresh = status_executor.submit(robot_status, policy.daq_local_api)
                 next_robot_refresh = time.monotonic() + 3
+            if diagnostic_refresh is not None and diagnostic_refresh.done():
+                diagnostic=diagnostic_refresh.result()
+                if diagnostic:operator['capabilities']['diagnostics']=diagnostic
+                else:operator['capabilities'].pop('diagnostics',None)
+                diagnostic_refresh=None
+            if policy.daq_local_api is not None and diagnostic_refresh is None and time.monotonic()>=next_diagnostic_refresh:
+                diagnostic_refresh=status_executor.submit(diagnostic_capability,policy.daq_local_api)
+                next_diagnostic_refresh=time.monotonic()+30
             if stream is None and time.monotonic()>=next_stream_retry:
                 try:
                     from station_stream import StationStream
