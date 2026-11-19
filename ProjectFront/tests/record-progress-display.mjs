@@ -289,3 +289,65 @@ test("缺少独立状态记录时明确提示未单独记录，不冒充完成",
   const tree = component("stages", closed, null, "plan").render();
   assert.equal(nodes(tree).filter((n) => n.props?.["data-state"] === "skipped").length, 1);
 });
+
+test("处理历程正文使用精确去编号的任务摘要，原记录和配置差异保留折叠详情", () => {
+  const raw = "Agent 配置修复：任务 95f89e89-3d92-4f6c-a6aa-9b95fddfcd88";
+  const source = {
+    ...data,
+    events: [
+      {
+        id: "remote",
+        label: "Agent 配置修复",
+        actor: "技术员",
+        date: "2026-11-19T10:00:00Z",
+        note: "BASEKNOW-D-477 第1轮诊断修复 · 配置修改：完成",
+        details: raw,
+        remote_process: {
+          summary: "BASEKNOW-D-477 第1轮诊断修复 · 配置修改：完成",
+          defect_code: "BASEKNOW-D-477",
+          round: 1,
+          target: { label: "机器人", username: "robot", host: "10.0.0.177" },
+          command: {
+            argv: ["inspect", "config.json"],
+            path: "/home/robot/config.json",
+            exit_code: 0,
+            changes: [
+              {
+                key: "robot_port",
+                before: 18778,
+                after: 18777,
+                before_exists: true,
+                after_exists: true,
+                line: 42,
+                path: "/home/robot/config.json",
+              },
+            ],
+          },
+          run_id: "95f89e89-3d92-4f6c-a6aa-9b95fddfcd88",
+        },
+      },
+    ],
+  };
+  const tree = component("timeline", source).render();
+  const row = nodes(tree).find((node) => node.type === "li");
+  const visible = [row.props.children].flat().filter((node) => node?.type !== "details");
+  assert.match(JSON.stringify(visible), /第1轮诊断修复 · 配置修改：完成/);
+  assert.doesNotMatch(JSON.stringify(visible), /BASEKNOW-D-477|95f89e89/);
+  const details = nodes(row).find((node) => node.type === "details");
+  assert.equal(details.props.open, undefined);
+  for (const text of [raw, "BASEKNOW-D-477", "robot", "10.0.0.177", "robot_port", "18778 → 18777", "config.json:42"])
+    assert.ok(JSON.stringify(details).includes(text), text);
+});
+
+test("旧处理历程没有元数据的UUID说明默认收起但完整原文仍可查", () => {
+  const raw = "人工改派：95f89e89-3d92-4f6c-a6aa-9b95fddfcd88";
+  const tree = component("timeline", {
+    ...data,
+    events: [{ id: "old", label: "人工改派", actor: "成员", date: "2026-11-19T10:00:00Z", note: raw }],
+  }).render();
+  const row = nodes(tree).find((node) => node.type === "li");
+  const details = nodes(row).find((node) => node.type === "details");
+  assert.ok(details);
+  assert.equal(details.props.open, undefined);
+  assert.match(JSON.stringify(details), /95f89e89/);
+});

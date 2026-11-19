@@ -8,11 +8,35 @@ import { ChevronDown, Flag, GitBranch, CalendarRange, List } from "lucide-react"
 import { renderNumericDateTime } from "@plane/utils";
 import { ScheduleTimeline } from "./schedule-timeline";
 import { DefectFlowGuidance } from "./defect-flow-guidance";
-import type { Context, Defect } from "./types";
+import type { Context, Defect, RemoteProcess } from "./types";
 import { qualityApi, errorMessage } from "./api";
 import { Badge, Modal, Paging } from "./shared";
 import { useCollectionPagination } from "./use-collection-pagination";
-type Event = { id: string; label: string; actor: string; date: string; note?: string; tone?: string };
+type Event = {
+  id: string;
+  label: string;
+  actor: string;
+  date: string;
+  note?: string;
+  tone?: string;
+  details?: string;
+  remote_process?: RemoteProcess | null;
+};
+const technicalId = /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/i;
+function eventSummary(event: Event, currentCode?: string) {
+  const summary = event.remote_process?.summary || event.note || "";
+  if (technicalId.test(summary) || (!event.remote_process && (summary.length > 180 || summary.split("\n").length > 3)))
+    return "原始说明见详情";
+  const code = [event.remote_process?.defect_code, currentCode].find(
+    (value) => value && summary.startsWith(value) && (!summary[value.length] || /[\s·：:]/.test(summary[value.length]))
+  );
+  return code ? summary.slice(code.length).replace(/^[\s·：:]+/, "") || summary : summary;
+}
+function fieldValue(value: unknown, exists: boolean | undefined) {
+  return exists === false ? "不存在" : value === undefined ? "未记录" : JSON.stringify(value);
+}
+const sourceLine = (value: number | null | undefined) =>
+  typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 type Data = {
   schedule: { id: string; name: string; start: string | null; target: string | null; status: string; path: string }[];
   stages: { key: string; name: string; state?: "current" | "completed" | "pending" | "skipped" }[];
@@ -213,15 +237,127 @@ export function RecordProgress({
                             {renderNumericDateTime(item.date)}
                           </time>
                         </div>
-                        {item.note &&
-                          (item.note.length > 180 || item.note.split("\n").length > 3 ? (
-                            <details className="mt-2 text-12 text-secondary">
-                              <summary className="cursor-pointer">查看详细内容</summary>
-                              <p className="mt-2 break-words whitespace-pre-wrap">{item.note}</p>
-                            </details>
-                          ) : (
-                            <p className="mt-1 text-12 break-words whitespace-pre-wrap text-secondary">{item.note}</p>
-                          ))}
+                        {eventSummary(item, defectFlow?.value.code) && (
+                          <p className="mt-1 text-12 break-words whitespace-pre-wrap text-secondary">
+                            {eventSummary(item, defectFlow?.value.code)}
+                          </p>
+                        )}
+                        {(item.remote_process ||
+                          item.details ||
+                          (item.note &&
+                            (technicalId.test(item.note) ||
+                              item.note.length > 180 ||
+                              item.note.split("\n").length > 3))) && (
+                          <details className="mt-2 text-12 text-secondary">
+                            <summary className="cursor-pointer">查看操作详情</summary>
+                            <dl className="mt-2 space-y-3">
+                              {item.remote_process?.defect_code && (
+                                <div>
+                                  <dt className="text-tertiary">任务</dt>
+                                  <dd>
+                                    {item.remote_process.defect_code}
+                                    {item.remote_process.round ? ` · 第${item.remote_process.round}轮` : ""}
+                                  </dd>
+                                </div>
+                              )}
+                              {item.remote_process?.target && (
+                                <div>
+                                  <dt className="text-tertiary">目标</dt>
+                                  <dd>
+                                    {item.remote_process.target.label || "现场"} ·{" "}
+                                    {item.remote_process.target.username || "用户名待确认"}@
+                                    {item.remote_process.target.host || "IP待确认"}
+                                  </dd>
+                                </div>
+                              )}
+                              {!!item.remote_process?.command?.argv?.length && (
+                                <div>
+                                  <dt className="text-tertiary">命令参数</dt>
+                                  <dd>
+                                    <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
+                                      {JSON.stringify(item.remote_process.command.argv, null, 2)}
+                                    </pre>
+                                  </dd>
+                                </div>
+                              )}
+                              {item.remote_process?.command?.path && (
+                                <div>
+                                  <dt className="text-tertiary">文件位置</dt>
+                                  <dd className="break-all">{item.remote_process.command.path}</dd>
+                                </div>
+                              )}
+                              {!!item.remote_process?.command?.changes?.length && (
+                                <div>
+                                  <dt className="text-tertiary">配置字段变更</dt>
+                                  <dd className="mt-2 space-y-2">
+                                    {item.remote_process.command.changes.map((change) => {
+                                      const line =
+                                        sourceLine(change.after_line) ||
+                                        sourceLine(change.line) ||
+                                        sourceLine(change.before_line);
+                                      const path = change.path || item.remote_process?.command?.path;
+                                      return (
+                                        <div
+                                          key={JSON.stringify([change.key, path, change.before, change.after])}
+                                          className="space-y-1 rounded border border-subtle p-2"
+                                        >
+                                          <p>{`${change.before_exists === false ? "新增配置字段" : change.after_exists === false ? "删除配置字段" : "配置字段"} ${change.key}`}</p>
+                                          <p>{`${fieldValue(change.before, change.before_exists)} → ${fieldValue(change.after, change.after_exists)}`}</p>
+                                          <p className="text-11 break-all text-tertiary">
+                                            {path ? `${path}${line ? `:${line}` : " · 行号未记录"}` : "路径未记录"}
+                                          </p>
+                                          {change.backup && <p className="text-11 break-all">备份：{change.backup}</p>}
+                                        </div>
+                                      );
+                                    })}
+                                  </dd>
+                                </div>
+                              )}
+                              {item.remote_process?.command?.exit_code !== undefined &&
+                                item.remote_process.command.exit_code !== null && (
+                                  <div>
+                                    <dt className="text-tertiary">退出码</dt>
+                                    <dd>{item.remote_process.command.exit_code}</dd>
+                                  </div>
+                                )}
+                              {item.remote_process?.details && (
+                                <div>
+                                  <dt className="text-tertiary">执行说明</dt>
+                                  <dd className="break-words whitespace-pre-wrap">{item.remote_process.details}</dd>
+                                </div>
+                              )}
+                              <div>
+                                <dt className="text-tertiary">原始记录</dt>
+                                <dd className="break-words whitespace-pre-wrap">
+                                  {Array.from(
+                                    new Set([item.details, item.note, item.remote_process?.summary].filter(Boolean))
+                                  ).join("\n")}
+                                </dd>
+                              </div>
+                              {(item.remote_process?.command?.expected_sha256 ||
+                                item.remote_process?.command?.sha256 ||
+                                item.remote_process?.command?.backup) && (
+                                <div className="text-11 break-all text-tertiary">
+                                  {item.remote_process.command.backup && (
+                                    <p>备份：{item.remote_process.command.backup}</p>
+                                  )}
+                                  {item.remote_process.command.expected_sha256 && (
+                                    <p>修改前校验：{item.remote_process.command.expected_sha256}</p>
+                                  )}
+                                  {item.remote_process.command.sha256 && (
+                                    <p>修改后校验：{item.remote_process.command.sha256}</p>
+                                  )}
+                                </div>
+                              )}
+                              {(item.remote_process?.run_id || item.remote_process?.command_id) && (
+                                <div className="border-t border-subtle pt-2 text-11 break-all text-tertiary">
+                                  {item.remote_process.run_id && <p>任务ID：{item.remote_process.run_id}</p>}
+                                  {item.remote_process.command_id && <p>命令ID：{item.remote_process.command_id}</p>}
+                                </div>
+                              )}
+                            </dl>
+                          </details>
+                        )}
                       </li>
                     ))}
                   </ul>
