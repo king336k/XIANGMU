@@ -317,6 +317,14 @@ class EventSerializer(serializers.ModelSerializer):
         from .reference_names import readable_references
 
         data["note"] = readable_references(data["note"], instance.project_id, instance.defect_id, self.context)
+        from .remote_event_display import event_process,readable_assignment
+        original_note=data["note"]
+        data["note"]=readable_assignment(data["note"])
+        if data["note"]!=original_note:
+            data["details"]=original_note
+        process=event_process(instance,self.context)
+        if process is not None:
+            data["remote_process"]=process
         return data
 
     actor = serializers.CharField(source="created_by.display_name", default="")

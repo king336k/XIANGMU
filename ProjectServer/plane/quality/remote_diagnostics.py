@@ -710,7 +710,10 @@ class RemoteDefectTargets(BaseAPIView):
     def get(self, request):
         defect = get_object_or_404(Defect, pk=request.query_params.get("defect_id"))
         stations = RemoteWorkstation.objects.filter(agent__project_id=defect.project_id).select_related("agent__project__workspace")
-        return Response({"results": [card(station, request.user) for station in stations if permitted(request.user, station) and feedback_for(station, defect.id).exists()]})
+        available=[station for station in stations if permitted(request.user, station) and feedback_for(station, defect.id).exists()]
+        active=RemoteAgentRun.objects.filter(defect=defect,owner=request.user,workstation__in=available,status__in=['queued','running'],expires_at__gt=timezone.now()).select_related('workstation__agent__project__workspace').order_by('-created_at').first()
+        return Response({"results":[card(station,request.user)for station in available],
+            'active_run':{'id':str(active.id),'status':active.status,'queue':run_queue(active),'error':active.error}if active else None})
 
 
 class RemoteRunDetail(BaseAPIView):
