@@ -157,3 +157,14 @@ test("技术跟进状态可继续处理或提交待回归，关闭选项仍被�
     assert.equal(choices.find((node) => node.props.value === "closed").props.disabled, true);
   }
 });
+
+test("人工确认可选择技术跟进状态，待技术确认仍交给服务器证据守卫且不能直接关闭", () => {
+  for (const status of ["open", "in_progress", "pending_tech", "needs_tech"]) {
+    const tree = form("workflow", () => {}, { status });
+    const select = nodes(tree).find((node) => node.type === "select" && node.props["aria-label"] === "处理状态");
+    const choices = nodes(select).filter((node) => node.type === "option");
+    assert.equal(choices.find((node) => node.props.value === "needs_tech").props.disabled, false);
+    assert.equal(choices.find((node) => node.props.value === "pending_tech").props.disabled, false);
+    assert.equal(choices.find((node) => node.props.value === "closed").props.disabled, true);
+  }
+});

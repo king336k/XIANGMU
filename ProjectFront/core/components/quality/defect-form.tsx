@@ -57,10 +57,10 @@ export function DefectForm({
   );
   const [verificationMethod, setVerificationMethod] = useState("regression");
   const transitions: Record<string, string[]> = {
-    open: ["open", "in_progress", "resolved"],
-    pending_tech: ["pending_tech", "in_progress", "resolved"],
-    needs_tech: ["needs_tech", "in_progress", "resolved"],
-    in_progress: ["open", "in_progress", "resolved"],
+    open: ["open", "in_progress", "needs_tech", "pending_tech", "resolved"],
+    pending_tech: ["pending_tech", "needs_tech", "in_progress", "resolved"],
+    needs_tech: ["needs_tech", "pending_tech", "in_progress", "resolved"],
+    in_progress: ["open", "in_progress", "needs_tech", "pending_tech", "resolved"],
     resolved: ["resolved", "open"],
     closed: ["closed", "open"],
   };
