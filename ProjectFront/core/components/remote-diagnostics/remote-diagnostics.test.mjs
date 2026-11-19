@@ -307,7 +307,7 @@ function nodes(tree) {
 
 const FileView = () => null;
 const TerminalView = () => null;
-function renderRoot(devices, selected = "", terminal = "", error = undefined, hasData = true) {
+function renderRoot(devices, selected = "", terminal = "", error = undefined, hasData = true, activeResults = []) {
   let cursor = 0;
   const states = [selected, terminal];
   const mutations = [];
@@ -321,7 +321,11 @@ function renderRoot(devices, selected = "", terminal = "", error = undefined, ha
     },
     "react-router": { useParams: () => ({ workspaceSlug: "test" }), useSearchParams: () => [new URLSearchParams()] },
     swr: {
-      default: () => ({ data: hasData ? { results: devices, can_manage: true } : undefined, error, mutate() {} }),
+      default: () => ({
+        data: hasData ? { results: devices, active_results: activeResults, can_manage: true } : undefined,
+        error,
+        mutate() {},
+      }),
     },
     "lucide-react": { Monitor: () => null, RefreshCw: () => null },
     "@/components/quality/api": { qualityApi: {}, errorMessage: String },
@@ -365,7 +369,8 @@ test("device card displays identity and selecting it does not open a shell impli
 
 test("missing collector IP stays unknown instead of substituting hostname or loopback", () => {
   const { tree } = renderRoot([{ ...device, ip_address: undefined }]);
-  const title = nodes(tree).find((node) => node.type === "h2");
+  const card = nodes(tree).find((node) => node.type === "button" && node.props["aria-pressed"] === false);
+  const title = nodes(card).find((node) => node.type === "h2");
   assert.equal(title.props.children.join(""), "operator@IP待确认");
   assert.doesNotMatch(JSON.stringify(title), /127\.0\.0\.1|robot-01/);
 });
@@ -534,4 +539,33 @@ test("terminal fit host excludes outer padding and fits again after fonts load",
   const source = readFileSync(new URL("./terminal-panel.tsx", import.meta.url), "utf8");
   assert.match(source, /ref=\{containerRef\}[^>]*className="h-full min-w-0"/);
   assert.match(source, /document.fonts.ready/);
+});
+
+test("device navigation is paged and independent from the active terminal pane", () => {
+  const { tree } = renderRoot([device], device.id, device.id);
+  const list = nodes(tree).find((n) => n.props?.["aria-label"] === "采集电脑列表");
+  const work = nodes(tree).find((n) => n.props?.["aria-label"] === "当前电脑操作");
+  assert.ok(list && work);
+  assert.equal(
+    nodes(list).some((n) => n.type === TerminalView),
+    false
+  );
+  assert.equal(nodes(work).filter((n) => n.type === TerminalView).length, 1);
+  const size = nodes(list).find((n) => n.props?.["aria-label"] === "每页电脑数量");
+  assert.equal(size.props.value, 6);
+  assert.ok(nodes(list).some((n) => n.props?.["aria-label"] === "搜索采集电脑"));
+  assert.ok(nodes(list).some((n) => n.props?.["aria-label"] === "设备在线状态"));
+});
+
+test("paging away from the selected computer preserves its terminal and files via current authorized pin", () => {
+  const other = { ...device, id: "other", username: "second" };
+  const before = renderRoot([device], device.id, device.id);
+  const after = renderRoot([other], device.id, device.id, undefined, true, [device]);
+  const initialTerminal = nodes(before.tree).find((n) => n.type === TerminalView);
+  const pagedTerminal = nodes(after.tree).find((n) => n.type === TerminalView);
+  assert.equal(pagedTerminal.key, initialTerminal.key);
+  assert.equal(pagedTerminal.props.device.id, device.id);
+  assert.equal(nodes(after.tree).find((n) => n.type === FileView).props.device.id, device.id);
+  const revoked = renderRoot([other], device.id, device.id, undefined, true, []);
+  assert.equal(nodes(revoked.tree).filter((n) => n.type === TerminalView).length, 0);
 });

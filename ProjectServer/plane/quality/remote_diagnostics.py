@@ -248,7 +248,7 @@ def close_session(session):
     )
 
 
-def card(value, user):
+def card(value, user, can_connect=None):
     return {
         "id": str(value.id),
         "username": value.username or value.agent.name,
@@ -259,7 +259,7 @@ def card(value, user):
         "last_seen_at": value.last_seen_at,
         "project_id": str(value.agent.project_id),
         "workspace_slug": value.agent.project.workspace.slug,
-        "can_connect": permitted(user, value),
+        "can_connect": permitted(user, value) if can_connect is None else can_connect,
         "capabilities": value.capabilities,
     }
 
@@ -273,12 +273,39 @@ class RemoteDirectory(BaseAPIView):
             stations = stations.filter(agent__project__workspace__slug=request.query_params["workspace"])
         if request.query_params.get("project"):
             stations = stations.filter(agent__project_id=request.query_params["project"])
-        return Response(
-            {
-                "results": [card(s, request.user) for s in stations if permitted(request.user, s)],
-                "can_manage": is_administrator(request.user),
-            }
-        )
+        params = request.query_params
+        paged = any(key in params for key in ("page", "per_page", "search", "status", "active"))
+        page = serializers.IntegerField(min_value=1).run_validation(params.get("page", 1))
+        size = serializers.ChoiceField(choices=(6, 12, 24)).run_validation(int(params.get("per_page", 6))) if str(params.get("per_page", 6)).isdigit() else None
+        if size is None:
+            raise ValidationError({"per_page": "请选择6、12或24台。"})
+        state = serializers.ChoiceField(choices=("all", "online", "offline")).run_validation(params.get("status", "all"))
+        active = [str(serializers.UUIDField().run_validation(value)) for value in params.get("active", "").split(",") if value]
+        if len(active) > 2:
+            raise ValidationError({"active": "最多保留两台当前操作电脑。"})
+        # Permissions are memoized only within this request and checked before counts or pins.
+        access = {}
+        allowed = []
+        for station in stations:
+            key = (station.agent.project_id, station.agent.owner_id, station.enabled, station.agent.enabled)
+            if key not in access:
+                access[key] = permitted(request.user, station)
+            if access[key]:
+                allowed.append(station)
+        if not paged:
+            return Response({"results": [card(station, request.user, True) for station in allowed],
+                "can_manage": is_administrator(request.user)})
+        selected = [station for station in allowed if str(station.id) in active]
+        search = str(params.get("search", "")).strip().casefold()[:200]
+        visible = [station for station in allowed
+            if (state == "all" or online(station) == (state == "online"))
+            and (not search or search in " ".join([station.username, station.hostname, station.agent.name,
+                str(station.capabilities.get("network", {}).get("ip_address", ""))]).casefold())]
+        count = len(visible)
+        page = min(page, max(1, (count + size - 1) // size))
+        return Response({"results": [card(station, request.user, True) for station in visible[(page-1)*size:page*size]],
+            "active_results": [card(station, request.user, True) for station in selected],
+            "count": count, "page": page, "per_page": size, "can_manage": is_administrator(request.user)})
 
     @transaction.atomic
     def post(self, request):
