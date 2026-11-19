@@ -24,6 +24,12 @@ export class TerminalConnection {
   private inputQueue: Uint8Array[] = [];
   private queuedBytes = 0;
   private sending = false;
+  private stream: WebSocket | undefined;
+  private streamSeq = 0;
+  private pendingAcks = new Map<
+    number,
+    { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+  >();
   private resizeQueue: { cols: number; rows: number } | undefined;
 
   constructor(
@@ -73,7 +79,7 @@ export class TerminalConnection {
       }
       this.onSession?.(session);
       this.onStatus("open");
-      void this.poll();
+      if (!(await this.openStream()) && !this.disposed) void this.poll();
     } catch (error) {
       if (!this.disposed) this.fail(error);
     }
@@ -94,7 +100,7 @@ export class TerminalConnection {
       this.inputTimer = setTimeout(() => {
         this.inputTimer = undefined;
         void this.flush();
-      }, 30);
+      }, 8);
     }
   }
 
@@ -138,7 +144,7 @@ export class TerminalConnection {
       }
     }
     if (input) {
-      await this.api.write(this.url, {
+      await this.send({
         action: "input",
         data: btoa(Array.from(input, (byte) => String.fromCharCode(byte)).join("")),
       });
@@ -146,31 +152,121 @@ export class TerminalConnection {
     } else if (this.resizeQueue) {
       const dimensions = this.resizeQueue;
       this.resizeQueue = undefined;
-      await this.api.write(this.url, { action: "resize", ...dimensions });
+      await this.send({ action: "resize", ...dimensions });
     } else return;
     await this.flushNext();
+  }
+
+  private async openStream(): Promise<boolean> {
+    if (typeof window === "undefined" || typeof WebSocket === "undefined") return false;
+    const url = new URL(`${this.base}terminal-stream/${encodeURIComponent(this.sessionId)}/`, window.location.origin);
+    if (url.origin !== window.location.origin) return false;
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return new Promise((resolve) => {
+      const socket = new WebSocket(url);
+      let ready = false;
+      let settled = false;
+      const finish = (value: boolean) => {
+        if (!settled) {
+          settled = true;
+          resolve(value);
+        }
+      };
+      const timeout = setTimeout(() => {
+        if (!ready) {
+          socket.close();
+          finish(false);
+        }
+      }, 1500);
+      socket.addEventListener("open", () => {
+        clearTimeout(timeout);
+        if (this.disposed) {
+          socket.close();
+          finish(false);
+          return;
+        }
+        ready = true;
+        this.stream = socket;
+        finish(true);
+      });
+      socket.addEventListener("message", (event) => {
+        if (this.disposed) return;
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === "ack") {
+            const pending = this.pendingAcks.get(message.seq);
+            if (pending) {
+              clearTimeout(pending.timer);
+              this.pendingAcks.delete(message.seq);
+              pending.resolve();
+            }
+          } else if (message.type === "output") this.consume(message);
+          else if (message.type === "error") this.fail(new Error(message.error || "终端连接已中断，请重新连接。"));
+        } catch {
+          this.fail(new Error("终端返回了无效数据，请重新连接。"));
+        }
+      });
+      socket.addEventListener("error", () => {
+        if (!ready) {
+          clearTimeout(timeout);
+          socket.close();
+          finish(false);
+        }
+      });
+      socket.addEventListener("close", () => {
+        clearTimeout(timeout);
+        if (!ready) finish(false);
+        else if (!this.disposed) this.fail(new Error("终端实时连接已断开，请重新连接。"));
+      });
+    });
+  }
+
+  private async send(payload: object): Promise<unknown> {
+    if (!this.stream) return this.api.write(this.url, payload);
+    const socket = this.stream;
+    if (socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 256 * 1024)
+      throw new Error("终端连接积压或已断开，请重新连接。");
+    const seq = ++this.streamSeq;
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingAcks.delete(seq);
+        reject(new Error("终端输入确认超时，请重新连接。"));
+      }, 10000);
+      this.pendingAcks.set(seq, { resolve, reject, timer });
+      try {
+        socket.send(JSON.stringify({ ...payload, seq }));
+      } catch (error) {
+        clearTimeout(timer);
+        this.pendingAcks.delete(seq);
+        reject(error);
+      }
+    });
+  }
+
+  private consume(response: TerminalSnapshot) {
+    if (this.disposed) return;
+    this.onSession?.(response);
+    for (const event of response.events) {
+      if (event.seq > this.cursor) {
+        this.output(decodeTerminalOutput(event.data));
+        this.cursor = event.seq;
+      }
+    }
+    this.cursor = Math.max(this.cursor, response.cursor);
+    if (response.status !== "open") {
+      this.onStatus(
+        response.status === "closed" && !response.error ? "closed" : "error",
+        response.error ? new Error(response.error) : undefined
+      );
+      this.dispose();
+    }
   }
 
   private async poll() {
     try {
       const response = await this.api.read<TerminalSnapshot>(`${this.url}?after=${this.cursor}`);
+      this.consume(response);
       if (this.disposed) return;
-      this.onSession?.(response);
-      for (const event of response.events) {
-        if (event.seq > this.cursor) {
-          this.output(decodeTerminalOutput(event.data));
-          this.cursor = event.seq;
-        }
-      }
-      this.cursor = Math.max(this.cursor, response.cursor);
-      if (response.status !== "open") {
-        this.onStatus(
-          response.status === "closed" && !response.error ? "closed" : "error",
-          response.error ? new Error(response.error) : undefined
-        );
-        this.dispose();
-        return;
-      }
       this.pollTimer = setTimeout(() => void this.poll(), 400);
     } catch (error) {
       if (!this.disposed) this.fail(error);
@@ -190,6 +286,12 @@ export class TerminalConnection {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.stream?.close();
+    for (const pending of this.pendingAcks.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("终端已关闭。"));
+    }
+    this.pendingAcks.clear();
     clearTimeout(this.pollTimer);
     clearTimeout(this.inputTimer);
     this.inputQueue = [];

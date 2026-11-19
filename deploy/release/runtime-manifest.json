@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "project_key": "engram_project",
-  "runtime_set_version": "2026.11.10",
+  "runtime_set_version": "2026.11.19-terminal-ws",
   "platform": "linux/amd64",
   "images": [
     {
       "service": "api",
-      "ref": "engramproject/runtime-api:2026.11.10",
-      "id": "sha256:778ad148d9e6b425fb8c3ef1ae09becf53c913d0c89d9c66aa3c249a2105a1cb",
+      "ref": "engramproject/runtime-api:terminal-ws-20261119",
+      "id": "sha256:50c76410221ad7a5633bb254b13e8015f23be9e19f4501c5d2b68cea2d29405f",
       "platform": "linux/amd64",
-      "dependency_sha256": "f90d2c569be0ffb5dfba4ce78a33e24700ec7329fa980d203016f4d60eabf0db",
+      "dependency_sha256": "dbbf23200bf3ed724ec02597632047ee5aa3d8b95921a19f05983fcf40327ad9",
       "dependency_files": [
         "ProjectServer/requirements/base.txt",
         "ProjectServer/requirements/local.txt",
@@ -19,10 +19,10 @@
     },
     {
       "service": "diagnostic-worker",
-      "ref": "engramproject/runtime-diagnostic:2026.11.10",
-      "id": "sha256:bb9598360f0b18783476899cdef610e7f8ca1629f46ac8ec475503294b703193",
+      "ref": "engramproject/runtime-diagnostic:terminal-ws-20261119",
+      "id": "sha256:16787210b71bdc0a53d9c522d5ff2b26fcdb5d8910df11da9b7fd95a763edda8",
       "platform": "linux/amd64",
-      "dependency_sha256": "25739d3a67235417bcea30d241078479700d475d37e81efa9bed926f069c6cfe",
+      "dependency_sha256": "858b1978142bda2651f2a0eac241cef19cd4a1f70a6cca21c5ff9a40ee3385f6",
       "dependency_files": [
         "ProjectServer/requirements/base.txt",
         "ProjectServer/requirements/local.txt",
@@ -45,9 +45,7 @@
       "id": "sha256:1d331dc65a6496ea1d93b7997bda3550a909aa7533b025b2264a3b68c60ea994",
       "platform": "linux/amd64",
       "dependency_sha256": "002d045529ee3b947df64b7b85c4ec8f921f6a2b718897c0549125bbb8d674c1",
-      "dependency_files": [
-        "pnpm-lock.yaml"
-      ]
+      "dependency_files": ["pnpm-lock.yaml"]
     },
     {
       "service": "builtin-embedding",
@@ -55,9 +53,7 @@
       "id": "sha256:ce9ce4aabf91ce85b9f032e4ccb9857beafc3c309388e8cb37894e22e5f2cc0f",
       "platform": "linux/amd64",
       "dependency_sha256": "9e396b4196e927e76a7ddf29ddfd577a47772f6b34cc6650084075287db4fb66",
-      "dependency_files": [
-        "services/embedding-service/requirements.txt"
-      ]
+      "dependency_files": ["services/embedding-service/requirements.txt"]
     },
     {
       "service": "document-ocr",
@@ -65,9 +61,7 @@
       "id": "sha256:67513a5a295c424c1ae6832ef29102ec52fecfb037b8efded42e4586fff591a0",
       "platform": "linux/amd64",
       "dependency_sha256": "d2b92fd0a06d60ff785b633d2e5bec19cec94f93a37cd411c6c34d7c3c93b1c0",
-      "dependency_files": [
-        "services/document-ocr/runtime.Dockerfile"
-      ]
+      "dependency_files": ["services/document-ocr/runtime.Dockerfile"]
     },
     {
       "service": "space",

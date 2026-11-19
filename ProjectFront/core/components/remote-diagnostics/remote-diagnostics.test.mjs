@@ -569,3 +569,74 @@ test("paging away from the selected computer preserves its terminal and files vi
   const revoked = renderRoot([other], device.id, device.id, undefined, true, []);
   assert.equal(nodes(revoked.tree).filter((n) => n.type === TerminalView).length, 0);
 });
+
+test("live stream sends ordered input with acknowledgements and no HTTP polling after upgrade", async () => {
+  const sockets = [];
+  const originalWindow = globalThis.window,
+    originalSocket = globalThis.WebSocket;
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    bufferedAmount = 0;
+    messages = [];
+    constructor(url) {
+      this.url = url;
+      sockets.push(this);
+      setImmediate(() => this.onopen?.());
+    }
+    addEventListener(name, callback) {
+      this["on" + name] = callback;
+    }
+    send(raw) {
+      const message = JSON.parse(raw);
+      this.messages.push(message);
+      setImmediate(() => this.onmessage?.({ data: JSON.stringify({ type: "ack", seq: message.seq }) }));
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+  }
+  globalThis.window = { location: { origin: "http://platform.test" } };
+  globalThis.WebSocket = Socket;
+  const output = [],
+    requests = [];
+  try {
+    const connection = new TerminalConnection(
+      {
+        read: async () => {
+          throw new Error("must not poll after upgrade");
+        },
+        write: async (url, body) => {
+          requests.push(body.action);
+          return { id: "live", status: "open" };
+        },
+      },
+      "/remote/",
+      (bytes) => output.push(...bytes),
+      () => {}
+    );
+    await connection.open("computer", 80, 24);
+    assert.match(String(sockets[0].url), /ws:\/\/platform.test\/remote\/terminal-stream\/live\//);
+    connection.input("cd 中文\r");
+    await flushInputFrame();
+    await flush();
+    assert.deepEqual(requests, ["open"]);
+    assert.equal(new TextDecoder().decode(decodeTerminalOutput(sockets[0].messages[0].data)), "cd 中文\r");
+    sockets[0].onmessage({
+      data: JSON.stringify({
+        type: "output",
+        status: "open",
+        cursor: 1,
+        events: [{ seq: 1, data: encodeTerminalInput("ok") }],
+      }),
+    });
+    assert.equal(new TextDecoder().decode(Uint8Array.from(output)), "ok");
+    connection.dispose();
+    await flush();
+    assert.equal(requests.at(-1), "close");
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.WebSocket = originalSocket;
+  }
+});

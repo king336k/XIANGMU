@@ -78,3 +78,6 @@ nh3==0.2.18
 
 # bounded local PDF document extraction
 pypdf==7.0.0
+
+# Uvicorn WebSocket protocol for interactive remote terminals
+wsproto==1.3.2
