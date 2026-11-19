@@ -535,9 +535,10 @@ class RemoteExchange(BaseAPIView):
         station.last_seen_at = now
         capabilities = identity.get("capabilities", {})
         if isinstance(capabilities, dict) and len(json.dumps(capabilities)) < 16000:
+            from .remote_profiles import daq_profile
             station.capabilities = {
                 **capabilities,
-                "agent_context": station.capabilities.get("agent_context", {}),
+                "agent_context": daq_profile(station.capabilities.get("agent_context", {}), capabilities),
             }
         station.save()
         for run in station.remoteagentrun_set.filter(status__in=["queued", "running"]).select_related("owner"):
@@ -885,6 +886,8 @@ class RemoteTool(BaseAPIView):
             tool_context = dict(station.capabilities.get("agent_context", {}))
             tool_context["repair_allowed"] = tool_context.get("repair_allowed") is True and run.mode == "repair"
             check_tool(tool_context, op, payload)
+            if op == 'run' and payload.get('argv', [])[:2] == ['daq-local-diagnostics-v1', 'repair']:
+                _, payload['expected_target_revision'] = robot_target(station)
             if run.remotecommand_set.filter(status__in=["pending", "delivered"],expires_at__gt=timezone.now()).exists():
                 raise Conflict("上一个现场操作尚未完成，请等待结果。")
             if run.remotecommand_set.count() >= 20:

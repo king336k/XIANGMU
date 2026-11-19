@@ -42,6 +42,16 @@ def finish(run_id, result, status="completed", error=""):
             'defect_state_version':run.result.get('defect_state_version'),'queued_at':run.created_at.timestamp(),
             'worker_started_at':run.started_at.timestamp() if run.started_at else None,
             'worker_completed_at':run.completed_at.timestamp(),'worker_queue':'field-repairs'}
+        from .agent_lifecycle import limited_verification_scope, configuration_receipts
+        configuration = configuration_receipts(run)
+        scope = limited_verification_scope(run, result) or configuration['scope']
+        result = {**result, 'configuration_repaired': configuration['configuration_repaired'],
+                  'configuration_verified': configuration['configuration_verified']}
+        if scope:
+            result = {**result, 'verification_scope': scope, 'repaired': False, 'business_verified': False,
+                      'outcome': 'unresolved', 'needs_business_verification': True,
+                      'verification_passed': configuration['verification_passed'],
+                      'repair_locations': configuration['repair_locations']}
         fields = [
             ("结论", "summary"),
             ("原因与证据", "root_cause"),
@@ -52,7 +62,10 @@ def finish(run_id, result, status="completed", error=""):
         from .agent_lifecycle import readonly_verified,handoff
         verified_only = status=='completed' and readonly_verified(run,result)
         repaired = status=='completed' and result.get('repaired') is True and result.get('verification_passed') is True
-        outcome = "已修复" if repaired else "验证通过" if verified_only else "未自动修复"
+        outcome = ("配置已修复，待业务验证" if scope and configuration['configuration_repaired'] else
+                   "配置检查通过，待业务验证" if scope and configuration['configuration_verified'] else
+                   "配置修复未验证，待业务验证" if scope and configuration['repair_locations'] else
+                   "已修复" if repaired else "验证通过" if verified_only else "未自动修复")
         lines = ["Agent 远程处理：" + outcome]
         for label, key in fields:
             value = result.get(key, "")
@@ -84,7 +97,7 @@ def finish(run_id, result, status="completed", error=""):
         run.defect.refresh_from_db(fields=['status'])
         DefectEvent.objects.create(project_id=run.defect.project_id, defect=run.defect, created_by=run.owner,
             previous_status=run.defect.status, status=run.defect.status,
-            note="Agent 处理结束：" + ("已修复并通过复测" if repaired else "验证通过，未修改现场" if verified_only else "未自动修复，根因及后续方案见现场处理结果") + f"；任务 {run.id}。")
+            note="Agent 处理结束：" + (outcome if scope else "已修复并通过复测" if repaired else "验证通过，未修改现场" if verified_only else "未自动修复，根因及后续方案见现场处理结果") + f"；任务 {run.id}。")
 
 
 @shared_task(bind=True, name="plane.quality.remote_repair", queue="field-repairs", soft_time_limit=400, time_limit=430, max_retries=None)
@@ -160,6 +173,8 @@ def remote_repair(self, run_id):
         context["collector_identity"]["ip_address"]=run.workstation.capabilities.get("network",{}).get("ip_address","")
         context["robot_identity"]={"username":run.workstation.capabilities.get("robot",{}).get("username",""),"ip_address":run.workstation.capabilities.get("robot",{}).get("host",""),"label":"机器人"}
         context["feedback"] = {"id":str(run.defect_id),"code":run.defect.code,"title":run.defect.title,"description":run.defect.description}
+        from .remote_materials import feedback_materials
+        context["feedback_materials"] = feedback_materials(run)
         context["repair_allowed"] = context.get("repair_allowed") is True and run.mode == "repair"
         from .remote_models import RemoteUploadedFile
         context["uploaded_files"] = list(RemoteUploadedFile.objects.filter(workstation=run.workstation,defect=run.defect,owner=run.owner,identity_key=identity_key(run.workstation),status="uploaded").order_by("-created_at").values("target","path","filename","sha256","size")[:10])

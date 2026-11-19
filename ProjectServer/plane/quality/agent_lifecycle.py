@@ -18,9 +18,90 @@ PROCESS_LABELS = {'analysis':'分析中','queued':'排队中','inspect':'排查�
     'repaired':'已修复','verified':'复核通过','unresolved':'未解决','interrupted':'已中断'}
 
 
+LIMITED_VERIFICATION_SCOPES = {'configuration_validation', 'read_only_connectivity', 'readonly_connectivity'}
+
+
+def limited_verification_scope(run, result=None):
+    """A model report cannot broaden server-owned or previously observed coverage."""
+    result = run.result if result is None else result
+    snapshot = run.result.get('display_policy_snapshot') or {}
+    state = getattr(run, '_state', None)
+    station = state.fields_cache.get('workstation') if state is not None else None
+    context = station.capabilities.get('agent_context', {}) if station is not None else {}
+    for value in (result.get('verification_scope'), snapshot.get('verification_scope'), context.get('verification_scope')):
+        if isinstance(value, str) and value in LIMITED_VERIFICATION_SCOPES:
+            return value
+    return None
+
+
+def configuration_receipts(run):
+    """Derive configuration progress from this run's fixed adapter receipts."""
+    scope = None
+    last_write = last_applied = last_verify = -1
+    verified = config_verified = False
+    locations = []
+    for index, command in enumerate(run.remotecommand_set.order_by('created_at', 'id')):
+        payload, receipt = command.payload, command.result
+        argv = payload.get('argv', [])
+        if payload.get('kind') == 'patch_file':
+            last_write = index
+        if payload.get('kind') != 'run':
+            continue
+        if not isinstance(argv, list) or argv[:1] != ['daq-local-diagnostics-v1']:
+            last_write = index
+            continue
+        try:
+            body = json.loads(receipt.get('stdout', '{}'))
+        except (ValueError, TypeError):
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        observed_scope = body.get('scope', body.get('verification_scope'))
+        if isinstance(observed_scope, str) and observed_scope in LIMITED_VERIFICATION_SCOPES:
+            scope = observed_scope
+        complete = (command.status == 'done' and receipt.get('ok') is not False
+                    and receipt.get('exit_code') == 0 and not receipt.get('timed_out')
+                    and not receipt.get('error') and not receipt.get('truncated'))
+        configuration = body.get('configuration', {})
+        configuration = configuration if isinstance(configuration, dict) else {}
+        if (argv == ['daq-local-diagnostics-v1', 'inspect'] and
+                configuration.get('state') in {'fail', 'unknown'}):
+            verified = config_verified = False
+        if argv == ['daq-local-diagnostics-v1', 'verify']:
+            last_verify = index
+            verified = (complete and isinstance(observed_scope, str) and observed_scope in LIMITED_VERIFICATION_SCOPES and body.get('verified') is True
+                        and (observed_scope != 'configuration_validation' or configuration.get('state') == 'pass'))
+            config_verified = verified and observed_scope == 'configuration_validation'
+        elif len(argv) == 3 and argv[:2] == ['daq-local-diagnostics-v1', 'repair']:
+            last_write = index
+            repair = configuration.get('repair', {})
+            repair = repair if isinstance(repair, dict) else {}
+            changes = repair.get('changes', body.get('changes', []))
+            if (command.status == 'done' and repair.get('state') in {'applied', 'written_runtime_unverified'}
+                    and isinstance(changes, list)):
+                valid_changes = 0
+                for change in changes[:10]:
+                    if (not isinstance(change, dict) or not isinstance(change.get('path'), str) or not change['path']
+                            or not isinstance(change.get('key'), str) or not change['key'].startswith('initial_joint_states.')
+                            or 'before' not in change or 'after' not in change or change['before'] == change['after']):
+                        continue
+                    valid_changes += 1
+                    row = {key: change[key] for key in ('path', 'key', 'before', 'after', 'backup') if key in change}
+                    row.update(target_kind='collector', target='采集电脑')
+                    if type(change.get('line')) is int and change['line'] > 0:
+                        row['line'] = change['line']
+                    locations.append(row)
+                if complete and repair.get('state') == 'applied' and valid_changes and run.mode == 'repair':
+                    last_applied = index
+    verified = verified and last_verify > last_write
+    config_verified = verified and config_verified
+    return {'scope': scope, 'verification_passed': verified, 'configuration_verified': config_verified,
+            'configuration_repaired': config_verified and last_applied >= 0 and last_applied == last_write,
+            'repair_locations': locations[-10:]}
+
+
 def readonly_verified(run, result=None):
     result = run.result if result is None else result
-    if (result.get('verification_passed') is not True or result.get('repaired') is True
+    if (limited_verification_scope(run, result) or result.get('verification_passed') is not True or result.get('repaired') is True
             or result.get('outcome') not in {'verified','verified_without_repair'}
             or result.get('repair_locations')):
         return False
@@ -44,6 +125,8 @@ def readonly_verified(run, result=None):
 def terminal_state(run):
     if run.status in {'failed','cancelled','expired'} or (run.result or {}).get('invalidated_at'):
         return 'interrupted'
+    if limited_verification_scope(run):
+        return 'unresolved'
     if run.status == 'completed' and run.result.get('verification_passed') is True:
         if run.result.get('repaired') is True:return 'repaired'
         if readonly_verified(run):return 'verified'
