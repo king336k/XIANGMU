@@ -180,3 +180,67 @@ test("DAQ创建记录显示真实采集员和问题标题，不再展示服务�
   const action = all.find((n) => n.props?.children === "DAQ异常反馈上报");
   assert.match(action.props.className, /text-secondary/);
 });
+
+test("Agent操作正文展示业务摘要，真实目标命令退出码与UUID只在默认折叠详情", () => {
+  const runId = "95f89e89-3d92-4f6c-a6aa-9b95fddfcd88";
+  const commandId = "87fba94f-c671-4cb7-b583-68217980e131";
+  const raw = `Agent 现场排查：${runId}，命令${commandId}`;
+  const tree = render(
+    [
+      {
+        ...events[0],
+        note: raw,
+        remote_process: {
+          summary: "D475 第1轮检查机器人配置完成",
+          stage: "inspect",
+          defect_code: "D475",
+          round: 1,
+          target: { label: "机器人", username: "robot", host: "10.0.0.177" },
+          command: {
+            argv: ["/usr/bin/python3", "/home/robot/inspect.py", "inspect"],
+            path: "/home/robot/config.json",
+            exit_code: 0,
+          },
+          run_id: runId,
+          command_id: commandId,
+          details: "读取当前配置，无修改",
+        },
+      },
+    ],
+    []
+  );
+  const list = nodes(tree).find((node) => node.props?.["aria-label"] === "处理时间线");
+  const row = nodes(list).find((node) => node.type === "li");
+  const expandedBody = nodes(row)
+    .filter((node) => node.type === "p")
+    .map((node) => node.props.children)
+    .filter((value) => typeof value === "string")
+    .join(" ");
+  assert.match(expandedBody, /D475 第1轮检查机器人配置完成/);
+  const details = nodes(row).find((node) => node.type === "details");
+  assert.equal(details.props.open, undefined);
+  for (const value of ["robot", "10.0.0.177", "inspect.py", "config.json", runId, commandId, raw])
+    assert.ok(JSON.stringify(details).includes(value));
+  assert.ok(nodes(details).some((node) => node.props?.children === 0));
+});
+
+test("没有元数据的旧UUID事件只收起原文而不猜名字或删除历史信息", () => {
+  const note = "人工改派：旧负责人 → 95f89e89-3d92-4f6c-a6aa-9b95fddfcd88";
+  const tree = render([{ ...events[0], note }], []);
+  const row = nodes(tree).find((node) => node.type === "li");
+  const details = nodes(row).find((node) => node.type === "details");
+  assert.ok(details);
+  assert.equal(details.props.open, undefined);
+  assert.ok(nodes(details).some((node) => node.props?.children === note));
+  const body = row.props.children.filter((node) => node?.type !== "details");
+  assert.ok(!JSON.stringify(body).includes("95f89e89"));
+});
+
+test("服务器已转可读姓名的指派正文仍保留返回的原始详情", () => {
+  const original = "人工改派：旧负责人 → 技术员甲 (95f89e89-3d92-4f6c-a6aa-9b95fddfcd88)";
+  const tree = render([{ ...events[0], note: "人工改派：旧负责人 → 技术员甲", details: original }], []);
+  const row = nodes(tree).find((node) => node.type === "li");
+  const details = nodes(row).find((node) => node.type === "details");
+  assert.ok(JSON.stringify(details).includes(original));
+  assert.ok(nodes(row).some((node) => node.type === "p" && node.props.children === "旧负责人 → 技术员甲"));
+});

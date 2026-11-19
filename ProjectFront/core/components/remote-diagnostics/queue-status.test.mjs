@@ -64,10 +64,11 @@ test("queue labels use real reason and positive position without inventing ETA o
   assert.equal(label({ status: "timed_out" }), "处理超时");
 });
 
-function actions(run, write = async () => ({ id: "run", status: "queued" })) {
+function actions(run, write = async () => ({ id: "run", status: "queued" }), restoredRun = undefined) {
   let cursor = 0;
   const states = ["", run?.id || "", false, ""];
   const intervals = [];
+  const runUrls = [];
   const api = module("../quality/agent-feedback-actions.tsx", {
     react: {
       ...React,
@@ -77,8 +78,11 @@ function actions(run, write = async () => ({ id: "run", status: "queued" })) {
     },
     swr: {
       default: (url, fetcher, config) => {
-        if (url?.includes("agent-runs")) intervals.push(config.refreshInterval);
-        return { data: url?.includes("defect-targets") ? { results: [device] } : run };
+        if (url?.includes("agent-runs")) {
+          intervals.push(config.refreshInterval);
+          runUrls.push(url);
+        }
+        return { data: url?.includes("defect-targets") ? { results: [device], active_run: restoredRun } : run };
       },
     },
     "./api": { qualityApi: { write }, errorMessage: (error) => error.message },
@@ -87,6 +91,7 @@ function actions(run, write = async () => ({ id: "run", status: "queued" })) {
   return {
     tree: api.AgentFeedbackActions({ defectId: "feedback", active: true, onCompleted() {}, onHistory() {} }),
     intervals,
+    runUrls,
   };
 }
 
@@ -94,6 +99,8 @@ test("feedback actions display real queue, keep polling queued/running and stop 
   const queued = { id: "run", status: "queued", queue: { reason: "terminal_open", position: 2 } };
   const { tree, intervals } = actions(queued);
   assert.match(JSON.stringify(tree), /等待终端关闭 · 前方 2 个任务/);
+  assert.match(JSON.stringify(tree), /animate-spin/);
+  assert.ok(nodes(tree).some((node) => node.props?.role === "status" && node.props["aria-live"] === "polite"));
   for (const button of nodes(tree).filter(
     (node) =>
       node.type === "button" && ["重新诊断（只读）", "诊断并修复", "重新验证（只读）"].includes(node.props.children)
@@ -106,6 +113,28 @@ test("feedback actions display real queue, keep polling queued/running and stop 
   const failed = actions({ id: "run", status: "failed", error: "任务超时，未确认恢复" }).tree;
   assert.match(JSON.stringify(failed), /任务超时，未确认恢复/);
   assert.match(JSON.stringify(failed), /text-danger-primary/);
+  assert.doesNotMatch(JSON.stringify(failed), /animate-spin/);
+});
+
+test("page refresh restores authoritative active run and polling without submitting another task", () => {
+  let writes = 0;
+  const restored = { id: "restored", status: "running", queue: { stage: "verify" } };
+  const { tree, runUrls } = actions(
+    undefined,
+    async () => {
+      writes++;
+    },
+    restored
+  );
+  assert.deepEqual(runUrls, ["/api/quality-auth/remote-diagnostics/agent-runs/restored/"]);
+  assert.match(JSON.stringify(tree), /正在复测/);
+  assert.match(JSON.stringify(tree), /animate-spin/);
+  for (const button of nodes(tree).filter(
+    (node) =>
+      node.type === "button" && ["重新诊断（只读）", "诊断并修复", "重新验证（只读）"].includes(node.props.children)
+  ))
+    assert.equal(button.props.disabled, true);
+  assert.equal(writes, 0);
 });
 
 test("feedback actions prevent a second submit before React rerenders", async () => {

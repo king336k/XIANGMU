@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
+import { RotateCw } from "lucide-react";
 import { qualityApi, errorMessage } from "./api";
 import { agentRunStatusLabel, remoteDiagnosticsBase, runningAgentStatuses } from "../remote-diagnostics/types";
 import type { AgentRun, RemoteDevice } from "../remote-diagnostics/types";
@@ -18,7 +19,7 @@ export function AgentFeedbackActions({
 }) {
   const { data: targets, error: targetError } = useSWR(
     active ? `${remoteDiagnosticsBase}defect-targets/?defect_id=${defectId}` : null,
-    (url: string) => qualityApi.read<{ results: RemoteDevice[] }>(url),
+    (url: string) => qualityApi.read<{ results: RemoteDevice[]; active_run?: AgentRun | null }>(url),
     { refreshInterval: active ? 10000 : 0 }
   );
   const [deviceId, setDeviceId] = useState("");
@@ -27,12 +28,13 @@ export function AgentFeedbackActions({
   const [error, setError] = useState("");
   const [submittedRun, setSubmittedRun] = useState<AgentRun | null>(null);
   const submitting = useRef(false);
+  const effectiveRunId = runId || targets?.active_run?.id || "";
   const { data: runSnapshot, error: runError } = useSWR(
-    runId ? `${remoteDiagnosticsBase}agent-runs/${runId}/` : null,
+    effectiveRunId ? `${remoteDiagnosticsBase}agent-runs/${effectiveRunId}/` : null,
     (url: string) => qualityApi.read<AgentRun>(url),
     { refreshInterval: (value) => (value && runningAgentStatuses.has(value.status) ? 1500 : 0) }
   );
-  const run = runSnapshot || submittedRun;
+  const run = runSnapshot || submittedRun || targets?.active_run;
   const completed = useRef("");
   useEffect(() => {
     if (run && !runningAgentStatuses.has(run.status) && completed.current !== run.id) {
@@ -119,8 +121,15 @@ export function AgentFeedbackActions({
         {(starting || run) && (
           <span
             role="status"
+            aria-live="polite"
             className={`rounded px-2 py-1 text-12 ${busy ? "bg-accent-subtle text-accent-primary" : run?.status === "failed" || run?.status === "timed_out" ? "bg-danger-subtle text-danger-primary" : run?.result?.verification_passed === true && (run.result.repaired === true || run.result.outcome === "verified") ? "bg-success-subtle text-success-primary" : "bg-surface-2 text-secondary"}`}
           >
+            {busy && (
+              <RotateCw
+                aria-hidden="true"
+                className="mr-1.5 inline-block size-3.5 animate-spin motion-reduce:animate-none"
+              />
+            )}
             {starting ? "正在提交…" : run ? agentRunStatusLabel(run) : ""}
           </span>
         )}

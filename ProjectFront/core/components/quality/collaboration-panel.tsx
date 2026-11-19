@@ -10,6 +10,8 @@ import { Field, fieldClass } from "./shared";
 import { AttachmentUpload } from "./attachment-upload";
 import { PackageForm } from "./package-form";
 import type { Context, Defect } from "./types";
+const hasTechnicalId = (value: string) =>
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(value);
 
 type Source = {
   id: string;
@@ -125,6 +127,7 @@ export function CollaborationPanel({
     [
       ...(value.events || []).map((event) => {
         const rawNote = event.note?.trim() || "";
+        const process = event.remote_process;
         const note = rawNote
           .replace(/^(.*验证第\d+轮)[：:]\s*$/, "$1")
           .replace(
@@ -154,22 +157,33 @@ export function CollaborationPanel({
                 ? `${statusNames[event.previous_status] || event.previous_status} → ${statusNames[event.status] || event.status}`
                 : "提交缺陷"
               : rawNote.match(/^(Agent [^：]+)：/)?.[1] || specific || "更新缺陷",
-          content: daqCreated
-            ? `采集员：${value.reporter?.username || value.created_by_name || "未记录"}\n问题：${value.title}`
-            : !changed && specific && note.startsWith(`${specific}：`)
-              ? note.slice(specific.length + 1).trim()
-              : note === "更新缺陷"
-                ? ""
-                : note,
-          tone: unsuccessful
-            ? "text-danger-primary"
-            : passed
-              ? "text-success-primary"
-              : note.startsWith("提交验证")
-                ? "text-warning-primary"
-                : changed && event.status === "open"
-                  ? "text-secondary"
-                  : "text-accent-primary",
+          content:
+            process?.summary ||
+            (hasTechnicalId(note)
+              ? "原始说明见详情"
+              : daqCreated
+                ? `采集员：${value.reporter?.username || value.created_by_name || "未记录"}\n问题：${value.title}`
+                : !changed && specific && note.startsWith(`${specific}：`)
+                  ? note.slice(specific.length + 1).trim()
+                  : note === "更新缺陷"
+                    ? ""
+                    : note),
+          process,
+          rawDetails: Array.from(
+            new Set([event.details || "", process || hasTechnicalId(rawNote) ? rawNote : ""].filter(Boolean))
+          ).join("\n"),
+          tone:
+            process?.stage === "failed"
+              ? "text-danger-primary"
+              : unsuccessful
+                ? "text-danger-primary"
+                : passed
+                  ? "text-success-primary"
+                  : note.startsWith("提交验证")
+                    ? "text-warning-primary"
+                    : changed && event.status === "open"
+                      ? "text-secondary"
+                      : "text-accent-primary",
         };
       }),
       ...(comments || []).map((comment) => ({
@@ -183,6 +197,8 @@ export function CollaborationPanel({
             : "采集员可见回复",
         tone: "text-secondary",
         content: comment.content,
+        process: undefined,
+        rawDetails: "",
       })),
     ],
     (entry) => new Date(entry.at).getTime()
@@ -255,6 +271,71 @@ export function CollaborationPanel({
                       ) : (
                         <p className="mt-1 break-words whitespace-pre-wrap text-secondary">{row.content}</p>
                       ))}
+                    {(row.process || row.rawDetails) && (
+                      <details className="mt-2 text-secondary">
+                        <summary className="cursor-pointer">查看操作详情</summary>
+                        <dl className="mt-2 space-y-2 text-12">
+                          {row.process?.defect_code && (
+                            <div>
+                              <dt className="text-tertiary">任务</dt>
+                              <dd>
+                                {row.process.defect_code}
+                                {row.process.round ? ` · 第${row.process.round}轮` : ""}
+                              </dd>
+                            </div>
+                          )}
+                          {row.process?.target && (
+                            <div>
+                              <dt className="text-tertiary">目标</dt>
+                              <dd>
+                                {row.process.target.label || "现场"} · {row.process.target.username || "用户名待确认"}@
+                                {row.process.target.host || "IP待确认"}
+                              </dd>
+                            </div>
+                          )}
+                          {!!row.process?.command?.argv?.length && (
+                            <div>
+                              <dt className="text-tertiary">命令参数</dt>
+                              <dd>
+                                <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
+                                  {JSON.stringify(row.process.command.argv, null, 2)}
+                                </pre>
+                              </dd>
+                            </div>
+                          )}
+                          {row.process?.command?.path && (
+                            <div>
+                              <dt className="text-tertiary">文件位置</dt>
+                              <dd className="break-all">{row.process.command.path}</dd>
+                            </div>
+                          )}
+                          {row.process?.command?.exit_code !== undefined && row.process.command.exit_code !== null && (
+                            <div>
+                              <dt className="text-tertiary">退出码</dt>
+                              <dd>{row.process.command.exit_code}</dd>
+                            </div>
+                          )}
+                          {row.process?.details && (
+                            <div>
+                              <dt className="text-tertiary">执行说明</dt>
+                              <dd className="break-words whitespace-pre-wrap">{row.process.details}</dd>
+                            </div>
+                          )}
+                          {row.rawDetails && (
+                            <div>
+                              <dt className="text-tertiary">原始记录</dt>
+                              <dd className="break-words whitespace-pre-wrap">{row.rawDetails}</dd>
+                            </div>
+                          )}
+                          {(row.process?.run_id || row.process?.command_id) && (
+                            <div className="space-y-1 border-t border-subtle pt-2 text-11 text-tertiary">
+                              {row.process.run_id && <p className="break-all">任务ID：{row.process.run_id}</p>}
+                              {row.process.command_id && <p className="break-all">命令ID：{row.process.command_id}</p>}
+                            </div>
+                          )}
+                        </dl>
+                      </details>
+                    )}
                   </li>
                 ))}
               </ul>

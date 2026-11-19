@@ -106,6 +106,17 @@ export type Plan = {
   summary: Summary;
   assignee_name: string;
 };
+export type RemoteProcess = {
+  summary: string;
+  stage?: "queued" | "inspect" | "repair" | "verify" | "completed" | "failed";
+  defect_code?: string;
+  round?: number;
+  target?: { label?: string; username?: string; host?: string };
+  command?: { argv?: string[]; path?: string; exit_code?: number | null };
+  run_id?: string;
+  command_id?: string;
+  details?: string;
+};
 export type Defect = {
   module?: { key: string; name: string } | null;
   assignment_origin?: "manual" | "diagnostic" | "initial" | "triage" | "";
@@ -152,7 +163,16 @@ export type Defect = {
   repair_issue_sequence: number | null;
   source_execution: Execution | null;
   regression_execution: Execution | null;
-  events: { id: string; previous_status: string; status: string; note: string; created_at: string; actor: string }[];
+  events: {
+    id: string;
+    previous_status: string;
+    status: string;
+    note: string;
+    created_at: string;
+    actor: string;
+    details?: string;
+    remote_process?: RemoteProcess | null;
+  }[];
 };
 export type Context = {
   work_item_options_url?: string;
