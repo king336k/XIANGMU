@@ -295,3 +295,14 @@ def test_readme_link_documents_are_exactly_whitelisted_for_package_and_install(s
     for name in ['docs/private/unlisted.md','ProjectServer/tests/private_fixture.py']:
         assert not any(member.endswith('/'+name) for member in content)
         assert not installer.allowed(name)
+
+
+def test_code_package_contains_remote_agent_and_central_integrations(source, tmp_path):
+    m=load();root,_=source
+    required=['services/diagnostic-agent/remote_runner.py','services/diagnostic-integrations/holmes_runner.py','services/diagnostic-integrations/holmes_service.py']
+    for name in required:
+        path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('trusted runtime source')
+    out=tmp_path/'remote-code'
+    assert m.main(['--artifact','code','--project-root',str(root),'--output',str(out),'--version','remote-runtime'])==0
+    content=members(archive(out,'code'))
+    for name in required:assert 'EngramProject_code_remote-runtime/'+name in content

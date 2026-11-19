@@ -27,6 +27,8 @@ FILES = ['ProjectServer/manage.py', 'README.md', 'LICENSE', 'LICENSE.txt', 'star
          'docs/design/three-platform/本轮测试与遗留项.md', 'docs/legal/COPYRIGHT.txt', 'docs/legal/THIRD_PARTY_NOTICES.md',
          'scripts/init_local_config.py', 'deploy/local/.env.example',
          'services/diagnostic-agent/runner.py', 'services/diagnostic-agent/requirements.txt',
+         'services/diagnostic-agent/remote_runner.py',
+         'services/diagnostic-integrations/holmes_runner.py', 'services/diagnostic-integrations/holmes_service.py',
          'services/document-ocr/server.py', 'services/document-ocr/extractor.py', 'services/document-ocr/README.md',
          'services/embedding-service/app.py', 'services/embedding-service/setup_platform.py',
          'services/embedding-service/model-manifest.json', 'services/embedding-service/platform.override.yml',
