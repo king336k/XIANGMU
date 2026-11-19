@@ -563,7 +563,7 @@ services:
     mem_limit: 128m
     memswap_limit: 128m
     pids_limit: 256
-  diagnostic-worker:
+  diagnostic-worker: &diagnostic-worker
     image: engramproject/runtime-diagnostic:2026.11.10
     command:
     - bash
@@ -657,6 +657,21 @@ services:
     mem_limit: 768m
     memswap_limit: 768m
     pids_limit: 256
+  field-worker:
+    <<: *diagnostic-worker
+    command:
+    - bash
+    - -c
+    - python manage.py wait_for_db && python manage.py wait_for_migrations && exec
+      celery -A plane worker -l info --concurrency=${FIELD_REPAIR_CONCURRENCY:-4} --prefetch-multiplier=1
+      -Q field-repairs
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+    mem_limit: 3g
+    memswap_limit: 3g
+    pids_limit: 512
   builtin-embedding:
     profiles:
     - helpers

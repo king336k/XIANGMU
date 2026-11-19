@@ -58,6 +58,8 @@ class RemoteAgentRun(models.Model):
     tool_credential_hash = models.CharField(max_length=64, blank=True)
     identity_key = models.CharField(max_length=64, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField()
     comment = models.OneToOneField("quality.DefectComment", null=True, on_delete=models.PROTECT)
 

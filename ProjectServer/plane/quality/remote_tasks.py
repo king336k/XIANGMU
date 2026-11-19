@@ -29,10 +29,17 @@ def finish(run_id, result, status="completed", error=""):
             .get(pk=run_id)
         )
         if run.status not in {"queued", "running"}:
+            if run.started_at and run.result.get('worker_completed_at') is None:
+                run.result={**run.result,'worker_completed_at':timezone.now().timestamp()}
+                run.save(update_fields=['result'])
             return
         if run.identity_key != identity_key(run.workstation) or not permitted(run.owner,run.workstation):
             result={"summary":"现场身份或授权已变化，本轮结果不能确认恢复。","repaired":False}
             status="failed";error="现场身份或授权已变化"
+        run.completed_at=timezone.now()
+        result={**result,'queued_at':run.created_at.timestamp(),
+            'worker_started_at':run.started_at.timestamp() if run.started_at else None,
+            'worker_completed_at':run.completed_at.timestamp(),'worker_queue':'field-repairs'}
         fields = [
             ("结论", "summary"),
             ("原因与证据", "root_cause"),
@@ -68,13 +75,13 @@ def finish(run_id, result, status="completed", error=""):
         run.error = error
         run.tool_credential_hash = ""
         run.comment = comment
-        run.save(update_fields=["result", "status", "error", "tool_credential_hash", "comment"])
+        run.save(update_fields=["result", "status", "error", "tool_credential_hash", "comment", "completed_at"])
         DefectEvent.objects.create(project_id=run.defect.project_id, defect=run.defect, created_by=run.owner,
             previous_status=run.defect.status, status=run.defect.status,
             note="Agent 处理结束：" + ("已修复并通过复测" if result.get("repaired") is True else "验证通过，未修改现场" if verified_only else "未自动修复，根因及后续方案见现场处理结果") + f"；任务 {run.id}。")
 
 
-@shared_task(bind=True, name="plane.quality.remote_repair", soft_time_limit=400, time_limit=430, max_retries=None)
+@shared_task(bind=True, name="plane.quality.remote_repair", queue="field-repairs", soft_time_limit=400, time_limit=430, max_retries=None)
 def remote_repair(self, run_id):
     with transaction.atomic():
         station_id=RemoteAgentRun.objects.values_list('workstation_id',flat=True).get(pk=run_id)
@@ -107,8 +114,9 @@ def remote_repair(self, run_id):
             raw = "rr_" + secrets.token_urlsafe(36)
             run.tool_credential_hash = hashlib.sha256(raw.encode()).hexdigest()
             run.status = "running"
+            run.started_at=timezone.now()
             run.expires_at = timezone.now() + timedelta(minutes=8)
-            run.save(update_fields=["status", "tool_credential_hash", "expires_at"])
+            run.save(update_fields=["status", "tool_credential_hash", "expires_at", "started_at"])
     if busy:
         # Release the station lock and worker slot while the device is occupied.
         raise self.retry(countdown=3)

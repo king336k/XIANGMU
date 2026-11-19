@@ -80,7 +80,8 @@ def robot_target(station):
 
 def terminal_snapshot(session):
     return {'id':str(session.id),'status':session.status,'target':session.target,
-        'identity':session.target_identity,'target_revision':session.target_revision}
+        'identity':session.target_identity,'target_revision':session.target_revision,
+        'created_at':session.created_at,'last_read_at':session.last_read_at}
 
 
 def terminal_target_valid(session,station):
@@ -113,10 +114,21 @@ def feedback_for(station, defect_id=None):
     ).distinct()
 
 
+def invalidate_run(run, reason):
+    """End authorization immediately; actual worker release is recorded separately."""
+    if run.status not in {'queued','running'}:return
+    run.status='failed';run.error=reason;run.tool_credential_hash='';run.completed_at=timezone.now()
+    run.result={**run.result,'queued_at':run.created_at.timestamp(),
+        'worker_started_at':run.started_at.timestamp() if run.started_at else None,
+        'worker_completed_at':None,'invalidated_at':run.completed_at.timestamp(),
+        'worker_queue':'field-repairs','repaired':False,'verification_passed':False}
+    run.save(update_fields=['status','error','tool_credential_hash','completed_at','result'])
+    run.remotecommand_set.filter(status__in=['pending','delivered']).update(status='expired',payload={})
+
+
 def fail_runs(station, reason):
-    active = station.remoteagentrun_set.filter(status__in=["queued", "running"])
-    station.commands.filter(run__in=active, status__in=["pending", "delivered"]).update(status="expired", payload={})
-    active.update(status="failed", tool_credential_hash="", error=reason)
+    for run in station.remoteagentrun_set.filter(status__in=['queued','running']):
+        invalidate_run(run, reason)
 
 
 def station_for(user, pk):
@@ -247,9 +259,7 @@ class RemoteDirectory(BaseAPIView):
             for session in station.remoteterminal_set.exclude(status="closed"):
                 close_session(session)
             station.commands.filter(status__in=["pending", "delivered"]).update(status="expired", payload={})
-            station.remoteagentrun_set.filter(status__in=["queued", "running"]).update(
-                status="failed", tool_credential_hash="", error="设备授权已撤销"
-            )
+            fail_runs(station,"设备授权已撤销")
             return Response({"enabled": False})
         if action != "open":
             raise ValidationError("未知操作。")
@@ -451,11 +461,7 @@ class RemoteExchange(BaseAPIView):
         station.save()
         for run in station.remoteagentrun_set.filter(status__in=["queued", "running"]).select_related("owner"):
             if run.expires_at <= now or run.identity_key != identity_key(station) or not permitted(run.owner, station):
-                run.status = "failed"
-                run.error = "任务现场身份或操作权限已变化。"
-                run.tool_credential_hash = ""
-                run.save(update_fields=["status", "error", "tool_credential_hash"])
-                run.remotecommand_set.filter(status__in=["pending", "delivered"]).update(status="expired", payload={})
+                invalidate_run(run,"任务现场身份或操作权限已变化。")
         outputs = request.data.get("outputs", [])
         results = request.data.get("results", [])
         if (
@@ -691,7 +697,7 @@ class RemoteRuns(BaseAPIView):
         DefectEvent.objects.create(project_id=defect.project_id,defect=defect,created_by=request.user,previous_status=defect.status,status=defect.status,note=f"Agent {'重新诊断' if mode == 'diagnose' else '重新验证' if mode == 'verify' else '诊断与自动修复'}：已进入队列；任务 {run.id}。")
         from .remote_tasks import remote_repair
 
-        transaction.on_commit(lambda: remote_repair.apply_async(args=[str(run.id)], queue="diagnostics"))
+        transaction.on_commit(lambda: remote_repair.apply_async(args=[str(run.id)], queue="field-repairs"))
         return Response({"id": str(run.id), "status": run.status, "queue": run_queue(run)}, status=201)
 
 
@@ -712,10 +718,7 @@ class RemoteRunDetail(BaseAPIView):
         if not permitted(request.user, run.workstation):
             raise PermissionDenied()
         if run.status in {"queued", "running"} and run.expires_at <= timezone.now():
-            run.status = "failed"
-            run.error = "远程任务已超时，现场恢复未确认。"
-            run.tool_credential_hash = ""
-            run.save(update_fields=["status", "error", "tool_credential_hash"])
+            invalidate_run(run,"远程任务已超时，现场恢复未确认。")
         return Response({"id": str(run.id), "status": run.status, "result": run.result, "error": run.error, "queue": run_queue(run)})
 
 
