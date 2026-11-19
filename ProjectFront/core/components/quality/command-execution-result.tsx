@@ -109,7 +109,10 @@ function executionResult(command: CommandExecutionStep) {
 export function CommandExecutionResult({ command, target }: { command: CommandExecution; target?: string }) {
   const steps = command.execution_steps?.length ? command.execution_steps : [command];
   const statuses = steps.map(executionStatus);
-  const status = statuses.includes("失败") ? "失败" : statuses.every((value) => value === "成功") ? "成功" : "待确认";
+  const outerFailed = executionStatus(command) === "失败";
+  const status =
+    outerFailed || statuses.includes("失败") ? "失败" : statuses.every((value) => value === "成功") ? "成功" : "待确认";
+  const outerError = command.execution_steps?.length && outerFailed ? command.stderr : undefined;
   const occurrences = new Map<string, number>();
   return (
     <details className="overflow-hidden rounded border border-subtle">
@@ -119,6 +122,24 @@ export function CommandExecutionResult({ command, target }: { command: CommandEx
         {target || "命令与执行结果"} · {status}
       </summary>
       <div aria-label="实际执行步骤" className="space-y-3 border-t border-subtle">
+        {!!command.execution_steps?.length && outerFailed && (
+          <div className="bg-danger-subtle px-3 py-2 text-12 text-danger-primary">
+            <p>整体执行未通过</p>
+            {outerError && (
+              <>
+                <pre aria-label="整体错误摘要" className="font-mono mt-1 overflow-auto break-words whitespace-pre-wrap">
+                  {outputPreview(outerError).preview}
+                </pre>
+                <details className="mt-1 text-11">
+                  <summary className="cursor-pointer">完整整体错误</summary>
+                  <pre className="font-mono mt-1 max-h-64 overflow-auto break-words whitespace-pre-wrap">
+                    {outerError}
+                  </pre>
+                </details>
+              </>
+            )}
+          </div>
+        )}
         {steps.map((step) => {
           const signature = JSON.stringify(step);
           const occurrence = (occurrences.get(signature) || 0) + 1;

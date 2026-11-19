@@ -222,3 +222,30 @@ test("command and output are one closed target disclosure with the actual aggreg
   const fallback = CommandExecutionResult({ command: {} });
   assert.equal(text(nodes(fallback).find((node) => node.type === "summary")), "命令与执行结果 · 待确认");
 });
+
+test("outer verification failures override successful children without changing their actual outcomes", () => {
+  for (const outer of [{ status: "done", exit_code: 1, ok: false }, { timed_out: true }]) {
+    const error = "HTTP probe failed: " + "x".repeat(1500);
+    const tree = CommandExecutionResult({
+      target: "采集电脑",
+      command: {
+        ...outer,
+        argv: ["python3", "helper.py", "verify"],
+        stderr: error,
+        execution_steps: [
+          { argv: ["systemctl", "--user", "show", "test.service"], status: "done", exit_code: 0, ok: true },
+        ],
+      },
+    });
+    assert.equal(text(nodes(tree).find((node) => node.type === "summary")), "采集电脑 · 失败");
+    assert.match(text(tree), /整体执行未通过/);
+    const childResult = region(tree, "执行结果");
+    assert.match(childResult.props.className, /bg-success-subtle/);
+    assert.match(text(childResult), /退出码：0/);
+    assert.doesNotMatch(text(tree), /helper.py/);
+    assert.ok(text(region(tree, "整体错误摘要")).length <= 1000);
+    const details = nodes(tree).find((node) => node.type === "details" && text(node).startsWith("完整整体错误"));
+    assert.ok(details && details.props.open === undefined);
+    assert.ok(nodes(details).some((node) => node.type === "pre" && node.props.children === error));
+  }
+});
