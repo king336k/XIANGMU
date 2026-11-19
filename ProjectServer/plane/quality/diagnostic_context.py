@@ -199,6 +199,23 @@ def diagnostic_context(job, report_only=False, sources=None):
         evidence={"run_id":str(field_run.id),"mode":field_run.mode,"recorded_at":field_run.created_at.isoformat(),
                   "recent_within_30_minutes":recent, **identity, "result":field_run.result}
         references.append({"reference":"PLATFORM-FIELD-CHECK","title":"本缺陷现场执行与复测记录","content":redact(json.dumps(evidence,ensure_ascii=False))[:16000]+"\n仅支持此任务记录的时间和对象范围。区分上报时历史故障与较晚现场状态；当前仍正常需重新验证，不把旧复测当永久正常。"})
+    # A later read-only verification must not erase an earlier confirmed file
+    # write, including writes whose final model report failed or timed out.
+    from .remote_models import RemoteCommand
+    from .remote_event_display import receipt_file_changes, safe_changes
+    for operation in (RemoteCommand.objects.filter(run__defect=defect,status='done',
+            run__comment__visibility='public').select_related('run__workstation__agent__project__workspace','run__owner')
+            .order_by('-created_at','-id')[:40]):
+        changes=safe_changes(receipt_file_changes(operation.result))
+        if not changes:continue
+        evidence={'recorded_at':operation.created_at.isoformat(),'source_run_id':str(operation.run_id),
+            'source_run_status':operation.run.status,'changes':changes[:10],
+            'configuration_repaired':operation.run.result.get('configuration_repaired') is True,
+            'business_verified':False,'scope':'recorded_file_changes_not_business_acceptance'}
+        references.append({'reference':'PLATFORM-FIELD-CHANGES','title':'本缺陷实际文件修改回执',
+            'content':redact(json.dumps(evidence,ensure_ascii=False))[:10000]+
+                '\n仅表示这次实际文件变化；最新状态以FIELD-CHECK为准。修改前值可能来源另一生效文件，不伪造旧文件或旧行号。'})
+        break
     if not report_only:
         from .models import DefectVerification
 
