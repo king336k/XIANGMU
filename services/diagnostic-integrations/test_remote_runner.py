@@ -125,6 +125,58 @@ class GatewayTest(unittest.TestCase):
         self.gateway.run_command(['repair'],purpose='repair')
         self.assertEqual(self.gateway.mutation,1)
 
+    def test_fixed_robot_repair_and_allowlisted_collector_patch_share_final_verification(self):
+        gateway=runner.Gateway('http://unused','synthetic',inspect_argv=['inspect-both'],verify_argv=['verify-both'],
+            repair_argv=['robot-repair','--expected-sha256'],editable_files=['collector-config.json'],require_knowledge=True)
+        with patch.object(gateway,'rpc',return_value={'ok':True,'exit_code':0}):gateway.run_command(['inspect-both'])
+        with patch.object(gateway,'rpc',return_value={'content':'old collector config','sha256':'a'*64}):gateway.read_file('collector-config.json')
+        with self.assertRaises(ValueError):gateway.patch_file('collector-config.json','a'*64,'new collector config')
+        gateway.knowledge_searched=True
+        with self.assertRaises(ValueError):gateway.patch_file('collector-config.json','b'*64,'new collector config')
+        with patch.object(gateway,'rpc',return_value={'ok':True,'exit_code':0}):
+            gateway.run_command(['robot-repair','--expected-sha256','c'*64],purpose='repair')
+            gateway.run_command(['verify-both'],purpose='verify')
+        self.assertTrue(gateway.repair_verified)
+        with patch.object(gateway,'rpc',return_value={'ok':True,'sha256':'d'*64}):
+            gateway.patch_file('collector-config.json','a'*64,'new collector config')
+        self.assertFalse(gateway.repair_verified or gateway.verification_passed)
+        self.assertEqual(gateway.mutation,2)
+        with patch.object(gateway,'rpc',return_value={'ok':True,'exit_code':0}):gateway.run_command(['verify-both'],purpose='verify')
+        self.assertTrue(gateway.repair_verified)
+        self.assertIn('写入授权文件完成：collector-config.json',gateway.execution_summary()[0])
+        self.assertEqual(gateway.repair_locations,[])  # no invented line numbers for generic patch
+
+    def test_collector_patch_allowlist_does_not_authorize_other_paths_or_readonly_tasks(self):
+        gateway=runner.Gateway('http://unused','synthetic',repair_argv=['robot-repair'],editable_files=['collector-config.json'])
+        gateway.inspected=True;gateway.read_hashes={'collector-config.json':'a'*64,'other-config.json':'a'*64}
+        with patch.object(gateway,'rpc') as rpc:
+            with self.assertRaises(ValueError):gateway.patch_file('other-config.json','a'*64,'new')
+            gateway.repair_allowed=False
+            with self.assertRaises(ValueError):gateway.patch_file('collector-config.json','a'*64,'new')
+        rpc.assert_not_called()
+
+    def test_agent_forwards_only_trusted_context_collector_editable_files(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        turns=[]
+        def model(messages,info):
+            index=len(turns);turns.append(index)
+            sequence=[('run_command',{'argv':['inspect']}),('read_file',{'path':'collector-config.json'}),
+                ('patch_file',{'path':'collector-config.json','expected_sha256':'a'*64,'content':'after'}),
+                ('run_command',{'argv':['check'],'purpose':'verify'})]
+            if index<len(sequence):
+                name,args=sequence[index];return ModelResponse(parts=[ToolCallPart(name,args)])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'采集机配置已修复并复测',
+                'root_cause':'当前已读取的采集机配置异常','actions':[],'verification':[],
+                'solution':'继续观察','repaired':True})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            result=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','problem':'修复采集机',
+                'context':{'operation_mode':'repair','inspect_argv':['inspect'],'verify_argv':['check'],
+                    'repair_argv':['robot-repair'],'editable_files':['collector-config.json']}}))
+        self.assertTrue(result['repaired'] and result['verification_passed'])
+        self.assertEqual([body['operation'] for _,body in self.requests],['run','read_file','patch_file','run'])
+
     def test_failed_mutation_cannot_be_declared_repaired_by_later_check(self):
         self.gateway.run_command(['inspect'], purpose='inspect')
         with patch.object(self.gateway, 'rpc', return_value={'exit_code': 1, 'error': 'failed'}):

@@ -58,7 +58,7 @@ def redact(value, secrets):
 
 
 class Gateway:
-    def __init__(self, url, token, secrets=(), max_calls=20, budget=280, repair_allowed=True, verify_argv=None, inspect_argv=None, specialist_argv=(), repair_argv=None, require_knowledge=False):
+    def __init__(self, url, token, secrets=(), max_calls=20, budget=280, repair_allowed=True, verify_argv=None, inspect_argv=None, specialist_argv=(), repair_argv=None, require_knowledge=False, editable_files=()):
         self.url, self.token = url, token
         self.secrets = [token, *secrets]
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
@@ -74,6 +74,7 @@ class Gateway:
         self.inspect_argv = inspect_argv
         self.specialist_argv = specialist_argv
         self.repair_argv = repair_argv
+        self.editable_files = tuple(editable_files) if isinstance(editable_files,(list,tuple)) and all(isinstance(path,str) for path in editable_files) else ()
         self.verification_attempted = False
         self.verification_passed = False
         self.require_knowledge = require_knowledge
@@ -254,7 +255,7 @@ class Gateway:
 
     def patch_file(self, path: str, expected_sha256: str, content: str) -> dict:
         """Patch a previously read remote file using its exact SHA256; requires post-check."""
-        if self.repair_argv is not None:
+        if self.repair_argv is not None and path not in self.editable_files:
             raise ValueError("use_configured_repair_command_instead_of_generic_patch")
         if not self.inspected or self.read_hashes.get(path) != expected_sha256:
             raise ValueError("read_exact_current_file_before_patch")
@@ -331,7 +332,8 @@ async def analyze(payload, runtime=None):
     gateway = Gateway(payload["gateway_url"], payload["tool_token"], [config["api_key"]],
                       repair_allowed=context.get("repair_allowed") is not False,
                       verify_argv=context.get("verify_argv"), inspect_argv=context.get("inspect_argv"), specialist_argv=specialist_argv,
-                      repair_argv=context.get("repair_argv"), require_knowledge=context.get('require_knowledge_search') is True)
+                      repair_argv=context.get("repair_argv"), require_knowledge=context.get('require_knowledge_search') is True,
+                      editable_files=context.get('editable_files',()))
     if runtime is not None:
         runtime['gateway']=gateway
     async with AsyncOpenAI(api_key=config["api_key"], base_url=config["base_url"], max_retries=0,
