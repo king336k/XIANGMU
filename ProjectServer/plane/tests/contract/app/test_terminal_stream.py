@@ -107,3 +107,27 @@ def test_transport_heartbeat_does_not_repeat_unrelated_admin_membership_sync(rem
     with patch('plane.quality.administrator_access.synchronize_administrator_access',side_effect=AssertionError('not part of transport authentication')):
         response=heartbeat(edge)
     assert response.status_code==200
+
+
+def test_stream_detects_logout_within_next_authorization_check(terminal):
+    from importlib import import_module
+    from django.conf import settings
+    row,user=terminal
+    Session=import_module(settings.SESSION_ENGINE).SessionStore
+    session=Session();session['_auth_user_id']=str(user.pk);session['_auth_user_backend']=settings.AUTHENTICATION_BACKENDS[0];session['_auth_user_hash']=user.get_session_auth_hash();session.save()
+    async def scenario():
+        from plane.quality.terminal_stream import TerminalConsumer
+        incoming,outgoing=asyncio.Queue(),asyncio.Queue()
+        scope={'type':'websocket','url_route':{'kwargs':{'pk':row.id}},'user':user,'session':session,
+            'headers':[(b'host',b'testserver'),(b'origin',b'http://testserver')],'query_string':b'','subprotocols':[]}
+        async def receive():return await incoming.get()
+        async def send(value):await outgoing.put(value)
+        task=asyncio.create_task(TerminalConsumer.as_asgi()(scope,receive,send))
+        await incoming.put({'type':'websocket.connect'})
+        assert (await asyncio.wait_for(outgoing.get(),3))['type']=='websocket.accept'
+        await asyncio.wait_for(outgoing.get(),3)
+        await sync_to_async(session.delete)()
+        event=await asyncio.wait_for(outgoing.get(),3)
+        assert event['type']=='websocket.close'
+        await stop(incoming,task)
+    asyncio.run(scenario())
