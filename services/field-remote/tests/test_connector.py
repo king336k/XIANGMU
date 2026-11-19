@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from connector import Engine, Policy, run_command, exchange, NoRedirect, identity, validate_server, routed_host_ip
+from connector import Engine, Policy, run_command, exchange, NoRedirect, identity, validate_server, routed_host_ip, PersistentExchangeOpener
 from collector_sim import inspect, verify
 from robot_sim import RobotServer
 from robot_peer import remote_operation, ssh_operation, ssh_server_ip
@@ -43,6 +43,20 @@ class ConnectorTests(unittest.TestCase):
     def command(self, kind, **kwargs):
         return {'id': str(time.monotonic_ns()), 'expires_at': time.time() + 30,
                 'kind': kind, **kwargs}
+
+    def test_persistent_exchange_reuses_only_same_origin_and_rejects_redirect(self):
+        response=Mock(status=200)
+        conn=Mock();conn.getresponse.return_value=response
+        with patch('connector.http.client.HTTPConnection',return_value=conn)as create:
+            opener=PersistentExchangeOpener()
+            req=urllib.request.Request('http://127.0.0.1:1234/exchange/',data=b'{}')
+            opener.open(req);opener.open(req)
+            self.assertEqual(create.call_count,1)
+            with self.assertRaisesRegex(ValueError,'origin changed'):
+                opener.open(urllib.request.Request('http://127.0.0.2:1234/exchange/',data=b'{}'))
+            response.status=302
+            with self.assertRaisesRegex(ValueError,'rejected'):opener.open(req)
+            conn.close.assert_called()
 
     def test_terminal_pump_drains_ready_chunks_without_waiting_another_exchange(self):
         import errno

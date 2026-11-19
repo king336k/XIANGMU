@@ -9,6 +9,7 @@ import errno
 import fcntl
 import getpass
 import hashlib
+import http.client
 import json
 import math
 import os
@@ -678,6 +679,39 @@ def identity(policy=None, server_url=None):
     return result
 
 
+class PersistentExchangeOpener:
+    """Reuse only the validated single platform origin; never follow redirects."""
+    def __init__(self):
+        self.connection = None
+        self.origin = None
+
+    def open(self, request, timeout=5):
+        parsed = urllib.parse.urlsplit(request.full_url)
+        origin = (parsed.scheme, parsed.hostname, parsed.port)
+        if self.origin is not None and self.origin != origin:
+            raise ValueError('exchange origin changed')
+        self.origin = origin
+        if self.connection is None:
+            connection_type = http.client.HTTPSConnection if parsed.scheme == 'https' else http.client.HTTPConnection
+            self.connection = connection_type(parsed.hostname, parsed.port, timeout=timeout)
+        try:
+            self.connection.request(request.get_method(), urllib.parse.urlunsplit(('', '', parsed.path, parsed.query, '')),
+                body=request.data, headers=dict(request.header_items()))
+            response = self.connection.getresponse()
+            if response.status != 200:
+                response.close(); self.close()
+                raise ValueError('exchange rejected')
+            return response
+        except (OSError, http.client.HTTPException):
+            self.close()
+            raise urllib.error.URLError('exchange transport interrupted')
+
+    def close(self):
+        if self.connection is not None:
+            self.connection.close()
+            self.connection = None
+
+
 def exchange(opener, url, token, payload):
     request = urllib.request.Request(url, data=json.dumps(payload).encode(), method='POST',
                                      headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
@@ -733,7 +767,7 @@ def main():
     policy = Policy(json.loads(Path(args.policy).read_text()))
     operator = identity(policy, args.server)
     engine = Engine(policy, operator['host_ip'])
-    opener = urllib.request.build_opener(NoRedirect, urllib.request.ProxyHandler({}))
+    opener = PersistentExchangeOpener()
     url = args.server.rstrip('/') + '/api/quality-auth/remote-diagnostics/exchange/'
     def stop(_signum, _frame):
         raise KeyboardInterrupt
@@ -769,6 +803,7 @@ def main():
         pass
     finally:
         status_executor.shutdown(wait=False, cancel_futures=True)
+        opener.close()
         engine.close()
 
 

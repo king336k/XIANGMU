@@ -12,6 +12,8 @@ from django.conf import settings
 from django.contrib.auth import get_user
 from importlib import import_module
 from types import SimpleNamespace
+from rest_framework.exceptions import APIException
+from django.http import Http404
 
 from .remote_diagnostics import RemoteSession
 from .remote_models import RemoteTerminalEvent
@@ -30,7 +32,19 @@ def session_request(user, pk, action=None, after=0, session_key=None):
         "wsgi.url_scheme": "http", "wsgi.input": BytesIO(raw),
     })
     request.user = user
-    response = RemoteSession.as_view()(request, pk=pk)
+    if not user or not user.is_authenticated or not user.is_active:
+        return 403, {"error": "终端登录已失效。"}
+    # Reuse terminal-specific owner/device/target checks, without synchronizing
+    # unrelated workspace memberships for every streamed frame.
+    view = RemoteSession()
+    view.args = ()
+    view.kwargs = {"pk": pk}
+    request = view.initialize_request(request)
+    view.request = request
+    try:
+        response = view.get(request, pk) if action is None else view.post(request, pk)
+    except (APIException, Http404) as error:
+        return getattr(error, "status_code", 404), {"error": "终端权限或连接已变化，请重新连接。"}
     return response.status_code, response.data
 
 
