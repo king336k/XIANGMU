@@ -42,9 +42,10 @@ def safe_argv(values):
 def safe_change_value(value,depth=0):
     if depth>16:return '[结构超过解析深度]'
     if isinstance(value,dict):
-        return {key:'[已隐藏]' if sensitive_name(key) else safe_change_value(item,depth+1) for key,item in value.items()}
+        return {key:'[已隐藏]' if sensitive_name(key) else safe_argv(item) if key=='argv' and isinstance(item,list)
+            else safe_change_value(item,depth+1) for key,item in value.items()}
     if isinstance(value,list):return [safe_change_value(item,depth+1) for item in value]
-    if isinstance(value,str):return redact(value)
+    if isinstance(value,str):return safe_output(value,depth+1)
     return value
 
 
@@ -71,12 +72,13 @@ def safe_changes(values):
     return changes
 
 
-def safe_output(value):
+def safe_output(value,depth=0):
+    if depth>16:return '[结构超过解析深度]'
     if not isinstance(value,str):return ''
     bounded=value[:65536]
     try:
         parsed=json.loads(bounded)
-        cleaned=json.dumps(safe_change_value(parsed),ensure_ascii=False,indent=2)
+        cleaned=json.dumps(safe_change_value(parsed,depth+1),ensure_ascii=False,indent=2)
     except (ValueError,TypeError,RecursionError):
         # Redact common configuration aliases even when output is not JSON.
         cleaned=re.sub(r'(?im)^([^\n:=]*(?:password|passwd|token|secret|api[_-]?key)[^\n:=]*[:=])[ \t]*\n(?:[ \t]+[^\n]*(?:\n|$))+',r'\1[已隐藏]\n',bounded)
@@ -163,10 +165,10 @@ def event_process(event,context):
             label='只读复核连接与服务状态' if context_policy.get('verification_scope')=='read_only_connectivity' else '执行本轮固定复测'
             stage='verify'
         elif context_policy.get('repair_argv') and isinstance(match_argv,list) and match_argv[:len(context_policy['repair_argv'])]==context_policy['repair_argv']:
-            label='修复已登记的机器人配置';stage='repair'
+            label='执行现场修复';stage='repair'
         elif isinstance(argv,list) and len(argv)>=2 and argv[-2] in {'rosa','rai'}:
             label=argv[-2].upper()+('健康检查'if argv[-1]=='health'else'只读检查')
-        elif argv and match_argv==context_policy.get('inspect_argv'):label='检查采集电脑与机器人当前配置和连接'
+        elif argv and match_argv==context_policy.get('inspect_argv'):label='检查现场环境与运行状态'
         success=row.result.get('ok')is True and row.result.get('exit_code',0)==0
         receipt=row.result
         # Only the registered fixed repair command returns this structured robot receipt.
@@ -191,10 +193,18 @@ def event_process(event,context):
             username,host=next(iter(robot_targets))
             target={'label':'机器人','username':redact(username),'host':redact(host),'identity_source':'execution_receipt'}
         changes=safe_changes(raw_changes)
+        steps=execution_steps(row.result)
+        if stage=='repair':
+            if changes:label='修改机器人配置' if target.get('label')=='机器人' else '修改配置文件'
+            elif steps:
+                actual_argv=steps[0]['argv']
+                if 'pip' in actual_argv and 'install' in actual_argv:label='安装 Python 依赖'
+                elif actual_argv and actual_argv[0].rsplit('/',1)[-1]=='systemctl' and 'restart' in actual_argv:
+                    label='重启服务：'+actual_argv[-1]
         command={'argv':safe_argv(argv),'path':redact(str(path))if path else None,'exit_code':row.result.get('exit_code'),
             'ok':row.result.get('ok') if type(row.result.get('ok')) is bool else None,'status':row.status,
             'stdout':safe_output(row.result.get('stdout')),'stderr':safe_output(row.result.get('stderr')),
-            'execution_steps':execution_steps(row.result),
+            'execution_steps':steps,
             'timed_out':row.result.get('timed_out') is True,
             'kind':kind,'changes':changes,'backup':redact(str(receipt.get('backup',''))),
             'expected_sha256':row.payload.get('expected_sha256'),'sha256':row.result.get('sha256')}

@@ -182,6 +182,8 @@ def test_command_output_is_actual_bounded_and_redacted(remote):
     assert 'synthetic-value' not in safe_output('{"robot":{"ssh_password":"synthetic-value"}}')
     assert 'synthetic-value' not in safe_output('ssh_password=synthetic-value')
     assert 'synthetic-value' not in safe_output('+ sshpass -p synthetic-value ssh robot')
+    assert 'synthetic-value' not in safe_output('{"execution_steps":[{"argv":["sshpass","-p","synthetic-value","ssh","robot"]}]}')
+    assert 'synthetic-value' not in safe_output('{"stdout":"+ sshpass -p synthetic-value ssh robot"}')
     assert 'synthetic-value' not in safe_output('ssh_password:\n  synthetic-value\nstatus: stopped')
     assert len(safe_output('x'*70000))<=8192
     response=client.get(f'/api/workspaces/{project.workspace.slug}/projects/{project.id}/quality/defects/{defect.id}/collaboration/')
