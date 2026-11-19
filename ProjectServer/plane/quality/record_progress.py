@@ -206,9 +206,18 @@ class RecordProgress(QualityView):
             stage_state = stage_states(
                 stages, current, row.events.order_by("created_at", "id").values_list("previous_status", "status")
             )
+            # Reference names and remote command projections share one per-response cache.
+            serializer_context = {"request": request}
             for event in selected:
-                note = EventSerializer(event).data["note"]
-                label, tone = defect_event_display(event, dict(stages), note)
+                display = EventSerializer(event, context=serializer_context).data
+                process = display.get("remote_process")
+                note = (process.get("summary") or display["note"]) if process else display["note"]
+                label, tone = defect_event_display(event, dict(stages), display["note"])
+                details = {}
+                if process:
+                    details = {"remote_process": process, "details": display.get("details") or event.note}
+                elif display.get("details"):
+                    details = {"details": display["details"]}
                 events.append(
                     {
                         "id": str(event.id),
@@ -219,6 +228,7 @@ class RecordProgress(QualityView):
                         else "系统",
                         "date": event.created_at,
                         "note": note,
+                        **details,
                     }
                 )
             builds = [row.affected_build, row.fixed_build]

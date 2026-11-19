@@ -110,3 +110,26 @@ def test_closed_forward_jump_marks_skipped_and_backward_reopens_work():
         "resolved": "pending",
         "closed": "pending",
     }
+
+
+def test_remote_progress_keeps_summary_details_and_reuses_serializer_projection_cache(session_client, progress_display):
+    from unittest.mock import patch
+    project, row, url, actor = progress_display
+    events = [DefectEvent.objects.create(project=project, defect=row, created_by=actor,
+        previous_status="resolved", status="resolved", note=f"Agent 检查：任务 {row.id}；事件{index}") for index in range(2)]
+    contexts = []
+    process = {"summary": "BASEKNOW-D-477 第1轮检查配置完成", "stage": "inspect", "defect_code": "BASEKNOW-D-477", "command": {"path": "/home/robot/config.json", "exit_code": 0}, "run_id": str(row.id)}
+    def project_event(event, context):
+        contexts.append(context)
+        context.setdefault("shared-lookup", process)
+        return context["shared-lookup"]
+    with patch("plane.quality.remote_event_display.event_process", side_effect=project_event):
+        response = session_client.get(url)
+    assert response.status_code == 200, response.content
+    projected = [item for item in response.data["events"] if item["id"] in {str(event.id) for event in events}]
+    assert len(projected) == 2
+    for item, event in zip(projected, events):
+        assert item["note"] == process["summary"]
+        assert event.note in item["details"]
+        assert item["remote_process"] == process
+    assert len(contexts) == 2 and contexts[0] is contexts[1]
