@@ -1,0 +1,6 @@
+# Additive evaluation SDK, isolated from production worker dependencies.
+pydantic-evals==2.66.0
+rich==14.3.3
+markdown-it-py==4.3.0
+pygments==2.21.0
+mdurl==0.1.2
