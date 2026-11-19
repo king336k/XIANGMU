@@ -177,6 +177,53 @@ class GatewayTest(unittest.TestCase):
         self.assertTrue(result['repaired'] and result['verification_passed'])
         self.assertEqual([body['operation'] for _,body in self.requests],['run','read_file','patch_file','run'])
 
+    def test_actual_http_joint_receipts_replace_model_locations_with_targeted_absolute_paths(self):
+        from pydantic_ai.models.function import FunctionModel
+        from pydantic_ai.messages import ModelResponse,ToolCallPart
+        turns=[]
+        collector={'target_kind':'collector','target_username':'operator','target_ip':'10.10.10.195',
+            'target_hostname':'collector195','path':'/approved/collector-config.json','key':'robot_port',
+            'before':8001,'after':8002,'backup':'/approved/.collector-config.json.backup'}
+        robot={'target_kind':'robot','target_username':'engram','target_ip':'10.10.10.177',
+            'target_hostname':'robot177','path':'/approved/robot-config.json','key':'telemetry_enabled',
+            'before':False,'after':True,'after_line':4,'before_line':1,'backup':'/approved/.robot-config.json.backup'}
+        def respond(body):
+            if body['operation']=='read_file':return {'content':'{"robot_port":8001}', 'sha256':'a'*64,
+                'resolved_path':'/approved/collector-config.json','target_kind':'collector'}
+            if body['operation']=='patch_file':return {'ok':True,'sha256':'b'*64,
+                'resolved_path':'/approved/collector-config.json','changes':[collector]}
+            if body['operation']=='run' and body['argv'][:1]==['robot-repair']:
+                return {'ok':True,'exit_code':0,'stdout':json.dumps({'changes':[robot]})}
+            return {'ok':True,'exit_code':0}
+        self.responder=respond
+        def model(messages,info):
+            index=len(turns);turns.append(index)
+            sequence=[('run_command',{'argv':['inspect']}),('read_file',{'path':'collector-config.json'}),
+                ('patch_file',{'path':'collector-config.json','expected_sha256':'a'*64,'content':'{"robot_port":8002}'}),
+                ('run_command',{'argv':['robot-repair','b'*64],'purpose':'repair'}),
+                ('run_command',{'argv':['check'],'purpose':'verify'})]
+            if index<len(sequence):
+                name,args=sequence[index];return ModelResponse(parts=[ToolCallPart(name,args)])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,{'summary':'两端复测完成','root_cause':'本轮配置已核实',
+                'actions':[],'verification':[],'solution':'继续观察','repaired':True,
+                'repair_locations':[{'path':'/invented/model.py','line':195}]})])
+        with patch.object(runner,'OpenAIChatModel',return_value=FunctionModel(model)):
+            value=asyncio.run(runner.analyze({'config':{'model':'test','api_key':'synthetic','base_url':'https://invalid.example/v1'},
+                'gateway_url':self.gateway.url,'tool_token':'synthetic-token','problem':'联合已授权修复',
+                'context':{'inspect_argv':['inspect'],'verify_argv':['check'],'repair_argv':['robot-repair'],
+                    'editable_files':['collector-config.json']}}))
+        self.assertTrue(value['repaired'])
+        self.assertEqual(len(value['repair_locations']),2)
+        actual_collector,actual_robot=value['repair_locations']
+        self.assertEqual(actual_collector['target'],'采集电脑：operator@10.10.10.195')
+        self.assertEqual(actual_collector['path'],collector['path'])
+        self.assertIsNone(actual_collector.get('line'))
+        self.assertEqual(actual_collector['before'],8001)
+        self.assertEqual(actual_robot['target'],'机器人：engram@10.10.10.177')
+        self.assertEqual(actual_robot['line'],4)
+        self.assertIn('写入授权文件完成：/approved/collector-config.json',value['actions'])
+        self.assertNotIn('/invented/',json.dumps(value))
+
     def test_model_corrects_invalid_repair_arguments_then_completes_joint_repair(self):
         from pydantic_ai.models.function import FunctionModel
         from pydantic_ai.messages import ModelResponse,ToolCallPart
@@ -582,6 +629,27 @@ if __name__ == "__main__":
     unittest.main()
 
 class LocationReceiptTest(unittest.TestCase):
+    def test_failed_patch_receipt_cannot_add_locations_or_ip_as_line(self):
+        gateway=runner.Gateway('http://unused','synthetic')
+        gateway.inspected=True;gateway.read_hashes['collector-config.json']='a'*64
+        result={'ok':False,'exit_code':1,'resolved_path':'/approved/collector-config.json','changes':[
+            {'path':'/approved/collector-config.json','target_kind':'collector','line':'10.10.10.195','key':'robot_port'}]}
+        with patch.object(gateway,'rpc',return_value=result):gateway.patch_file('collector-config.json','a'*64,'after')
+        self.assertEqual(gateway.repair_locations,[])
+        gateway.record_changes({**result,'ok':True})
+        self.assertNotIn('line',gateway.repair_locations[0])
+        self.assertNotIn('before',gateway.repair_locations[0])
+        self.assertNotIn('after',gateway.repair_locations[0])
+
+    def test_failed_read_does_not_promote_resolved_path_or_sha_to_evidence(self):
+        gateway=runner.Gateway('http://unused','synthetic')
+        with patch.object(gateway,'rpc',return_value={'ok':True,'exit_code':1,'content':'not a successful read',
+            'sha256':'a'*64,'resolved_path':'/unconfirmed/collector-config.json'}):
+            gateway.read_file('collector-config.json')
+        self.assertEqual(gateway.read_hashes,{})
+        self.assertEqual(gateway.observed_locations,set())
+        self.assertNotIn('/unconfirmed/',json.dumps(gateway.execution_summary()))
+
     def test_exhausted_location_validation_reports_fixed_reason_and_keeps_inspection(self):
         from pydantic_ai.models.function import FunctionModel
         from pydantic_ai.messages import ModelResponse,ToolCallPart

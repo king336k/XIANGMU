@@ -120,6 +120,34 @@ class Gateway:
             for item in value:
                 self.observe_locations(item,depth+1)
 
+    @staticmethod
+    def resolved_receipt_path(result,fallback):
+        resolved=result.get('resolved_path')
+        return resolved if isinstance(resolved,str) and resolved.startswith('/') else fallback
+
+    def record_changes(self,receipt,default_kind=None):
+        """Only successful execution receipts supply changed file/target metadata."""
+        if not isinstance(receipt,dict) or not isinstance(receipt.get('changes'),list):
+            return
+        for change in receipt['changes'][:10]:
+            if not isinstance(change,dict):continue
+            path=change.get('path') or receipt.get('resolved_path')
+            if not isinstance(path,str) or not path:continue
+            kind=change.get('target_kind',receipt.get('target_kind',default_kind))
+            user=change.get('target_username',receipt.get('target_username'))
+            address=change.get('target_ip',receipt.get('target_ip'))
+            hostname=change.get('target_hostname',receipt.get('target_hostname'))
+            label={'collector':'采集电脑','robot':'机器人'}.get(kind,'现场')
+            target=label+'：'+str(user)+'@'+str(address) if user and address else label+('：'+str(hostname) if hostname else '')
+            row={'target':target,'target_kind':kind,'username':user,'ip_address':address,'hostname':hostname,
+                 'path':path,'key':change.get('key'),
+                 'backup':change.get('backup',receipt.get('backup'))}
+            for field in ('before','after'):
+                if field in change:row[field]=change[field]
+            for field,value in [('line',change.get('after_line',change.get('line'))),('before_line',change.get('before_line'))]:
+                if type(value) is int and value>0:row[field]=value
+            self.repair_locations.append(row)
+
     def execution_summary(self):
         """Public executed/verified statements are deterministic receipt summaries."""
         labels={'inspect':'现场取证','specialist':'只读专家检查','repair':'授权修复','read_file':'读取现场文件','patch_file':'写入授权文件'}
@@ -239,12 +267,7 @@ class Gateway:
                 self.successful_mutation = self.mutation
                 try:
                     receipt=json.loads(result.get("stdout", "{}"))
-                    for change in receipt.get("changes", [])[:10]:
-                        if isinstance(change,dict) and isinstance(change.get("path"),str):
-                            target_ip=change.get("target_ip")
-                            target_user=change.get("target_username")
-                            target=("机器人："+str(target_user)+"@"+str(target_ip)) if target_user and target_ip else str(change.get("target_hostname") or "现场")
-                            self.repair_locations.append({"target":target,"username":target_user,"ip_address":target_ip,"hostname":change.get("target_hostname"),"path":change["path"],"line":change.get("after_line",change.get("line")),"before_line":change.get("before_line"),"key":change.get("key"),"before":change.get("before"),"after":change.get("after"),"backup":change.get("backup")})
+                    self.record_changes(receipt)
                 except (ValueError,TypeError,AttributeError):
                     pass
         return result
@@ -252,12 +275,14 @@ class Gateway:
     def read_file(self, path: str) -> dict:
         """Read current remote file and retain its server-provided SHA256 for patching."""
         result = self.rpc({"operation": "read_file", "path": path})
-        successful=not result.get("error") and result.get("ok") is not False and isinstance(result.get("content"),str)
-        self.executions.append({'phase':'read_file','success':successful,**({'path':path} if successful else {})})
+        successful=(not result.get("error") and result.get("ok") is not False and result.get('exit_code',0)==0
+                    and not result.get('timed_out') and isinstance(result.get("content"),str))
+        actual_path=self.resolved_receipt_path(result,path)
+        self.executions.append({'phase':'read_file','success':successful,**({'path':actual_path} if successful else {})})
         if successful:
             self.observed_locations.update((path,line) for line in range(1,len(result['content'].splitlines())+1))
+            self.observed_locations.update((actual_path,line) for line in range(1,len(result['content'].splitlines())+1))
             self.observe_locations(result)
-        if not result.get("error") and result.get("ok") is not False and isinstance(result.get("content"), str):
             if self.inspect_argv is None:
                 self.inspected = True
             digest = result.get("sha256")
@@ -287,8 +312,9 @@ class Gateway:
         if acknowledged and not result.get("error") and result.get("ok") is not False and result.get("exit_code", 0) == 0 and not result.get("timed_out"):
             self.successful_mutation = self.mutation
         patched=self.successful_mutation==self.mutation
-        self.executions.append({'phase':'patch_file','success':patched,**({'path':path} if patched else {})})
-        self.observe_locations(result)
+        if patched:self.record_changes(result,default_kind='collector')
+        self.executions.append({'phase':'patch_file','success':patched,**({'path':self.resolved_receipt_path(result,path)} if patched else {})})
+        if patched:self.observe_locations(result)
         return result
 
 
