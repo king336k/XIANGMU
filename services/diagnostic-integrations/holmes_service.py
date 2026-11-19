@@ -10,7 +10,19 @@ import sys
 import threading
 
 TOKEN = os.environ.get("HOLMES_SERVICE_TOKEN", "")
-SLOTS = threading.BoundedSemaphore(2)
+
+
+def concurrency_limit():
+    try:
+        value=int(os.environ.get('HOLMES_MAX_CONCURRENCY','4'))
+    except ValueError:
+        raise ValueError('HOLMES_MAX_CONCURRENCY must be an integer from 1 to 8') from None
+    if not 1<=value<=8:
+        raise ValueError('HOLMES_MAX_CONCURRENCY must be an integer from 1 to 8')
+    return value
+
+
+SLOTS = threading.BoundedSemaphore(concurrency_limit())
 
 
 class Handler(BaseHTTPRequestHandler):
