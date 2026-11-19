@@ -290,49 +290,89 @@ export function RecordProgress({
                                     </dd>
                                   </div>
                                 )}
-                                {item.remote_process?.command?.exit_code !== undefined &&
-                                  item.remote_process.command.exit_code !== null && (
+                                {typeof item.remote_process?.command?.exit_code === "number" &&
+                                  item.remote_process.command.exit_code !== 0 && (
+                                    <p className="text-danger-primary">
+                                      命令执行失败 · 退出码 {item.remote_process.command.exit_code}
+                                    </p>
+                                  )}
+                                {item.remote_process?.details &&
+                                  !["读取配置文件", "修改配置文件", "执行现场命令", "执行现场操作"].includes(
+                                    item.remote_process.details
+                                  ) && (
                                     <div>
-                                      <dt className="text-tertiary">退出码</dt>
-                                      <dd>{item.remote_process.command.exit_code}</dd>
+                                      <dt className="text-tertiary">执行说明</dt>
+                                      <dd className="break-words whitespace-pre-wrap">{item.remote_process.details}</dd>
                                     </div>
                                   )}
-                                {item.remote_process?.details && (
-                                  <div>
-                                    <dt className="text-tertiary">执行说明</dt>
-                                    <dd className="break-words whitespace-pre-wrap">{item.remote_process.details}</dd>
-                                  </div>
-                                )}
-                                {(item.remote_process?.command?.expected_sha256 ||
-                                  item.remote_process?.command?.sha256 ||
-                                  item.remote_process?.command?.backup) && (
-                                  <div className="text-11 break-all text-tertiary">
-                                    {item.remote_process.command.backup && (
-                                      <p>备份：{item.remote_process.command.backup}</p>
-                                    )}
-                                    {item.remote_process.command.expected_sha256 && (
-                                      <p>
-                                        {item.remote_process.command.kind === "patch_file"
-                                          ? "修改前校验："
-                                          : "预期校验值："}
-                                        {item.remote_process.command.expected_sha256}
-                                      </p>
-                                    )}
-                                    {item.remote_process.command.sha256 && (
-                                      <p>
-                                        {item.remote_process.command.kind === "patch_file"
-                                          ? "修改后校验："
-                                          : "文件校验值："}
-                                        {item.remote_process.command.sha256}
-                                      </p>
-                                    )}
-                                  </div>
-                                )}
+                                {!item.remote_process?.command?.changes?.length &&
+                                  (item.remote_process?.command?.backup ||
+                                    item.remote_process?.command?.expected_sha256 ||
+                                    item.remote_process?.command?.sha256) && (
+                                    <div className="space-y-1 text-11 text-tertiary">
+                                      {item.remote_process.command.backup && (
+                                        <p>
+                                          {item.remote_process.command.status === "done" &&
+                                          item.remote_process.command.ok === true &&
+                                          item.remote_process.command.exit_code === 0
+                                            ? "备份已保存"
+                                            : "备份路径已记录"}
+                                        </p>
+                                      )}
+                                      {item.remote_process.command.expected_sha256 && (
+                                        <p>
+                                          {item.remote_process.command.kind === "patch_file"
+                                            ? "修改前校验值已记录"
+                                            : "预期校验值已记录"}
+                                        </p>
+                                      )}
+                                      {item.remote_process.command.sha256 && (
+                                        <p>
+                                          {item.remote_process.command.kind === "patch_file"
+                                            ? "修改后校验值已记录"
+                                            : "文件校验值已记录"}
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
                                 <div>
                                   <details>
                                     <summary className="cursor-pointer text-11 text-tertiary">技术记录</summary>
                                     <div className="mt-2 space-y-2 text-11 text-tertiary">
-                                      <p>{item.remote_process?.defect_code}</p>{" "}
+                                      <p>{item.remote_process?.defect_code}</p>
+                                      {!item.remote_process?.command?.changes?.length && (
+                                        <div className="space-y-1 break-all">
+                                          {item.remote_process?.command?.backup && (
+                                            <p>备份：{item.remote_process.command.backup}</p>
+                                          )}
+                                          {item.remote_process?.command?.expected_sha256 && (
+                                            <p>
+                                              {item.remote_process.command.kind === "patch_file"
+                                                ? "修改前："
+                                                : "预期校验值："}
+                                              {item.remote_process.command.expected_sha256}
+                                            </p>
+                                          )}
+                                          {item.remote_process?.command?.sha256 && (
+                                            <p>
+                                              {item.remote_process.command.kind === "patch_file"
+                                                ? "修改后："
+                                                : "文件校验值："}
+                                              {item.remote_process.command.sha256}
+                                            </p>
+                                          )}
+                                        </div>
+                                      )}{" "}
+                                      {item.remote_process?.command?.exit_code !== undefined &&
+                                        item.remote_process.command.exit_code !== null && (
+                                          <div>
+                                            <dt className="text-tertiary">退出码</dt>
+                                            <dd>{item.remote_process.command.exit_code}</dd>
+                                          </div>
+                                        )}
+                                      {item.remote_process?.details && (
+                                        <p className="break-words whitespace-pre-wrap">{item.remote_process.details}</p>
+                                      )}{" "}
                                       <div>
                                         <dt className="text-tertiary">原始记录</dt>
                                         <dd className="break-words whitespace-pre-wrap">

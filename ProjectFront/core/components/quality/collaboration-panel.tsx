@@ -330,46 +330,83 @@ export function CollaborationPanel({
                                 </dd>
                               </div>
                             )}
-                            {(row.process?.command?.backup ||
-                              row.process?.command?.expected_sha256 ||
-                              row.process?.command?.sha256) && (
-                              <div>
-                                <dt className="text-tertiary">备份与文件校验</dt>
-                                <dd className="space-y-1 text-11 break-all">
-                                  {row.process.command.backup && <p>备份：{row.process.command.backup}</p>}
+                            {!row.process?.command?.changes?.length &&
+                              (row.process?.command?.backup ||
+                                row.process?.command?.expected_sha256 ||
+                                row.process?.command?.sha256) && (
+                                <div className="space-y-1 text-11 text-tertiary">
+                                  {row.process.command.backup && (
+                                    <p>
+                                      {row.process.command.status === "done" &&
+                                      row.process.command.ok === true &&
+                                      row.process.command.exit_code === 0
+                                        ? "备份已保存"
+                                        : "备份路径已记录"}
+                                    </p>
+                                  )}
                                   {row.process.command.expected_sha256 && (
                                     <p>
-                                      {row.process.command.kind === "patch_file" ? "修改前：" : "预期校验值："}
-                                      {row.process.command.expected_sha256}
+                                      {row.process.command.kind === "patch_file"
+                                        ? "修改前校验值已记录"
+                                        : "预期校验值已记录"}
                                     </p>
                                   )}
                                   {row.process.command.sha256 && (
                                     <p>
-                                      {row.process.command.kind === "patch_file" ? "修改后：" : "文件校验值："}
-                                      {row.process.command.sha256}
+                                      {row.process.command.kind === "patch_file"
+                                        ? "修改后校验值已记录"
+                                        : "文件校验值已记录"}
                                     </p>
                                   )}
-                                </dd>
-                              </div>
-                            )}
-                            {row.process?.command?.exit_code !== undefined &&
-                              row.process.command.exit_code !== null && (
-                                <div>
-                                  <dt className="text-tertiary">退出码</dt>
-                                  <dd>{row.process.command.exit_code}</dd>
                                 </div>
                               )}
-                            {row.process?.details && (
-                              <div>
-                                <dt className="text-tertiary">执行说明</dt>
-                                <dd className="break-words whitespace-pre-wrap">{row.process.details}</dd>
-                              </div>
-                            )}
+                            {typeof row.process?.command?.exit_code === "number" &&
+                              row.process.command.exit_code !== 0 && (
+                                <p className="text-danger-primary">
+                                  命令执行失败 · 退出码 {row.process.command.exit_code}
+                                </p>
+                              )}
+                            {row.process?.details &&
+                              !["读取配置文件", "修改配置文件", "执行现场命令", "执行现场操作"].includes(
+                                row.process.details
+                              ) && (
+                                <div>
+                                  <dt className="text-tertiary">执行说明</dt>
+                                  <dd className="break-words whitespace-pre-wrap">{row.process.details}</dd>
+                                </div>
+                              )}
                             <div>
                               <details>
                                 <summary className="cursor-pointer text-11 text-tertiary">技术记录</summary>
                                 <div className="mt-2 space-y-2 text-11 text-tertiary">
-                                  <p>{row.process?.defect_code || value.code}</p>{" "}
+                                  <p>{row.process?.defect_code || value.code}</p>
+                                  {!row.process?.command?.changes?.length && (
+                                    <div className="space-y-1 break-all">
+                                      {row.process?.command?.backup && <p>备份：{row.process.command.backup}</p>}
+                                      {row.process?.command?.expected_sha256 && (
+                                        <p>
+                                          {row.process.command.kind === "patch_file" ? "修改前：" : "预期校验值："}
+                                          {row.process.command.expected_sha256}
+                                        </p>
+                                      )}
+                                      {row.process?.command?.sha256 && (
+                                        <p>
+                                          {row.process.command.kind === "patch_file" ? "修改后：" : "文件校验值："}
+                                          {row.process.command.sha256}
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}{" "}
+                                  {row.process?.command?.exit_code !== undefined &&
+                                    row.process.command.exit_code !== null && (
+                                      <div>
+                                        <dt className="text-tertiary">退出码</dt>
+                                        <dd>{row.process.command.exit_code}</dd>
+                                      </div>
+                                    )}
+                                  {row.process?.details && (
+                                    <p className="break-words whitespace-pre-wrap">{row.process.details}</p>
+                                  )}{" "}
                                   {row.rawDetails && (
                                     <div>
                                       <dt className="text-tertiary">原始记录</dt>

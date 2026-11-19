@@ -461,3 +461,28 @@ test("处理历程只折叠连续且已明确成功的同轮检查，不隐藏�
   assert.match(JSON.stringify(group), /read-two/);
   assert.doesNotMatch(JSON.stringify(group), /"children":"verify"/);
 });
+
+test("处理历程读取的长校验值默认折叠，正常退出码与工具套话进入技术记录", () => {
+  const process = {
+    summary: "读取配置完成",
+    command: { kind: "read_file", path: "/config.json", sha256: "a".repeat(64), exit_code: 0 },
+    details: "读取配置文件",
+  };
+  const tree = component("timeline", {
+    ...data,
+    events: [{ id: "read", label: "读取配置", actor: "成员", date: "2026-11-19T10:00:00Z", remote_process: process }],
+  }).render();
+  const checks = nodes(tree).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children].flat().some((child) => child?.type === "summary" && child.props.children === "技术记录")
+  );
+  assert.ok(checks);
+  assert.equal(checks.props.open, undefined);
+  const technical = nodes(tree).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children].flat().some((child) => child?.type === "summary" && child.props.children === "技术记录")
+  );
+  assert.match(JSON.stringify(technical), /读取配置文件/);
+});

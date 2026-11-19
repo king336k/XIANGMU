@@ -60,9 +60,21 @@ export function ConfigurationChangeDiff({ command }: { command: Command }) {
               {(change.backup || change.before_sha256 || change.after_sha256) && (
                 <details className="px-3 py-2 text-11 text-tertiary">
                   <summary className="cursor-pointer">备份与校验信息</summary>
-                  {change.backup && <p className="mt-1 break-all">{change.backup}</p>}
-                  {change.before_sha256 && <p className="mt-1 break-all">修改前：{change.before_sha256}</p>}
-                  {change.after_sha256 && <p className="mt-1 break-all">修改后：{change.after_sha256}</p>}
+                  {change.backup && (
+                    <p className="mt-1">
+                      {command.status === "done" && command.ok === true && command.exit_code === 0
+                        ? "备份已保存"
+                        : "备份路径已记录"}
+                    </p>
+                  )}
+                  {change.before_sha256 && <p className="mt-1">修改前校验值已记录</p>}
+                  {change.after_sha256 && <p className="mt-1">修改后校验值已记录</p>}
+                  <details className="mt-2">
+                    <summary className="cursor-pointer">技术信息</summary>
+                    {change.backup && <p className="mt-1 break-all">{change.backup}</p>}
+                    {change.before_sha256 && <p className="mt-1 break-all">修改前：{change.before_sha256}</p>}
+                    {change.after_sha256 && <p className="mt-1 break-all">修改后：{change.after_sha256}</p>}
+                  </details>
                 </details>
               )}
             </div>

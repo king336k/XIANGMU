@@ -60,3 +60,40 @@ test("new deleted null boolean and object values stay factual without invented s
   assert.match(text(before), /行号未记录/);
   assert.doesNotMatch(text(before), /第7行/);
 });
+
+test("backup and checksum display friendly recorded states while long values stay in nested technical information", () => {
+  const before = "a".repeat(64),
+    after = "b".repeat(64),
+    backup = "/home/robot/config.json.backup-95f89e89-3d92-4f6c-a6aa-9b95fddfcd88";
+  const tree = ConfigurationChangeDiff({
+    command: {
+      status: "done",
+      ok: true,
+      exit_code: 0,
+      path: "/home/robot/config.json",
+      changes: [
+        {
+          key: "enabled",
+          before: false,
+          after: true,
+          before_exists: true,
+          after_exists: true,
+          backup,
+          before_sha256: before,
+          after_sha256: after,
+        },
+      ],
+    },
+  });
+  const check = nodes(tree).find((node) => node.type === "details");
+  const primary = [check.props.children].flat().filter((node) => node?.type !== "details");
+  assert.match(text(primary), /备份已保存/);
+  assert.match(text(primary), /修改前校验值已记录/);
+  assert.match(text(primary), /修改后校验值已记录/);
+  assert.ok(!text(primary).includes(before) && !text(primary).includes(after) && !text(primary).includes(backup));
+  assert.doesNotMatch(text(primary), /校验通过/);
+  const technical = nodes(check).find((node) => node !== check && node.type === "details");
+  assert.equal(technical.props.open, undefined);
+  assert.match(text(technical), /config.json.backup-/);
+  assert.ok(text(technical).includes(before) && text(technical).includes(after));
+});

@@ -425,3 +425,59 @@ test("连续同任务成功检查默认折叠，失败检查与修复仍在一�
   const list = nodes(tree).find((node) => node.props?.["aria-label"] === "处理时间线");
   assert.equal([list.props.children].flat().flat().length, 3);
 });
+
+test("有diff时不重复父备份校验，读取校验折叠且成功退出码工具套话仅在技术记录", () => {
+  const process = {
+    summary: "读取配置完成",
+    command: { kind: "read_file", path: "/config.json", sha256: "a".repeat(64), exit_code: 0 },
+    details: "读取配置文件",
+  };
+  const tree = render([{ ...events[0], remote_process: process }], []);
+  const checks = nodes(tree).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children].flat().some((child) => child?.type === "summary" && child.props.children === "技术记录")
+  );
+  assert.ok(checks);
+  assert.equal(checks.props.open, undefined);
+  const technical = nodes(tree).find(
+    (node) =>
+      node.type === "details" &&
+      [node.props.children].flat().some((child) => child?.type === "summary" && child.props.children === "技术记录")
+  );
+  assert.ok(JSON.stringify(technical).includes("读取配置文件"));
+  const patch = render(
+    [
+      {
+        ...events[0],
+        remote_process: {
+          ...process,
+          command: {
+            kind: "patch_file",
+            path: "/config.json",
+            backup: "/config.bak",
+            expected_sha256: "a".repeat(64),
+            sha256: "b".repeat(64),
+            changes: [
+              {
+                key: "enabled",
+                before: false,
+                after: true,
+                before_exists: true,
+                after_exists: true,
+                backup: "/config.bak",
+                before_sha256: "a".repeat(64),
+                after_sha256: "b".repeat(64),
+              },
+            ],
+          },
+        },
+      },
+    ],
+    []
+  );
+  assert.equal(
+    nodes(patch).some((node) => node.type === "dt" && node.props.children === "备份与文件校验"),
+    false
+  );
+});
