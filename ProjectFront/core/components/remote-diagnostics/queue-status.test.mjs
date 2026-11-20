@@ -94,6 +94,7 @@ function actions(run, write = async () => ({ id: "run", status: "queued" }), res
       },
     },
     "./api": { qualityApi: { write }, errorMessage: (error) => error.message },
+    "./configuration-repair-plan": { ConfigurationRepairPlan: () => null },
     "../remote-diagnostics/types": types,
   });
   return {
