@@ -832,9 +832,19 @@ def main():
     diagnostic_refresh=None
     next_application_refresh=0.0
     application_refresh=None
+    next_cache_cleanup=0.0
+    cache_cleanup=None
     status_executor = ThreadPoolExecutor(max_workers=1)
     try:
         while True:
+            if cache_cleanup is not None and cache_cleanup.done():
+                try:cache_cleanup.result()
+                except (OSError,ValueError):pass
+                cache_cleanup=None
+            if cache_cleanup is None and not engine.tasks and time.monotonic()>=next_cache_cleanup:
+                from file_browser import cleanup_expired_transfers
+                cache_cleanup=status_executor.submit(cleanup_expired_transfers,Path.home())
+                next_cache_cleanup=time.monotonic()+60
             if application_refresh is not None and application_refresh.done():
                 application=application_refresh.result()
                 if application is not None:

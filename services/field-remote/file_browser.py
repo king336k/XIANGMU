@@ -120,6 +120,29 @@ def cleanup(root, spool_fd):
             except OSError: pass
 
 
+def cleanup_expired_transfers(home):
+    """Reclaim only this connector's expired transfer tickets, never user files."""
+    root=Path(home)
+    spool=root/'.cache/engram/remote-downloads'
+    if not spool.exists():return {'removed':0}
+    if root.absolute()!=root.resolve()or spool.absolute()!=spool.resolve():
+        raise ValueError('transfer_cache_symlink_path')
+    spool=private_spool(spool);folder=directory_fd(spool)
+    lock=None
+    try:
+        lock=os.open('.transfer.lock',os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW|os.O_NONBLOCK,0o600,dir_fd=folder)
+        info=os.fstat(lock)
+        if not stat.S_ISREG(info.st_mode)or info.st_uid!=os.getuid()or info.st_nlink!=1:
+            raise ValueError('unsafe_transfer_lock')
+        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:return {'removed':0,'busy':True}
+        before=set(os.listdir(folder));cleanup(root,folder)
+        return {'removed':len(before-set(os.listdir(folder)))}
+    finally:
+        if lock is not None:os.close(lock)
+        os.close(folder)
+
+
 def upload_request(root, spool_fd, request):
     action = request['action']
     if action == 'upload_start':
