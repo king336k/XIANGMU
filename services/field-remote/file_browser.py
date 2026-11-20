@@ -16,6 +16,7 @@ import tarfile
 import time
 import uuid
 from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
+from urllib.error import HTTPError
 
 CHUNK = 96 * 1024
 MAX_DOWNLOAD = 256 * 1024 * 1024
@@ -344,7 +345,7 @@ def file_request(root, spool_fd, request):
         os.unlink(ticket, dir_fd=spool_fd); raise
 
 
-def local_launcher_request(local,request,terminal=False,diagnostics=False,timeout=None):
+def local_launcher_request(local,request,terminal=False,diagnostics=False,timeout=None,application=False):
     if not isinstance(local,dict) or local.get('url')!='http://127.0.0.1:11452/api/launcher/remote-robot-files':
         raise ValueError('invalid_local_launcher_endpoint')
     fd=os.open(local['token_file'],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
@@ -357,6 +358,7 @@ def local_launcher_request(local,request,terminal=False,diagnostics=False,timeou
         def redirect_request(self,*_args):return None
     url=local['url'].replace('/remote-robot-files','/remote-robot-terminal') if terminal else local['url']
     if diagnostics:url=local['url'].replace('/remote-robot-files','/remote-diagnostics')
+    if application:url=local['url'].replace('/remote-robot-files','/remote-application')
     outgoing=Request(url,data=json.dumps(request).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+token},method='POST')
     try:
         with build_opener(ProxyHandler({}),NoRedirect()).open(outgoing,timeout=timeout if timeout is not None else 3 if terminal else 105) as response:
@@ -365,7 +367,34 @@ def local_launcher_request(local,request,terminal=False,diagnostics=False,timeou
         result=json.loads(raw)
         if not isinstance(result,dict) or result.get('error'):raise ValueError('invalid_local_launcher_result')
         return result
-    except OSError:raise ValueError('DAQ当前机器人未连接或连接已切换，请在启动页确认机器人连接')
+    except OSError as error:
+        if application and isinstance(error,HTTPError) and error.code in {403,404}:
+            return {'protocol':'application-status-unavailable'}
+        raise ValueError('DAQ当前机器人未连接或连接已切换，请在启动页确认机器人连接')
+
+
+def application_status(local):
+    """Observe fixed local application endpoints, independently of robot startup."""
+    from datetime import datetime, timezone
+    if local is None:
+        return None
+    value={'version':None,'revision':None,'web_ready':None,
+           'observed_at':datetime.now(timezone.utc).isoformat()}
+    try:
+        status=local_launcher_request(local,{'action':'status'},application=True,timeout=1)
+        if status.get('protocol')!='daq-application-status-v1':return value
+        for key,maximum in [('version',80),('revision',64)]:
+            if isinstance(status.get(key),str)and 0<len(status[key])<=maximum:
+                value[key]=status[key]
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self,*args):return None
+        request=Request('http://127.0.0.1:5173/',headers={'Accept':'text/html'},method='GET')
+        with build_opener(ProxyHandler({}),NoRedirect()).open(request,timeout=1)as response:
+            html=response.read(65537)
+            value['web_ready']=response.status==200 and b'<html'in html.lower()and b'id="app"'in html
+    except (OSError,ValueError,TypeError,KeyError):
+        value['web_ready']=False
+    return value
 
 
 def robot_status(local):

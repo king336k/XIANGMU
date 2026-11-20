@@ -711,8 +711,10 @@ def identity(policy=None, server_url=None):
                       'allowed_commands': policy.allowed, 'file_patch': True,
                       'specialists_probed': False},
         }
-        from file_browser import robot_status
+        from file_browser import robot_status, application_status
         result['capabilities']['robot']=robot_status(policy.daq_local_api)
+        application=application_status(policy.daq_local_api)
+        if application is not None:result['capabilities']['application']=application
         diagnostic=diagnostic_capability(policy.daq_local_api)
         if diagnostic:result['capabilities']['diagnostics']=diagnostic
         try:
@@ -828,9 +830,23 @@ def main():
     robot_refresh = None
     next_diagnostic_refresh=0.0
     diagnostic_refresh=None
+    next_application_refresh=0.0
+    application_refresh=None
     status_executor = ThreadPoolExecutor(max_workers=1)
     try:
         while True:
+            if application_refresh is not None and application_refresh.done():
+                application=application_refresh.result()
+                if application is not None:
+                    previous=operator['capabilities'].get('application',{})
+                    for key in ('version','revision'):
+                        if application.get(key) is None:application[key]=previous.get(key)
+                    operator['capabilities']['application']=application
+                application_refresh=None
+            if policy.daq_local_api is not None and application_refresh is None and time.monotonic()>=next_application_refresh:
+                from file_browser import application_status
+                application_refresh=status_executor.submit(application_status,policy.daq_local_api)
+                next_application_refresh=time.monotonic()+5
             if robot_refresh is not None and robot_refresh.done():
                 operator['capabilities']['robot'] = robot_refresh.result()
                 robot_refresh = None
