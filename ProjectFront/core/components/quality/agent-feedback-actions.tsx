@@ -46,6 +46,7 @@ export function AgentFeedbackActions({
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [submittedRun, setSubmittedRun] = useState<AgentRun | null>(null);
+  const [planRunId, setPlanRunId] = useState("");
   const submitting = useRef(false);
   const effectiveRunId = runId || targets?.active_run?.id || "";
   const { data: runSnapshot, error: runError } = useSWR(
@@ -181,6 +182,16 @@ export function AgentFeedbackActions({
           key={defectId}
           defectId={defectId}
           disabled={busy || !available}
+          run={run?.id === planRunId ? run : undefined}
+          onHistory={onHistory}
+          onRestoredRun={(restored) => {
+            setPlanRunId(restored.id);
+            // A prior plan must not replace another task already being followed.
+            if (!effectiveRunId || effectiveRunId === restored.id) {
+              setRunId(restored.id);
+              setSubmittedRun(restored);
+            }
+          }}
           onSubmitting={() => {
             if (submitting.current || busy || !available) return false;
             submitting.current = true;
@@ -193,6 +204,7 @@ export function AgentFeedbackActions({
           }}
           onSubmitted={(next) => {
             submitting.current = true;
+            setPlanRunId(next.id);
             setSubmittedRun(next);
             setRunId(next.id);
             onStarted?.();

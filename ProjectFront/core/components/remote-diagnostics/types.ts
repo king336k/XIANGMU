@@ -40,6 +40,7 @@ export type TerminalSnapshot = {
 
 export type AgentRun = {
   id: string;
+  can_follow?: boolean;
   status: string;
   mode?: "diagnose" | "repair" | "verify";
   queue?: {
@@ -61,6 +62,13 @@ export type AgentRun = {
     business_verified?: boolean;
     verification_passed?: boolean;
     outcome?: "verified" | "verified_without_repair" | "repaired" | "unresolved";
+    configuration_repair_state?: string;
+    verification_scope?: string;
+    configuration_blocked_code?: string;
+    configuration_blocked_reason?: string;
+    actual_write?: boolean;
+    brief_report?: unknown;
+    evidence_details?: unknown;
   } | null;
   error?: string;
 };

@@ -162,7 +162,8 @@ def test_worker_exception_is_reported_without_replaying_or_leaking_details(candi
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.skipif(not __import__('pathlib').Path('/daq/scripts/remote-diagnostics/connector.py').exists(),
                     reason='isolated /daq source mount required for the actual edge adapter')
-def test_real_connector_local_http_adapter_and_controller_finish_one_plan(candidate, tmp_path, monkeypatch):
+@pytest.mark.parametrize('runtime_mode', [0o775, 0o2775])
+def test_real_connector_local_http_adapter_and_controller_finish_one_plan(candidate, tmp_path, monkeypatch, runtime_mode):
     """Real edge transport and real file changes, with isolated robot state only."""
     import importlib.util
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -182,6 +183,7 @@ def test_real_connector_local_http_adapter_and_controller_finish_one_plan(candid
     service, source_file, state = fixture.fixture(tmp_path)
     service.approval_file.unlink()
     original = source_file.read_bytes()
+    state.chmod(runtime_mode)
     client, edge, station, _, run, source_command, _ = candidate
     config = service.inspect('custom')
     assert config['repair_allowed'] is False
@@ -367,3 +369,33 @@ def test_unsupported_or_ambiguous_repairs_have_no_proposal(candidate, changes):
     command.result['stdout'] = json.dumps(receipt)
     command.save(update_fields=['result'])
     assert proposal(candidate) is None
+
+
+def test_blocked_confirmed_plan_reports_no_write_reason_and_survives_refresh(candidate):
+    from plane.quality.remote_tasks import remote_repair
+
+    _, _, _, _, _, _, receipt = candidate
+    accepted = confirm(candidate)
+    blocked = copy.deepcopy(receipt)
+    blocked['repair'] = {'state':'blocked','blocked_reason':'configuration_approval_path_invalid'}
+    blocked['configuration']['repair'] = blocked['repair']
+    outputs = [receipt, blocked, receipt]
+    def execute(run_id, action, approval=None):
+        run = RemoteAgentRun.objects.get(pk=run_id)
+        result = outputs.pop(0)
+        RemoteCommand.objects.create(workstation=run.workstation, run=run, status='done',
+            payload={'kind':'run','argv':['daq-local-diagnostics-v1',action]+(['b'*64] if action=='repair' else [])},
+            result={'ok':action=='inspect','exit_code':0 if action=='inspect' else 1,'stdout':json.dumps(result)}, expires_at=run.expires_at)
+        return result
+    with patch('plane.quality.configuration_plans.execute_step',side_effect=execute):
+        remote_repair.run(accepted.data['id'])
+    result = RemoteAgentRun.objects.get(pk=accepted.data['id'])
+    assert result.result['actual_write'] is False
+    assert result.result['configuration_blocked_code'] == 'configuration_approval_path_invalid'
+    assert '授权文件' in result.result['configuration_blocked_reason']
+    assert '未修改' in result.result['summary']
+    current = proposal(candidate)
+    assert current['submitted_run']['id'] == str(result.id)
+    assert current['submitted_run']['result']['actual_write'] is False
+    assert current['can_approve'] is False
+    assert 'configuration_approval' not in current['submitted_run']['result']

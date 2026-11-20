@@ -26,6 +26,60 @@ FIELD = re.compile(r'^initial_joint_states\.[A-Za-z0-9_-]{1,80}(?:\[[0-9]{1,3}\]
 SHA256 = re.compile(r'^[a-f0-9]{64}$')
 LIFETIME = timedelta(minutes=15)
 
+BLOCKED_REASONS = {
+    'configuration_approval_path_invalid': '修复授权文件路径或目录权限不符合要求。',
+    'configuration_approval_unavailable': '本机未能建立临时修复授权。',
+    'configuration_approval_invalid': '修复授权无效或已过期，请重新诊断并确认。',
+    'configuration_approval_does_not_match_observation': '现场配置与确认计划不一致，请重新诊断。',
+    'target_revision_changed': '机器人连接目标已变化，请重新诊断。',
+    'matching_runtime_evidence_required': '缺少与本次故障匹配的运行证据。',
+    'baseline_not_approved_for_device': '当前设备尚无已批准的修复依据。',
+    'override_effective_mismatch': '覆盖配置与生效配置不一致。',
+}
+
+
+def submitted_summary(source, station, defect, viewer=None):
+    """Read-only execution projection; do not expose approval material or private data."""
+    run_id = source.result.get('configuration_approval_run_id')
+    if not run_id:
+        return None
+    run = RemoteAgentRun.objects.filter(pk=run_id, workstation=station, defect=defect).first()
+    if run is None:
+        return None
+    fields = {'summary', 'verification', 'verification_scope', 'configuration_repaired',
+              'configuration_verified', 'verification_passed', 'business_verified', 'actual_write',
+              'configuration_blocked_code', 'configuration_blocked_reason', 'configuration_repair_state'}
+    result = {key: value for key, value in run.result.items() if key in fields}
+    # Older completed runs have receipts but no structured blocked-result projection.
+    # Project only a recognized fixed repair receipt; never infer no-write from missing output.
+    if run.status not in {'queued', 'running'} and 'configuration_repair_state' not in result:
+        commands = run.remotecommand_set.filter(status='done', payload__kind='run').order_by('-created_at', '-id')
+        for command in commands[:20]:
+            argv = command.payload.get('argv', [])
+            if not isinstance(argv, list) or argv[:2] != ['daq-local-diagnostics-v1', 'repair']:
+                continue
+            try:
+                receipt = json.loads(command.result.get('stdout', ''))
+                repair = receipt.get('repair', receipt.get('configuration', {}).get('repair', {}))
+            except (ValueError, TypeError, AttributeError):
+                break
+            if not isinstance(repair, dict):
+                break
+            state = repair.get('state')
+            code = repair.get('blocked_reason')
+            code = code if isinstance(code, str) else ''
+            if state == 'blocked' and repair.get('actual_write') is not True:
+                result.update(actual_write=False, configuration_repair_state='blocked',
+                    configuration_blocked_code=code if code in BLOCKED_REASONS else 'repair_blocked',
+                    configuration_blocked_reason=BLOCKED_REASONS.get(code, '现场修复未获执行，请查看复查记录。'))
+                result['summary'] = '未修改：' + result['configuration_blocked_reason']
+            elif type(repair.get('actual_write')) is bool:
+                result.update(actual_write=repair['actual_write'], configuration_repair_state=state)
+            break
+    return {'id': str(run.pk), 'mode': run.mode, 'status': run.status, 'error': run.error,
+            'can_follow': viewer is not None and run.owner_id == viewer.pk,
+            'queue': run_queue(run), 'result': result}
+
 
 def finite_value(value):
     try:
@@ -81,7 +135,7 @@ def candidate(command):
         return None
 
 
-def plan_for(run, station, defect):
+def plan_for(run, station, defect, viewer=None):
     command = run.remotecommand_set.filter(status='done', payload__kind='run').order_by('-created_at', '-id')
     command = next((row for row in command[:30] if row.payload.get('argv') in [
         ['daq-local-diagnostics-v1', 'inspect'], ['daq-local-diagnostics-v1', 'verify']]), None)
@@ -119,7 +173,8 @@ def plan_for(run, station, defect):
     return {**proposal, 'source_run_id': str(run.pk), 'plan_digest': digest,
             'device': {'username': station.username,
                        'ip_address': station.capabilities.get('network', {}).get('ip_address')},
-            'expires_at': expires.isoformat(), 'can_approve': not reason, 'blocked_reason': reason}
+            'expires_at': expires.isoformat(), 'can_approve': not reason, 'blocked_reason': reason,
+            'submitted_run': submitted_summary(run, station, defect, viewer)}
 
 
 class Confirmation(serializers.Serializer):
@@ -154,7 +209,7 @@ class ConfigurationPlans(BaseAPIView):
         source = run.result.get('configuration_approval_source_run_id')
         if source:
             run = get_object_or_404(RemoteAgentRun, pk=source, defect=defect, workstation=station)
-        return Response({'proposal': plan_for(run, station, defect)})
+        return Response({'proposal': plan_for(run, station, defect, request.user)})
 
     @transaction.atomic
     def post(self, request):
@@ -280,10 +335,26 @@ def execute_confirmed(run):
         verification = execute_step(run.pk, 'verify')
         verified = verification.get('configuration', {}).get('state') == 'pass' and verification.get('verified') is True
         applied = repair.get('state') == 'applied' and repair.get('actual_write') is True
-        summary = '配置已修复，待业务验证。' if applied and verified else '配置未完成修复，复查结果见处理记录。'
-        finish(run.pk, {'summary': summary,
-            'root_cause': '当前有效配置校验失败，已按设备负责人确认的限定计划处理。',
-            'actions': ['重新核验现场快照', '执行限定配置修复', '读取配置复查结果'],
+        state = repair.get('state')
+        code = repair.get('blocked_reason')
+        code = code if isinstance(code, str) else ''
+        blocked_reason = BLOCKED_REASONS.get(code, '现场修复未获执行，请查看复查记录。') if state == 'blocked' else ''
+        actual_write = repair.get('actual_write')
+        if type(actual_write) is not bool:
+            actual_write = False if state in {'blocked', 'not_needed'} else None
+        no_write = state == 'blocked' and actual_write is False
+        summary = ('配置已修复，待业务验证。' if applied and verified else
+                   '未修改：' + blocked_reason if no_write else '配置未完成修复，复查结果见处理记录。')
+        execution = {'configuration_repair_state': state}
+        if actual_write is not None:
+            execution['actual_write'] = actual_write
+        if blocked_reason:
+            execution.update(configuration_blocked_code=code if code in BLOCKED_REASONS else 'repair_blocked',
+                             configuration_blocked_reason=blocked_reason)
+        finish(run.pk, {'summary': summary, **execution,
+            'root_cause': blocked_reason or '已按确认计划处理当前配置，结果以复查为准。',
+            'actions': ['重新核验现场快照', '修复被拦截，未写入配置' if no_write else '执行限定配置修复',
+                        '读取配置复查结果'],
             'verification': ['配置复查通过。' if verified else '配置复查未通过。'],
             'verification_scope': 'configuration_validation', 'business_verified': False,
             'repaired': False, 'verification_passed': verified,

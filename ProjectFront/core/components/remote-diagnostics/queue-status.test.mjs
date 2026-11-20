@@ -64,15 +64,19 @@ test("queue labels use real reason and positive position without inventing ETA o
   assert.equal(label({ status: "timed_out" }), "处理超时");
 });
 
-function actions(run, write = async () => ({ id: "run", status: "queued" }), restoredRun = undefined) {
+function actions(run, write = async () => ({ id: "run", status: "queued" }), restoredRun = undefined, planRunId = "") {
   let cursor = 0;
-  const states = ["", run?.id || "", false, ""];
+  const states = ["", run?.id || "", false, "", null, planRunId];
   const intervals = [];
   const runUrls = [];
+  const stateChanges = [];
   const api = module("../quality/agent-feedback-actions.tsx", {
     react: {
       ...React,
-      useState: () => [states[cursor++], () => {}],
+      useState: () => {
+        const index = cursor++;
+        return [states[index], (value) => stateChanges.push({ index, value })];
+      },
       useRef: (initial) => ({ current: initial }),
       useEffect() {},
     },
@@ -101,6 +105,7 @@ function actions(run, write = async () => ({ id: "run", status: "queued" }), res
     tree: api.AgentFeedbackActions({ defectId: "feedback", active: true, onCompleted() {}, onHistory() {} }),
     intervals,
     runUrls,
+    stateChanges,
   };
 }
 
@@ -323,4 +328,35 @@ test("device panel polls real queued stage through repair to completion and then
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(pendingTimers.length, 0);
   assert.equal(changes.at(-1)[1].status, "completed");
+});
+
+test("configuration plan receives the existing run snapshot and history action without a second poller", () => {
+  const run = { id: "plan-run", status: "running", queue: { stage: "verify" } };
+  const value = actions(run, undefined, undefined, run.id);
+  const plan = nodes(value.tree).find(
+    (node) => node.props?.defectId === "feedback" && typeof node.props?.onSubmitted === "function"
+  );
+  assert.ok(plan);
+  assert.deepEqual(plan.props.run, run);
+  assert.equal(typeof plan.props.onHistory, "function");
+  assert.equal(typeof plan.props.onRestoredRun, "function");
+  assert.deepEqual(value.runUrls, ["/api/quality-auth/remote-diagnostics/agent-runs/plan-run/"]);
+  assert.equal(value.intervals[0]({ status: "completed" }), 0);
+});
+
+test("restoring an older plan cannot replace a different current task", () => {
+  const current = { id: "current-run", status: "running", queue: { stage: "inspect" } };
+  const value = actions(current);
+  const plan = nodes(value.tree).find(
+    (node) => node.props?.defectId === "feedback" && typeof node.props?.onSubmitted === "function"
+  );
+  plan.props.onRestoredRun({ id: "old-plan-run", status: "completed" });
+  assert.equal(
+    value.stateChanges.some((change) => change.index === 1),
+    false
+  );
+  assert.equal(
+    value.stateChanges.some((change) => change.index === 4),
+    false
+  );
 });

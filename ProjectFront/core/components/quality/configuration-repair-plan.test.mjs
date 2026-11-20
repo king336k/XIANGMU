@@ -32,6 +32,8 @@ const proposal = {
 function harness({
   current = proposal,
   disabled = false,
+  run = null,
+  onRestoredRun,
   write = async () => ({ id: "new-run", status: "queued" }),
 } = {}) {
   const state = [],
@@ -42,7 +44,8 @@ function harness({
   const exports = {};
   const model = { current };
   const reads = [],
-    writes = [];
+    writes = [],
+    effects = [];
   const source = readFileSync(new URL("./configuration-repair-plan.tsx", import.meta.url), "utf8");
   new Function(
     "require",
@@ -55,6 +58,9 @@ function harness({
       ({
         react: {
           ...React,
+          useEffect(effect) {
+            effects.push(effect);
+          },
           useState(initial) {
             const i = cursor++;
             if (!(i in state)) state[i] = initial;
@@ -86,6 +92,9 @@ function harness({
           },
           errorMessage: (error) => error.message,
         },
+        "./configuration-plan-result": {
+          ConfigurationPlanResult: ({ run: resultRun }) => React.createElement("p", null, resultRun?.status || ""),
+        },
         "../remote-diagnostics/types": { remoteDiagnosticsBase: "/api/quality-auth/remote-diagnostics/" },
       })[name] ?? require(name),
     exports
@@ -96,18 +105,31 @@ function harness({
     return exports.ConfigurationRepairPlan({
       defectId: "defect-502",
       disabled,
-      onSubmitted(run) {
-        submitted = run;
+      run,
+      onHistory() {},
+      onRestoredRun,
+      onSubmitted(acceptedRun) {
+        submitted = acceptedRun;
       },
     });
   }
   function click(tree, label) {
+    if (label === "配置修复计划") {
+      const details = nodes(tree).find((node) => node.type === "details");
+      assert.ok(details, "native plan disclosure");
+      const summary = nodes(details).find((node) => node.type === "summary");
+      assert.ok(summary && text(summary).includes(label), label);
+      return details.props.onToggle({ currentTarget: { open: !details.props.open } });
+    }
     const button = nodes(tree).find((node) => node.type === "button" && text(node) === label);
     assert.ok(button, label);
     return button.props.onClick();
   }
   return {
     render,
+    runEffects() {
+      effects.splice(0).forEach((effect) => effect());
+    },
     click,
     model,
     reads,
@@ -121,7 +143,11 @@ function harness({
 test("plan is collapsed and never approves from initial render or missing proposal", () => {
   const h = harness();
   const tree = h.render();
-  assert.match(JSON.stringify(tree), /查看修复计划/);
+  const details = nodes(tree).find((node) => node.type === "details");
+  assert.ok(details, "plan uses the same native disclosure as field versions");
+  assert.equal(details.props.open, false);
+  assert.match(text(tree), /配置修复计划/);
+  assert.doesNotMatch(text(tree), /查看修复计划|收起修复计划/);
   assert.doesNotMatch(JSON.stringify(tree), /5\.3065|private-digest|private-source/);
   assert.equal(h.writes.length, 0);
   assert.equal(harness({ current: null }).render(), null);
@@ -129,9 +155,29 @@ test("plan is collapsed and never approves from initial render or missing propos
   assert.doesNotMatch(JSON.stringify(tree), /animate-spin/);
 });
 
+test("plan title row opens and closes the native disclosure without approving", () => {
+  const h = harness();
+  let tree = h.render();
+  let details = nodes(tree).find((node) => node.type === "details");
+  assert.ok(details, "native details gives keyboard Enter/Space disclosure behavior");
+  assert.equal(details.props.open, false);
+  assert.equal(nodes(tree).find((node) => node.type === "summary").props["aria-expanded"], false);
+  h.click(tree, "配置修复计划");
+  tree = h.render();
+  details = nodes(tree).find((node) => node.type === "details");
+  assert.equal(details.props.open, true);
+  assert.equal(nodes(tree).find((node) => node.type === "summary").props["aria-expanded"], true);
+  assert.match(text(tree), /修改前.*修改后/u);
+  h.click(tree, "配置修复计划");
+  tree = h.render();
+  assert.equal(nodes(tree).find((node) => node.type === "details").props.open, false);
+  assert.doesNotMatch(text(tree), /修改前|确认修复/);
+  assert.equal(h.writes.length, 0);
+});
+
 test("expanded plan shows real before/after and requires explicit applicability confirmation", async () => {
   const h = harness();
-  h.click(h.render(), "查看修复计划");
+  h.click(h.render(), "配置修复计划");
   let tree = h.render();
   assert.match(text(tree), /cfys-025@10\.10\.10\.76/);
   assert.match(JSON.stringify(tree), /5\.3065/);
@@ -170,7 +216,7 @@ test("double click cannot submit a second mutation and changed plans require con
         finish = resolve;
       }),
   });
-  h.click(h.render(), "查看修复计划");
+  h.click(h.render(), "配置修复计划");
   nodes(h.render())
     .find((node) => node.type === "input")
     .props.onChange({ target: { checked: true } });
@@ -192,7 +238,7 @@ test("unapproved, expired and busy plans stay reviewable but cannot be submitted
     { disabled: true },
   ]) {
     const h = harness(options);
-    h.click(h.render(), "查看修复计划");
+    h.click(h.render(), "配置修复计划");
     const tree = h.render();
     assert.equal(nodes(tree).find((node) => node.type === "button" && text(node) === "确认修复").props.disabled, true);
     assert.equal(h.writes.length, 0);
@@ -213,7 +259,7 @@ test("plan header gives short pending, expired, update and submitted states with
     assert.equal(h.writes.length, 0);
   }
   const submitted = harness();
-  submitted.click(submitted.render(), "查看修复计划");
+  submitted.click(submitted.render(), "配置修复计划");
   nodes(submitted.render())
     .find((node) => node.type === "input")
     .props.onChange({ target: { checked: true } });
@@ -229,7 +275,7 @@ test("failed submit keeps the plan visible and allows an explicit retry", async 
       return { id: "retry", status: "queued" };
     },
   });
-  h.click(h.render(), "查看修复计划");
+  h.click(h.render(), "配置修复计划");
   nodes(h.render())
     .find((node) => node.type === "input")
     .props.onChange({ target: { checked: true } });
@@ -239,6 +285,18 @@ test("failed submit keeps the plan visible and allows an explicit retry", async 
   await h.click(h.render(), "确认修复");
   assert.equal(h.writes.length, 2);
   assert.equal(h.submitted.id, "retry");
+});
+
+test("submitted repair remains visible when the proposal disappears and follows the parent snapshot", () => {
+  const run = { id: "confirmed-run", status: "running", queue: { stage: "verify" } };
+  const h = harness({ current: null, run });
+  assert.deepEqual(h.render().props.run, run);
+  const restored = harness({
+    current: { ...proposal, submitted_run: { id: "restored", status: "completed", result: { actual_write: false } } },
+  });
+  const result = nodes(restored.render()).find((node) => node.props?.run?.id === "restored");
+  assert.ok(result, "the server-provided run remains directly reachable after refresh");
+  assert.equal(restored.writes.length, 0);
 });
 
 test("backend refusal stays readable and generic fields do not become a joint-only form", () => {
@@ -251,9 +309,32 @@ test("backend refusal stays readable and generic fields do not become a joint-on
       changes: [{ key: "calibration.left[2]", before: 8.5, after: 0.25 }],
     },
   });
-  h.click(h.render(), "查看修复计划");
+  h.click(h.render(), "配置修复计划");
   const tree = h.render();
   assert.match(text(tree), /请先更新 DAQ，再重新诊断/);
   assert.match(text(tree), /calibration.left\[2\]/);
   assert.doesNotMatch(text(tree), /right_arm|5.3065|0.3065/);
+});
+
+test("another operator's submitted summary stays visible without starting their private run poll", () => {
+  const restored = [];
+  const run = {
+    id: "other-run",
+    can_follow: false,
+    status: "completed",
+    result: { actual_write: false, configuration_blocked_reason: "配置已变化。" },
+  };
+  const h = harness({ current: { ...proposal, submitted_run: run }, onRestoredRun: (value) => restored.push(value) });
+  const tree = h.render();
+  h.runEffects();
+  assert.equal(restored.length, 0);
+  assert.ok(nodes(tree).find((node) => node.props?.run?.id === "other-run"));
+  const mine = harness({
+    current: { ...proposal, submitted_run: { ...run, id: "my-run", can_follow: true } },
+    onRestoredRun: (value) => restored.push(value),
+  });
+  mine.render();
+  mine.runEffects();
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].id, "my-run");
 });
