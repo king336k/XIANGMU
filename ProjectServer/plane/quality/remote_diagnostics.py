@@ -386,14 +386,25 @@ class RemoteDirectory(BaseAPIView):
 
 
 class RemoteSession(BaseAPIView):
+    def perform_authentication(self, request):
+        # A terminal already belongs to an authorized owner. Check current
+        # device/project access below rather than reprojecting global memberships
+        # on every input and output frame (the WebSocket path does the same).
+        request.user
+
     def session(self, request, pk):
         session = get_object_or_404(
-            RemoteTerminal.objects.select_related("workstation__agent__project__workspace"),
+            RemoteTerminal.objects,
             pk=pk,
             owner=request.user,
         )
-        RemoteWorkstation.objects.select_for_update(of=("self",)).get(pk=session.workstation_id)
+        station = (
+            RemoteWorkstation.objects.select_for_update(of=("self",))
+            .select_related("agent__project__workspace")
+            .get(pk=session.workstation_id)
+        )
         session.refresh_from_db()
+        session.workstation = station
         if session.workstation.remoteagentrun_set.filter(status="running",expires_at__gt=timezone.now()).exists():
             close_session(session)
         if session.status == "open" and session.last_read_at <= timezone.now()-timedelta(seconds=60):
@@ -509,6 +520,14 @@ class RemoteExchange(BaseAPIView):
         now = timezone.now()
         if not permitted(station.agent.owner, station) or station.credential_expires_at <= now:
             raise AuthenticationFailed("现场连接凭据已失效。")
+        # All decisions use this locked device snapshot and are discarded at
+        # request completion; revocation is checked again on the next exchange.
+        permission_decisions = {station.agent.owner_id: True}
+
+        def allowed(user):
+            if user.pk not in permission_decisions:
+                permission_decisions[user.pk] = permitted(user, station)
+            return permission_decisions[user.pk]
         if len(json.dumps(request.data)) > 1500000:
             raise ValidationError("现场消息超过限制。")
         identity = request.data.get("identity", {})
@@ -543,7 +562,7 @@ class RemoteExchange(BaseAPIView):
             }
         station.save()
         for run in station.remoteagentrun_set.filter(status__in=["queued", "running"]).select_related("owner"):
-            if run.expires_at <= now or run.identity_key != identity_key(station) or not permitted(run.owner, station):
+            if run.expires_at <= now or run.identity_key != identity_key(station) or not allowed(run.owner):
                 invalidate_run(run,"任务现场身份或操作权限已变化。")
         outputs = request.data.get("outputs", [])
         results = request.data.get("results", [])
@@ -638,7 +657,12 @@ class RemoteExchange(BaseAPIView):
             if cutoff:
                 session.events.filter(id__lte=cutoff[0]).delete()
         for session in station.remoteterminal_set.filter(status="open").select_related("owner"):
-            if session.expires_at < now or (now - session.last_read_at).total_seconds() > 60 or not permitted(session.owner, station) or not terminal_target_valid(session,station):
+            if (
+                session.expires_at < now
+                or (now - session.last_read_at).total_seconds() > 60
+                or not allowed(session.owner)
+                or not terminal_target_valid(session, station)
+            ):
                 close_session(session)
         station.commands.filter(status__in=["pending", "delivered"], expires_at__lte=now).update(
             status="expired", payload={}
@@ -663,7 +687,7 @@ class RemoteExchange(BaseAPIView):
         for row in pending:
             if row.payload.get("kind") == "file_browser":
                 job = getattr(row, "file_request", None)
-                if not job or not permitted(job.owner, station) or job.identity_key != identity_key(station):
+                if not job or not allowed(job.owner) or job.identity_key != identity_key(station):
                     row.status = "expired"
                     row.payload = {}
                     row.save(update_fields=["status", "payload"])
