@@ -6,8 +6,6 @@ from urllib.parse import urlsplit
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
-from io import BytesIO
-from django.core.handlers.wsgi import WSGIRequest
 from django.core.serializers.json import DjangoJSONEncoder
 from django.conf import settings
 from django.contrib.auth import get_user
@@ -15,8 +13,9 @@ from importlib import import_module
 from types import SimpleNamespace
 from rest_framework.exceptions import APIException
 from django.http import Http404
+from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
 
-from .remote_diagnostics import RemoteSession
+from .remote_sessions import read_session, change_session
 from .remote_models import RemoteTerminalEvent
 
 
@@ -40,28 +39,13 @@ def session_request(user, pk, action=None, after=0, session_key=None):
     if session_key:
         session = import_module(settings.SESSION_ENGINE).SessionStore(session_key=session_key)
         user = get_user(SimpleNamespace(session=session))
-    raw = json.dumps(action).encode() if action is not None else b""
-    request = WSGIRequest({
-        "REQUEST_METHOD": "GET" if action is None else "POST", "PATH_INFO": "/",
-        "QUERY_STRING": "after=" + str(after), "CONTENT_TYPE": "application/json",
-        "CONTENT_LENGTH": str(len(raw)), "SERVER_NAME": "localhost", "SERVER_PORT": "80",
-        "wsgi.url_scheme": "http", "wsgi.input": BytesIO(raw),
-    })
-    request.user = user
     if not user or not user.is_authenticated or not user.is_active:
         return 403, {"error": "终端登录已失效。"}
-    # Reuse terminal-specific owner/device/target checks, without synchronizing
-    # unrelated workspace memberships for every streamed frame.
-    view = RemoteSession()
-    view.args = ()
-    view.kwargs = {"pk": pk}
-    request = view.initialize_request(request)
-    view.request = request
     try:
-        response = view.get(request, pk) if action is None else view.post(request, pk)
+        result = read_session(user, pk, after) if action is None else change_session(user, pk, action)
     except (APIException, Http404) as error:
         return getattr(error, "status_code", 404), {"error": "终端权限或连接已变化，请重新连接。"}
-    return response.status_code, response.data
+    return result.status_code, result.data
 
 
 @database_sync_to_async
@@ -83,7 +67,7 @@ def publish_fast_output(station_id, outputs):
     from django_redis import get_redis_connection
     from .remote_models import RemoteTerminal
     from .remote_access import permitted
-    from .remote_diagnostics import terminal_target_valid
+    from .remote_sessions import terminal_target_valid
     from django.utils import timezone
     import base64
     if not isinstance(outputs,list)or not outputs or len(outputs)>100:return
@@ -233,17 +217,20 @@ class TerminalConsumer(AsyncJsonWebsocketConsumer):
 
 @database_sync_to_async
 def station_exchange(raw, payload, previous_identity=None, poll_only=False):
-    from .remote_diagnostics import RemoteExchange
-    data = json.dumps(payload).encode()
-    request = WSGIRequest({"REQUEST_METHOD":"POST","PATH_INFO":"/","QUERY_STRING":"",
-        "CONTENT_TYPE":"application/json","CONTENT_LENGTH":str(len(data)),
-        "HTTP_AUTHORIZATION":"Bearer "+raw,"SERVER_NAME":"localhost","SERVER_PORT":"80",
-        "wsgi.url_scheme":"http","wsgi.input":BytesIO(data)})
-    # Internal ASGI metadata, never accepted from an HTTP header or JSON body.
-    request.remote_stream_previous_identity = previous_identity
-    request.remote_stream_poll_only = poll_only
-    response = RemoteExchange.as_view()(request)
-    return response.status_code, response.data
+    from .remote_exchange import authenticate_station, exchange_station
+    try:
+        _, station = authenticate_station(raw)
+        result = exchange_station(station.pk, payload, previous_identity, poll_only)
+        return result.status_code, result.data
+    except (APIException, Http404) as error:
+        detail = getattr(error, "detail", "现场连接不可用。")
+        return getattr(error, "status_code", 404), detail if isinstance(detail, (dict, list)) else {"detail": detail}
+
+    except DjangoValidationError:
+        return 400, {"error": "Please provide valid detail"}
+    except ObjectDoesNotExist:
+        return 404, {"error": "The required object does not exist."}
+
 
 
 @database_sync_to_async
@@ -255,13 +242,9 @@ def pending_station_commands(station_id):
 
 @database_sync_to_async
 def station_identity(raw, include_identity=False):
-    from .remote_diagnostics import WorkstationAuthentication
-    from rest_framework.request import Request
-    request = WSGIRequest({"REQUEST_METHOD":"GET","PATH_INFO":"/","QUERY_STRING":"",
-        "HTTP_AUTHORIZATION":"Bearer "+raw,"SERVER_NAME":"localhost","SERVER_PORT":"80",
-        "wsgi.url_scheme":"http","wsgi.input":BytesIO()})
+    from .remote_exchange import authenticate_station
     try:
-        _, station = WorkstationAuthentication().authenticate(Request(request))
+        _, station = authenticate_station(raw)
         if include_identity:
             return {"id": str(station.id), "identity": {
                 "boot_id": station.boot_id, "hostname": station.hostname, "username": station.username,

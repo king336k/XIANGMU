@@ -5,7 +5,7 @@ from django.db.models.functions import Cast
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers
-from rest_framework.exceptions import APIException, ValidationError
+from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 from rest_framework.response import Response
@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from plane.app.views.base import BaseAPIView
 from plane.db.models import Issue, Project, ProjectMember, WorkspaceMember
 from .models import CaseRevision, Defect, DefectEvent, PlanItem, TestCase, TestExecution, TestPlan, TestSuite
+from .errors import Conflict as Conflict  # Existing imports retain the same business error.
 from .permissions import (
     roles_for,
     has_role,
@@ -48,11 +49,6 @@ def notify_assignment_supervisors(defect, actor):
     receivers = set(managers(defect.project)) - already_notified
     if receivers:
         defect_notice(defect, actor, "新缺陷已分派", receivers=receivers)
-
-
-class Conflict(APIException):
-    status_code = 409
-    default_detail = "数据已变更，请刷新后重试。"
 
 
 class QualityPermission(BasePermission):

@@ -43,7 +43,7 @@ def test_repair_binds_server_feedback_target_and_observed_configuration_revision
         result={'stdout':json.dumps({'configuration':{'target_revision':'b'*64,'snapshot_sha256':'a'*64}})},
         expires_at=run.expires_at)
     response=SimpleNamespace(status='done',result={'ok':True},refresh_from_db=lambda:None)
-    with patch('plane.quality.remote_diagnostics.command',return_value=response)as dispatch:
+    with patch('plane.quality.remote_tool_operations.command',return_value=response)as dispatch:
         result=client.post(BASE+'agent-tool/',{'operation':'run','argv':['daq-local-diagnostics-v1','repair','a'*64],
             'timeout':20,'configuration_target':'forged-target'},format='json')
     assert result.status_code==200,result.content
@@ -54,7 +54,7 @@ def test_repair_binds_server_feedback_target_and_observed_configuration_revision
 
 def test_repair_without_matching_observed_snapshot_is_never_dispatched(target_run):
     client,run=target_run
-    with patch('plane.quality.remote_diagnostics.command')as dispatch:
+    with patch('plane.quality.remote_tool_operations.command')as dispatch:
         result=client.post(BASE+'agent-tool/',{'operation':'run','argv':['daq-local-diagnostics-v1','repair','a'*64]},format='json')
     assert result.status_code==409,result.content
     dispatch.assert_not_called()

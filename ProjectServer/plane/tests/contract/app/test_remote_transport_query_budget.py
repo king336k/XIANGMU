@@ -45,7 +45,7 @@ def test_exchange_reuses_one_owner_permission_decision_within_request_only(remot
     _, edge, _, _ = remote
     from plane.quality.remote_diagnostics import permitted
 
-    with patch("plane.quality.remote_diagnostics.permitted", wraps=permitted) as decision:
+    with patch("plane.quality.remote_exchange.permitted", wraps=permitted) as decision:
         assert heartbeat(edge).status_code == 200
     assert decision.call_count == 2  # Credential validation and locked current-device check.
     row = RemoteTerminal.objects.get(pk=sid)

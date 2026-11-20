@@ -161,7 +161,7 @@ def _clean_text(text,cleaner):
 
 def _redactor(callback):
     if callback is not None:return callback
-    from .diagnostic_materials import redact
+    from .diagnostic_redaction import redact
     return redact
 
 

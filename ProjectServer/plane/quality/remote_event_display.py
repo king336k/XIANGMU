@@ -3,7 +3,7 @@ import re
 import json
 import shlex
 
-from .diagnostic_materials import redact
+from .diagnostic_redaction import redact
 from .remote_models import RemoteAgentRun, RemoteCommand
 
 UUID = re.compile(r'\b[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\b')

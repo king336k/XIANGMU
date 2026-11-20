@@ -339,7 +339,7 @@ class DefectSerializer(AuthoredRecordSerializer):
 
     def get_agent_availability(self, obj):
         if not self.context.get('include_agent_availability'):return None
-        from .remote_diagnostics import defect_agent_availability
+        from .remote_bindings import defect_agent_availability
         return defect_agent_availability(obj)
 
     agent_processing = serializers.SerializerMethodField()

@@ -16,7 +16,7 @@ from plane.knowledge.assistant import provider_config
 from .models import DefectComment, DefectEvent
 from .remote_models import RemoteAgentRun, RemoteWorkstation
 from .remote_access import permitted, identity_key
-from .diagnostic_materials import redact
+from .diagnostic_redaction import redact
 
 
 def finish(run_id, result, status="completed", error=""):
@@ -128,7 +128,8 @@ def remote_repair(self, run_id):
                 "任务已失效",
             )
             return
-        from .remote_diagnostics import run_queue, close_session
+        from .remote_run_state import run_queue
+        from .remote_sessions import close_session
         from .remote_models import RemoteCommand
         for session in run.workstation.remoteterminal_set.filter(status="open", last_read_at__lte=timezone.now()-timedelta(seconds=60)):
             close_session(session)

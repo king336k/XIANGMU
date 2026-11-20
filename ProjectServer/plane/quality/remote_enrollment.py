@@ -19,7 +19,7 @@ from plane.license.models import InstanceConfiguration
 from .models import FieldAgent
 from .remote_models import RemoteWorkstation
 from .remote_access import digest, permitted
-from .views import Conflict
+from .errors import Conflict
 
 
 class EnrollmentInput(serializers.Serializer):

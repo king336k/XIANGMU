@@ -29,7 +29,7 @@ def case_history(run, query):
     """Reuse only owner-visible outcomes, never promote them to published truth."""
     from .remote_models import RemoteAgentRun
     from .remote_access import permitted
-    from .diagnostic_materials import redact
+    from .diagnostic_redaction import redact
     terms = set(re.findall(r'[A-Za-z0-9_-]{2,}|[\u4e00-\u9fff]{2,}', str(query).lower()))
     candidates = RemoteAgentRun.objects.filter(owner=run.owner, workstation__agent__project_id=run.workstation.agent.project_id,
         status__in=['completed','failed']).exclude(pk=run.pk).select_related('workstation__agent__project__workspace').order_by('-created_at')[:100]
@@ -64,7 +64,7 @@ def case_history(run, query):
 
 def knowledge(project, query, run=None):
     from plane.knowledge.retrieval import search
-    from .diagnostic_materials import redact
+    from .diagnostic_redaction import redact
     rows = list(search(project, str(query)[:2000])[:5])
     result = {'source':'project_knowledge', 'query':str(query)[:2000], 'results':[
         {'id':str(row.id), 'title':redact(row.title), 'version':row.version, 'content':redact(row.content)[:12000],
@@ -196,7 +196,7 @@ def fetch_bytes(url, source):
 
 
 def read_source(project_id, source_id, path, operation='read_source', query=None, offset=0):
-    from .diagnostic_materials import redact
+    from .diagnostic_redaction import redact
     snapshot_root = os.environ.get('QUALITY_REMOTE_SOURCE_SNAPSHOTS_ROOT')
     if snapshot_root:
         from .remote_source_snapshots import catalog, read
@@ -252,7 +252,7 @@ def _view():
     from rest_framework.response import Response
     from rest_framework import serializers
     from plane.app.views.base import BaseAPIView
-    from .remote_diagnostics import ToolAuthentication
+    from .remote_auth import ToolAuthentication
 
     class ResearchView(BaseAPIView):
         authentication_classes = [ToolAuthentication]

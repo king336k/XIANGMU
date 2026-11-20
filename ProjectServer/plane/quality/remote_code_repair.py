@@ -63,7 +63,7 @@ def _clean(value,secrets=()):
         for secret in secrets:
             if secret:raw=raw.replace(secret,'[REDACTED]')
         try:
-            from .diagnostic_materials import redact
+            from .diagnostic_redaction import redact
             return redact(raw)
         except (ImportError,ValueError):
             return re.sub(r'(?i)(api[_-]?key|password|token|authorization)(\s*[:=]\s*)([^\s,]+)',r'\1\2[REDACTED]',raw)

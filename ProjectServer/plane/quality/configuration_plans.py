@@ -15,9 +15,11 @@ from rest_framework.response import Response
 
 from plane.app.views.base import BaseAPIView
 from .models import Defect, DefectEvent
-from .remote_diagnostics import browser_boundary, daq_binding, feedback_for, identity_key, online, permitted, run_queue
+from .remote_access import browser_boundary, identity_key, online, permitted
+from .remote_bindings import daq_binding, feedback_for
+from .remote_run_state import run_queue
 from .remote_models import RemoteAgentRun, RemoteWorkstation
-from .views import Conflict
+from .errors import Conflict
 
 PROTOCOL = 'robot-config-repair-approval-v1'
 FIELD = re.compile(r'^initial_joint_states\.[A-Za-z0-9_-]{1,80}(?:\[[0-9]{1,3}\])?$')
@@ -206,7 +208,7 @@ class ConfigurationPlans(BaseAPIView):
 
 def execute_step(run_id, action, approval=None):
     """Use the existing serialized, expiring field-command transport."""
-    from .remote_diagnostics import command
+    from .remote_commands import command
 
     with transaction.atomic():
         station_id = RemoteAgentRun.objects.values_list('workstation_id', flat=True).get(pk=run_id)

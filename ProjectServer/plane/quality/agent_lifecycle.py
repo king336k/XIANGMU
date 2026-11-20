@@ -6,7 +6,7 @@ from django.db import transaction
 from django.db.models import Exists, OuterRef, Prefetch, Q, prefetch_related_objects
 from django.utils import timezone
 
-from .diagnostic_materials import redact
+from .diagnostic_redaction import redact
 from .models import Defect, DefectEvent
 from .remote_models import RemoteAgentRun, RemoteCommand
 
@@ -211,7 +211,7 @@ def processing(run):
     if run.status in {'queued','running'} and run.expires_at<=now:state='interrupted'
     elif run.status=='queued':state='queued'
     elif run.status=='running':
-        from .remote_diagnostics import run_queue
+        from .remote_run_state import run_queue
         state=run_queue(run)['stage']
     else:state=terminal_state(run)
     commands=getattr(run,'_processing_commands',[])
