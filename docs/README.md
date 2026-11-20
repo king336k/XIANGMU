@@ -21,6 +21,7 @@
 
 ## 设计与追溯
 
+- [平台架构、性能与 Java 评估](design/2026-11-20-platform-architecture-performance.md)
 - [质量管理设计](design/quality-design.md)
 - [迁移设计](design/migration-design.md)
 - [全局菜单与页面结构](design/全局菜单与页面结构.md)
