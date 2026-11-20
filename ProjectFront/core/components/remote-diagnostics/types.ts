@@ -149,9 +149,9 @@ export function deviceApplicationSummary(device: RemoteDevice) {
         : "版本未读取",
     web:
       !device.online || typeof application?.web_ready !== "boolean"
-        ? "网页状态未知"
+        ? "启动状态未知"
         : application.web_ready
-          ? "网页已启动"
-          : "网页未启动",
+          ? "遥操DAQ已启动"
+          : "遥操DAQ未启动",
   };
 }

@@ -717,12 +717,12 @@ test("computer cards use three factual lines for identity application version an
       { version: "1.4.2", revision, web_ready: true, observed_at: "2026-11-20T00:00:00Z" },
       true,
       "遥操 DAQ · v1.4.2",
-      "网页已启动",
+      "遥操DAQ已启动",
     ],
-    [{ version: "v1.4.2", revision, web_ready: false, observed_at: "now" }, true, "遥操 DAQ · v1.4.2", "网页未启动"],
-    [{ version: null, revision, web_ready: null, observed_at: "now" }, true, "遥操 DAQ · aaaaaaa", "网页状态未知"],
-    [{ version: "1.4.2", revision, web_ready: true, observed_at: "now" }, false, "遥操 DAQ · v1.4.2", "网页状态未知"],
-    [undefined, true, "版本未读取", "网页状态未知"],
+    [{ version: "v1.4.2", revision, web_ready: false, observed_at: "now" }, true, "遥操 DAQ · v1.4.2", "遥操DAQ未启动"],
+    [{ version: null, revision, web_ready: null, observed_at: "now" }, true, "遥操 DAQ · aaaaaaa", "启动状态未知"],
+    [{ version: "1.4.2", revision, web_ready: true, observed_at: "now" }, false, "遥操 DAQ · v1.4.2", "启动状态未知"],
+    [undefined, true, "版本未读取", "启动状态未知"],
   ]) {
     const { tree } = renderRoot([{ ...device, online, capabilities: application ? { application } : {} }]);
     const card = nodes(tree).find((node) => node.type === "button" && node.props["aria-pressed"] === false);
@@ -734,6 +734,6 @@ test("computer cards use three factual lines for identity application version an
     assert.equal(nodes(card).filter((node) => node.type === "p").length, 2);
     assert.doesNotMatch(html, /robot-01|现场电脑/);
     assert.doesNotMatch(html, new RegExp(revision));
-    if (!online) assert.doesNotMatch(html, /网页已启动/);
+    if (!online) assert.doesNotMatch(html, /遥操DAQ已启动/);
   }
 });
