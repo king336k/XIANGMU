@@ -127,6 +127,12 @@ def safe_output(value,depth=0):
         cleaned=re.sub(r'(?im)^([^\n:=]*(?:password|passwd|token|secret|api[_-]?key)[^\n:=]*[:=])[^\n]*',r'\1[已隐藏]',cleaned)
         lines=[]
         for line in cleaned.splitlines():
+            # A missing credential file is a readiness error, not its contents.
+            # Match the complete ENOENT shape before removing the private path;
+            # credential assignments/commands still follow normal redaction.
+            if re.fullmatch(r'''\[Errno 2\] No such file or directory: (['"])/[^\r\n'"<>]*?/remote-diagnostics/local-api-token\1''', line):
+                lines.append('本机诊断接口未就绪：诊断凭据文件缺失，请重新启动 DAQ 后重试。')
+                continue
             if re.search(r'(?i)(?:sshpass|--?\S*(?:password|passwd|token|secret|api[_-]?key)|\bmysql\b)',line):
                 # Shell xtrace may omit key=value syntax; never publish credential-bearing command lines.
                 lines.append('[含凭据的命令输出已隐藏]')
