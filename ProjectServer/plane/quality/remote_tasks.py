@@ -42,6 +42,9 @@ def finish(run_id, result, status="completed", error=""):
             'defect_state_version':run.result.get('defect_state_version'),'queued_at':run.created_at.timestamp(),
             'worker_started_at':run.started_at.timestamp() if run.started_at else None,
             'worker_completed_at':run.completed_at.timestamp(),'worker_queue':'field-repairs'}
+        for key in ('configuration_plan_digest', 'configuration_approval_source_run_id', 'configuration_approval'):
+            if key in run.result:
+                result[key] = run.result[key]
         from .agent_lifecycle import limited_verification_scope, configuration_receipts
         configuration = configuration_receipts(run)
         scope = limited_verification_scope(run, result) or configuration['scope']
@@ -155,6 +158,10 @@ def remote_repair(self, run_id):
     if busy:
         # Release the station lock and worker slot while the device is occupied.
         raise self.retry(countdown=3)
+    if run.result.get('configuration_approval'):
+        from .configuration_plans import execute_confirmed
+        execute_confirmed(run)
+        return
     try:
         config = provider_config(run.defect.project.workspace_id)
         if not config.get("configured"):

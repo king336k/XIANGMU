@@ -55,7 +55,7 @@ class Report(BaseModel):
     brief_report: str = Field(default="", max_length=220, description="新报告主文：故障/已处理/待验证三短句，通常100-180字；不写内部ID/hash或字段解释。")
     summary: str = Field(max_length=5000, description="原失败操作直接环节与当前处理，通常一至两句；内部ID/字段解释留结构化追踪。")
     evidence_details: str = Field(default="", max_length=10000, description="新报告仅2-4条关键原始日志/源码依据，目标800字以内；不重写取证过程或输出UUID/hash/tool引用编号。")
-    root_cause: str = Field(max_length=5000)
+    root_cause: str = Field(max_length=5000, description="已证实的失败环节及依据；配置问题写实际配置键或数组索引，不用中文部位名代替可定位字段。")
     actions: list[str] = Field(max_length=15)
     verification: list[str] = Field(max_length=15)
     solution: str = Field(max_length=8000)
@@ -551,6 +551,7 @@ context.feedback 是关联原缺陷的标题/描述/编号，应结合它定位�
 root_cause用一句写已确认原因，未确认只说一次最关键缺项；actions最多4条，每条描述实际业务操作，不重复框架名称或inspect_argv/purpose等内部术语。
 verification最多4条，先说原故障是否恢复及实际检查结果；哈希和各专家原始输出保留在详细证据，不反复复制。
 修复定位信息由真实repair_locations和变化明细完整保留，必要细节可放evidence_details；actions只简述目标、配置项/函数和实际处理，不反复复制完整路径或hash。没有可靠行号则用配置键或函数，不猜行号。
+配置故障的root_cause至少写一次实际读取到的配置键（数组问题写实际组或索引），配合简短中文说明；不要仅写“头部/手臂配置错误”而让开发者无法定位。不抄工具内部ID或未读字段。
 repair_locations仅填现场工具已经返回的真实位置与变化，可包含target、path、line、key、before、after、backup；不能凭历史或模型猜测。
 actions和verification最终由工具执行回执生成，不接受模型自述为已执行事实；处理建议放solution，原因分析放root_cause。summary/root_cause/solution中的明确路径:行号必须实际出现在本轮读取或执行回执中，否则保留待定位，不编造地址。
 若缺配置文件，说明文件名、完整目标目录、模板来源和必要内容；若缺Python包/系统依赖，说明目标主机或容器、解释器/虚拟环境、包名版本、实际安装命令和校验结果；若是服务或调用链，说明调用方、目标服务、接口端口及失败证据。

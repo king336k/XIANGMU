@@ -94,6 +94,7 @@ function actions(run, write = async () => ({ id: "run", status: "queued" }), res
       },
     },
     "./api": { qualityApi: { write }, errorMessage: (error) => error.message },
+    "./configuration-repair-plan": { ConfigurationRepairPlan: () => null },
     "../remote-diagnostics/types": types,
   });
   return {
@@ -206,6 +207,55 @@ test("completion label claims repair and retest only when both actual evidence f
     "处理完成"
   );
   assert.equal(types.agentRunStatusLabel({ status: "completed", result: { repaired: true } }), "处理完成");
+  assert.equal(
+    types.agentRunStatusLabel({
+      status: "completed",
+      result: { configuration_repaired: true, configuration_verified: true, needs_business_verification: true },
+    }),
+    "配置已修复，待业务验证"
+  );
+  assert.equal(
+    types.agentRunShortLabel({
+      status: "completed",
+      result: { configuration_repaired: true, configuration_verified: true, needs_business_verification: true },
+    }),
+    "待验证"
+  );
+  assert.equal(
+    types.agentRunStatusLabel({
+      status: "completed",
+      result: { configuration_verified: true, needs_business_verification: true },
+    }),
+    "配置已通过，待业务验证"
+  );
+  assert.equal(
+    types.agentRunShortLabel({
+      status: "completed",
+      result: { configuration_verified: true, needs_business_verification: true },
+    }),
+    "待验证"
+  );
+  assert.equal(
+    types.agentRunShortLabel({
+      status: "completed",
+      result: {
+        repaired: true,
+        verification_passed: true,
+        business_verified: true,
+        configuration_repaired: true,
+        configuration_verified: true,
+        needs_business_verification: true,
+      },
+    }),
+    "已修复"
+  );
+  assert.equal(
+    types.agentRunShortLabel({
+      status: "completed",
+      result: { configuration_repaired: true, configuration_verified: false, needs_business_verification: true },
+    }),
+    "未解决"
+  );
 });
 
 test("device panel polls real queued stage through repair to completion and then stops", async () => {

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { RotateCw } from "lucide-react";
 import { qualityApi, errorMessage } from "./api";
+import { ConfigurationRepairPlan } from "./configuration-repair-plan";
 import {
   agentRunShortLabel,
   agentRunStatusLabel,
@@ -175,6 +176,29 @@ export function AgentFeedbackActions({
           </span>
         )}
       </div>
+      {active && sourceBound && selected && bindingReady && !verifyOnly && (
+        <ConfigurationRepairPlan
+          key={defectId}
+          defectId={defectId}
+          disabled={busy || !available}
+          onSubmitting={() => {
+            if (submitting.current || busy || !available) return false;
+            submitting.current = true;
+            setStarting(true);
+            return true;
+          }}
+          onSettled={(accepted) => {
+            setStarting(false);
+            if (!accepted) submitting.current = false;
+          }}
+          onSubmitted={(next) => {
+            submitting.current = true;
+            setSubmittedRun(next);
+            setRunId(next.id);
+            onStarted?.();
+          }}
+        />
+      )}
       <p className="text-11 text-secondary">
         {run && busy ? agentRunStatusLabel(run) : "同一任务完成排查、授权修复与复测；只读操作不修改现场。"}
       </p>

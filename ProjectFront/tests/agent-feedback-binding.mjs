@@ -22,6 +22,7 @@ const nodes = (tree) =>
       : [tree, ...nodes(tree.props?.children)];
 const original = { id: "original", username: "original-user", ip_address: "10.0.0.199", online: true };
 const unrelated = { id: "wrong", username: "wrong-user", ip_address: "10.0.0.195", online: true };
+const ConfigurationRepairPlan = () => null;
 function actions(data, selectedId = "wrong") {
   const exports = {},
     writes = [],
@@ -53,6 +54,7 @@ function actions(data, selectedId = "wrong") {
         errorMessage: String,
       };
     if (id === "../remote-diagnostics/types") return types;
+    if (id === "./configuration-repair-plan") return { ConfigurationRepairPlan };
     return require(id);
   }, exports);
   const tree = exports.AgentFeedbackActions({ defectId: "D494", active: true, onCompleted() {}, onHistory() {} });
@@ -71,6 +73,26 @@ test("DAQ source fixes the original station and ignores stale selection or malic
     .props.onClick();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(writes[0].device_id, original.id);
+});
+
+test("approved plan and existing actions share the in-flight guard and release it only on rejection", () => {
+  const { tree, writes } = actions({
+    binding: { kind: "daq", state: "matched", device_id: original.id },
+    results: [original],
+  });
+  const plan = nodes(tree).find((node) => node.type === ConfigurationRepairPlan);
+  assert.ok(plan);
+  assert.equal(plan.props.defectId, "D494");
+  assert.equal(plan.props.onSubmitting(), true);
+  assert.equal(plan.props.onSubmitting(), false);
+  const inspect = nodes(tree).find((node) => node.type === "button" && node.props.children === "重新诊断");
+  inspect.props.onClick();
+  assert.equal(writes.length, 0);
+  plan.props.onSettled(false);
+  assert.equal(plan.props.onSubmitting(), true);
+  plan.props.onSubmitted({ id: "approved-plan-run", status: "queued" });
+  plan.props.onSettled(true);
+  assert.equal(plan.props.onSubmitting(), false);
 });
 test("original offline missing or conflict never falls back to an online unrelated station", () => {
   for (const [state, device, expected] of [

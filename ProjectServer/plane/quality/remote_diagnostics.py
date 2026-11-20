@@ -491,11 +491,30 @@ class RemoteExchange(BaseAPIView):
 
         previous_executor = executor_instance(station.capabilities)
         current_executor = executor_instance(capabilities)
+        previous_identity = getattr(request._request, "remote_stream_previous_identity", None)
+        poll_only = getattr(request._request, "remote_stream_poll_only", False)
+        if previous_identity is not None:
+            def matches_current(candidate):
+                return (
+                    candidate.get("boot_id", "") == station.boot_id
+                    and candidate.get("hostname", "") == station.hostname
+                    and candidate.get("username", "") == station.username
+                    and executor_instance(candidate.get("capabilities")) == previous_executor
+                )
+            if not matches_current(previous_identity) and not matches_current(identity):
+                return Response({"error": "旧执行端连接已被替换。"}, status=409)
+        if poll_only:
+            # A server command poll is not a new workstation observation.
+            if not online(station):
+                return Response({"error": "执行端心跳已中断。"}, status=409)
+            identity = {"boot_id": station.boot_id, "hostname": station.hostname, "username": station.username}
+            capabilities = station.capabilities
+            current_executor = previous_executor
         executor_changed = capabilities is not None and previous_executor != current_executor and bool(
             previous_executor or current_executor
         )
         boot = str(identity.get("boot_id", ""))[:120]
-        interrupted = (
+        interrupted = not poll_only and (
             station.boot_id
             and station.boot_id != boot
             or station.last_seen_at
@@ -511,17 +530,18 @@ class RemoteExchange(BaseAPIView):
                 close_session(session)
             fail_runs(station, "现场连接身份已变化，旧任务已停止。")
             station.commands.filter(status__in=["pending", "delivered"], run__isnull=False).update(status="expired", payload={})
-        station.username = str(identity.get("username", ""))[:120]
-        station.hostname = str(identity.get("hostname", ""))[:200]
-        station.boot_id = boot
-        station.last_seen_at = now
-        if capabilities is not None:
-            from .remote_profiles import daq_profile
-            station.capabilities = {
-                **capabilities,
-                "agent_context": daq_profile(station.capabilities.get("agent_context", {}), capabilities),
-            }
-        station.save()
+        if not poll_only:
+            station.username = str(identity.get("username", ""))[:120]
+            station.hostname = str(identity.get("hostname", ""))[:200]
+            station.boot_id = boot
+            station.last_seen_at = now
+            if capabilities is not None:
+                from .remote_profiles import daq_profile
+                station.capabilities = {
+                    **capabilities,
+                    "agent_context": daq_profile(station.capabilities.get("agent_context", {}), capabilities),
+                }
+            station.save()
         for run in station.remoteagentrun_set.filter(status__in=["queued", "running"]).select_related("owner"):
             if run.expires_at <= now or run.identity_key != identity_key(station) or not allowed(run.owner):
                 invalidate_run(run,"任务现场身份或操作权限已变化。")
