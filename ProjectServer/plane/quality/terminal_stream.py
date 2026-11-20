@@ -20,6 +20,21 @@ from .remote_diagnostics import RemoteSession
 from .remote_models import RemoteTerminalEvent
 
 
+# Keep sequence allocation and bounded append atomic across API workers.
+# https://redis.io/docs/latest/develop/programmability/eval-intro/
+_APPEND_FAST_OUTPUT = """
+for _, raw in ipairs(ARGV) do
+    local event = cjson.decode(raw)
+    event.fast_seq = redis.call('INCR', KEYS[2])
+    redis.call('RPUSH', KEYS[1], cjson.encode(event))
+end
+redis.call('LTRIM', KEYS[1], -8, -1)
+redis.call('EXPIRE', KEYS[1], 60)
+redis.call('EXPIRE', KEYS[2], 120)
+return #ARGV
+"""
+
+
 @database_sync_to_async
 def session_request(user, pk, action=None, after=0, session_key=None):
     if session_key:
@@ -70,28 +85,34 @@ def publish_fast_output(station_id, outputs):
     from .remote_diagnostics import permitted, terminal_target_valid
     from django.utils import timezone
     import base64
-    if not isinstance(outputs,list)or len(outputs)>100:return
+    if not isinstance(outputs,list)or not outputs or len(outputs)>100:return
     try:client=get_redis_connection('default')
     except Exception:return
     sessions={str(row.id):row for row in RemoteTerminal.objects.filter(workstation_id=station_id,status='open',expires_at__gt=timezone.now()).select_related('owner','workstation__agent__project__workspace')}
-    valid=[]
+    valid={}
+    authorized={}
     for event in outputs:
         if not isinstance(event,dict):return
         session=sessions.get(str(event.get('session_id')))
         if not session or event.get('kind')!='data':continue
-        if not permitted(session.owner,session.workstation)or not terminal_target_valid(session,session.workstation):continue
+        # This local decision never survives into another batch or another session.
+        if session.id not in authorized:
+            authorized[session.id] = (
+                permitted(session.owner,session.workstation) and terminal_target_valid(session,session.workstation)
+            )
+        if not authorized[session.id]:continue
         try:raw=base64.b64decode(event.get('data',''),validate=True)
         except Exception:continue
         source=event.get('id')
         if len(raw)>65536 or not isinstance(source,str)or not 1<=len(source)<=80:continue
-        valid.append((str(session.id),{'source_id':source,'data':event['data']}))
+        valid.setdefault(str(session.id), []).append(json.dumps({'source_id':source,'data':event['data']}))
+    if not valid:
+        return
     try:
-        with client.pipeline()as pipe:
-            for sid,event in valid:
+        with client.pipeline(transaction=False)as pipe:
+            for sid, events in valid.items():
                 key='remote:terminal-output:'+sid
-                event['fast_seq']=client.incr(key+':seq')
-                pipe.expire(key+':seq',120)
-                pipe.rpush(key,json.dumps(event));pipe.ltrim(key,-8,-1);pipe.expire(key,60)
+                pipe.eval(_APPEND_FAST_OUTPUT, 2, key, key+':seq', *events)
             pipe.execute()
     except Exception:pass
 
