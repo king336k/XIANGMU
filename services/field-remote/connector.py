@@ -33,6 +33,8 @@ MAX_FILE = 128 * 1024
 MAX_OUTPUT = 64 * 1024
 MAX_PENDING = 512 * 1024
 TOKEN_ENV = 'FIELD_REMOTE_TOKEN'
+# Transient process generation, separate from the persistent machine identity.
+EXECUTOR_INSTANCE = uuid.uuid4().hex
 
 
 def safe_environment(preserve_sim=False):
@@ -702,7 +704,8 @@ def identity(policy=None, server_url=None):
         result['capabilities'] = {
             'network': {'ip_address': result['host_ip']},
             'terminal': {'ready': Path('/bin/bash').is_file() and Path('/usr/bin/python3').is_file(),
-                         'backend': 'host-pty', 'max_sessions': 2, 'max_input_bytes': 4096},
+                         'backend': 'host-pty', 'max_sessions': 2, 'max_input_bytes': 4096,
+                         'executor_instance': EXECUTOR_INSTANCE},
             'file_browser': {'ready': policy.file_browser_enabled, 'read_only': True, 'max_bytes': 256 * 1024 * 1024},
             'tools': {'ready': bool(policy.allowed), 'approved_root': str(policy.root),
                       'allowed_commands': policy.allowed, 'file_patch': True,

@@ -533,6 +533,19 @@ class RemoteExchange(BaseAPIView):
         identity = request.data.get("identity", {})
         if not isinstance(identity, dict):
             raise ValidationError("电脑身份无效。")
+        capabilities = identity.get("capabilities", {})
+        if not isinstance(capabilities, dict) or len(json.dumps(capabilities)) >= 16000:
+            capabilities = None
+        def executor_instance(value):
+            terminal = value.get("terminal", {}) if isinstance(value, dict) else {}
+            instance = terminal.get("executor_instance") if isinstance(terminal, dict) else None
+            return instance if isinstance(instance, str) and re.fullmatch(r"[a-f0-9]{32}", instance) else None
+
+        previous_executor = executor_instance(station.capabilities)
+        current_executor = executor_instance(capabilities)
+        executor_changed = capabilities is not None and previous_executor != current_executor and bool(
+            previous_executor or current_executor
+        )
         boot = str(identity.get("boot_id", ""))[:120]
         interrupted = (
             station.boot_id
@@ -542,6 +555,7 @@ class RemoteExchange(BaseAPIView):
             or bool(station.last_seen_at) and (
                 station.hostname != str(identity.get("hostname", ""))[:200]
                 or station.username != str(identity.get("username", ""))[:120]
+                or executor_changed
             )
         )
         if interrupted:
@@ -553,8 +567,7 @@ class RemoteExchange(BaseAPIView):
         station.hostname = str(identity.get("hostname", ""))[:200]
         station.boot_id = boot
         station.last_seen_at = now
-        capabilities = identity.get("capabilities", {})
-        if isinstance(capabilities, dict) and len(json.dumps(capabilities)) < 16000:
+        if capabilities is not None:
             from .remote_profiles import daq_profile
             station.capabilities = {
                 **capabilities,

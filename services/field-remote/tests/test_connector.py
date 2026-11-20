@@ -28,6 +28,17 @@ ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
 
 class ConnectorTests(unittest.TestCase):
+    def test_executor_generation_is_stable_per_process_and_distinct_from_boot(self):
+        with patch('connector.EXECUTOR_INSTANCE', 'a' * 32):
+            first = identity(self.policy)
+            second = identity(self.policy)
+        self.assertEqual(first['capabilities']['terminal']['executor_instance'], 'a' * 32)
+        self.assertEqual(second['capabilities']['terminal']['executor_instance'], 'a' * 32)
+        with patch('connector.EXECUTOR_INSTANCE', 'b' * 32):
+            restarted = identity(self.policy)
+        self.assertEqual(restarted['capabilities']['terminal']['executor_instance'], 'b' * 32)
+        self.assertEqual(first['boot_id'], restarted['boot_id'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=ARTIFACTS)
         self.root = Path(self.temp.name)
