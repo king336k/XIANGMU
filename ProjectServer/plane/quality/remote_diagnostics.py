@@ -1,14 +1,12 @@
 """Authorized outbound workstation relay. PTYs and tools execute only on the workstation."""
 
 import base64
-import hashlib
 import json
 import re
 import secrets
 import time
 import uuid
 from datetime import timedelta
-from urllib.parse import urlsplit
 
 from django.db import transaction
 from django.db.models import Q, Prefetch, OuterRef, Subquery, Case, When, Value, CharField, Count
@@ -22,7 +20,7 @@ from rest_framework.response import Response
 from plane.app.views.base import BaseAPIView
 from plane.db.models import Project
 from .models import FieldAgent, Defect, DefectEvent
-from .permissions import is_administrator, writable_member, has_role
+from .permissions import is_administrator, writable_member
 from .remote_models import (
     RemoteWorkstation,
     RemoteTerminal,
@@ -31,37 +29,8 @@ from .remote_models import (
     RemoteAgentRun,
 )
 from .views import Conflict
-
-
-def digest(value):
-    return hashlib.sha256(value.encode()).hexdigest()
-
-
-def permitted(user, station):
-    project = station.agent.project
-    return bool(
-        user.is_authenticated
-        and user.is_active
-        and station.enabled
-        and station.agent.enabled
-        and writable_member(project.id, user.id, project.workspace.slug)
-        and (
-            is_administrator(user)
-            or station.agent.owner_id == user.id
-            and has_role(project.id, user.id, "TECHNICIAN")
-        )
-    )
-
-
-def online(station):
-    return bool(station.last_seen_at and (timezone.now() - station.last_seen_at).total_seconds() < 20)
-
-
-def identity_key(station):
-    robot=station.capabilities.get('robot',{})
-    peer=[robot.get('username'),robot.get('host'),robot.get('target_revision')] if isinstance(robot,dict) and robot.get('connected') is True else None
-    # DHCP/DAQ versions are metadata. A robot switch changes the execution target.
-    return digest(json.dumps([str(station.pk), station.boot_id, station.hostname, station.username,peer], ensure_ascii=False))
+# Compatibility exports for existing callers of this HTTP module.
+from .remote_access import browser_boundary, digest, identity_key, online, permitted, station_for
 
 
 def robot_target(station):
@@ -179,27 +148,6 @@ def invalidate_run(run, reason):
 def fail_runs(station, reason):
     for run in station.remoteagentrun_set.filter(status__in=['queued','running']):
         invalidate_run(run, reason)
-
-
-def station_for(user, pk):
-    value = get_object_or_404(RemoteWorkstation.objects.select_related("agent__project__workspace"), pk=pk)
-    if not permitted(user, value):
-        raise PermissionDenied("没有这台采集电脑的远程操作权限。")
-    return value
-
-
-def browser_boundary(request):
-    if request.method in {"GET", "HEAD", "OPTIONS"}:
-        return
-    if not request.content_type.startswith("application/json"):
-        raise ValidationError("仅接受JSON请求。")
-    origin = request.headers.get("Origin")
-    if origin and (
-        urlsplit(origin).netloc != request.get_host() or urlsplit(origin).scheme not in {"http", "https"}
-    ):
-        raise PermissionDenied("请求来源不匹配。")
-    if request.headers.get("Sec-Fetch-Site") in {"cross-site", "same-site"}:
-        raise PermissionDenied("请求来源不匹配。")
 
 
 def command(station, payload, session=None, run=None, lifetime=35):

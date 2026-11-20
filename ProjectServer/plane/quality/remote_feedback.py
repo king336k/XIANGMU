@@ -7,7 +7,7 @@ from django.utils import timezone
 from .models import SourceLink, DefectEvent
 from .daq_reporting import signed_record
 from .remote_models import RemoteWorkstation, RemoteFeedbackBinding, RemoteAgentRun
-from .remote_diagnostics import online, permitted, identity_key
+from .remote_access import online, permitted, identity_key
 
 
 def blocked_followup(defect_id,station,reason):

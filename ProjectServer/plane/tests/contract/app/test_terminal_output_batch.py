@@ -60,10 +60,10 @@ def test_cache_remains_bounded_and_expires_without_touching_durable_history(term
 
 def test_batch_reuses_only_its_current_session_authorization(terminal):
     from plane.db.models import ProjectMember
-    from plane.quality.remote_diagnostics import permitted
+    from plane.quality.remote_access import permitted
 
     row, _ = terminal
-    with patch('plane.quality.remote_diagnostics.permitted', wraps=permitted) as decision:
+    with patch('plane.quality.remote_access.permitted', wraps=permitted) as decision:
         asyncio.run(publish_fast_output(row.workstation_id, events(row, 100)))
     assert decision.call_count == 1, 'same session rechecks identical membership per output'
     ProjectMember.objects.filter(project_id=row.workstation.agent.project_id, member=row.owner).update(is_active=False)

@@ -111,7 +111,7 @@ def select_reviews(rows, *, defect_id, sources=None):
 def field_workstation_context(field_run, *, source_link=None, signed_source=None, manual_binding=False):
     """A signed stable device UUID and the current execution identity answer different questions."""
     from uuid import UUID
-    from .remote_diagnostics import identity_key
+    from .remote_access import identity_key
 
     station = field_run.workstation
     workstation_id = str(field_run.workstation_id)

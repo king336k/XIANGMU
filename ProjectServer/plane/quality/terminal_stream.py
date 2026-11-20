@@ -82,7 +82,8 @@ def fast_output(pk):
 def publish_fast_output(station_id, outputs):
     from django_redis import get_redis_connection
     from .remote_models import RemoteTerminal
-    from .remote_diagnostics import permitted, terminal_target_valid
+    from .remote_access import permitted
+    from .remote_diagnostics import terminal_target_valid
     from django.utils import timezone
     import base64
     if not isinstance(outputs,list)or not outputs or len(outputs)>100:return

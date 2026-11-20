@@ -28,7 +28,7 @@ OFFICIAL = {
 def case_history(run, query):
     """Reuse only owner-visible outcomes, never promote them to published truth."""
     from .remote_models import RemoteAgentRun
-    from .remote_diagnostics import permitted
+    from .remote_access import permitted
     from .diagnostic_materials import redact
     terms = set(re.findall(r'[A-Za-z0-9_-]{2,}|[\u4e00-\u9fff]{2,}', str(query).lower()))
     candidates = RemoteAgentRun.objects.filter(owner=run.owner, workstation__agent__project_id=run.workstation.agent.project_id,

@@ -108,6 +108,20 @@ Go/Java 需要共同覆盖冷/热启动、稳定负载和混合峰值，不只�
 
 原始调研、错误与性能样本保存在本机 `/home/engram/Documents/tmp/artifacts/platform-architecture-research-20261120/`。第三方 HTTP 404 和浏览器启动失败均保留记录，已用实际可用源码入口核对依赖；不把工具失败算平台缺陷。
 
+## 第二批改动：共享设备访问策略边界
+
+在同一 Python 进程内抽出 [remote_access.py](../../ProjectServer/plane/quality/remote_access.py)，统一设备权限、身份指纹、在线判断、设备查找和浏览器写入来源校验。目录/会话/交换等 HTTP 入口继续留在 `remote_diagnostics.py`；文件、自动接入、Agent 任务/反馈/研究、诊断上下文和终端快速输出直接依赖公共策略，减少对视图模块的反向依赖。
+
+本轮只建立这个边界，没有完成全部会话应用逻辑拆分。`remote_diagnostics.py` 保留原函数名的导入兼容，既有 HTTP/WS 路由、错误、事务、授权重查、缓存范围和序号协议保持。六个提取函数与提取前提交 `b9a1ff8` 的 AST 一致；代码换行不影响身份哈希的 JSON 顺序、分隔符或编码。未新增服务、依赖或数据库迁移，不作性能提升声明。
+
+新增 [设备访问合同](../../ProjectServer/plane/tests/contract/app/test_remote_access.py) 23 项，覆盖管理员也必须具有当前项目/空间成员资格、归属技术员、设备/Agent/账户禁用、归档、身份指纹、20秒在线边界及 JSON/同源限制。独立解释器在禁止加载远程 HTTP 视图模块时仍可导入公共策略，防止重新引入反向依赖。
+
+验证使用独立 PostgreSQL 15.7、Redis 8 和已有 Python 3.12/Django 5.2 测试镜像。新合同先因模块不存在失败，再与查询预算/批处理合同一起 35 项通过；扩大到终端、站点 WS、目录、接入、文件、队列及诊断上下文后 114 项通过、2 项按既有显式启用条件跳过（混合负载 broker、DAQ 源码挂载）。临时容器覆盖层绕过成员校验后，3 项撤权/归档测试如期失败，未修改工作树的授权策略。Django system check、Python 语法、Ruff 新文件检查及差异检查通过。
+
+完整后端 `pytest` 实际执行 2882 项：2867 通过、5 跳过、9 失败、1 错误（628.91秒），不能声明全套通过。全部9失败和1错误已用提取前 `b9a1ff8` 源码覆盖层在同一隔离环境复现：分诊2项、成员上报1项、管理员继承1项、角色变更1项、验证范围4项；另有业务文件 `plane/quality/test_resources.py::test_scheduler` 被收集为测试后缺少 `project_id` fixture。未修改这些不相关代码或放宽断言。真实ZIP和种子挂载、测试URL、broker及附件目录的初期环境失败已单独保留日志，最终统计来自补齐环境后的完整运行。修改过的既有文件 Ruff 同配置基线202项、当前199项，无新增；这不等于整个项目 lint 无问题。
+
+本轮证据保存在本机 `/home/engram/Documents/tmp/artifacts/platform-framework-boundaries-20261120/`。这属于模块边界回归，未部署平台、未验证真实设备或 Go/Java 原型。
+
 ## 官方机制依据
 
 - [Redis pipelining](https://redis.io/docs/latest/develop/using-commands/pipelining/)：依赖前一次返回的读/改/写需要额外处理，不能把 pipeline 内部仍发起的独立请求算成合并。

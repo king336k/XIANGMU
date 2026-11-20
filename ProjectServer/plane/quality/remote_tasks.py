@@ -15,7 +15,7 @@ from django.utils import timezone
 from plane.knowledge.assistant import provider_config
 from .models import DefectComment, DefectEvent
 from .remote_models import RemoteAgentRun, RemoteWorkstation
-from .remote_diagnostics import permitted, identity_key
+from .remote_access import permitted, identity_key
 from .diagnostic_materials import redact
 
 

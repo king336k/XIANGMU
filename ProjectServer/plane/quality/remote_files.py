@@ -8,7 +8,8 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from plane.app.views.base import BaseAPIView
 from .remote_models import RemoteFileRequest, RemoteWorkstation, RemoteUploadedFile, RemoteAgentRun, RemoteTerminal
-from .remote_diagnostics import station_for, identity_key, permitted, online, browser_boundary, command, feedback_for, digest
+from .remote_access import station_for, identity_key, permitted, online, browser_boundary, digest
+from .remote_diagnostics import command, feedback_for
 from .views import Conflict
 
 class RemoteFiles(BaseAPIView):
