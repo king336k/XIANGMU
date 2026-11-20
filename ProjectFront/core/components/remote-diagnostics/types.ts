@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+export type RemoteApplication = {
+  version: string | null;
+  revision: string | null;
+  web_ready: boolean | null;
+  observed_at: string;
+};
 export type RemoteDevice = {
   id: string;
   username: string;
@@ -10,7 +16,7 @@ export type RemoteDevice = {
   project_id: string;
   workspace_slug: string;
   can_connect: boolean;
-  capabilities: Record<string, unknown>;
+  capabilities: Record<string, unknown> & { application?: RemoteApplication };
 };
 
 export type TerminalStatus = "connecting" | "open" | "closed" | "error";
@@ -129,4 +135,23 @@ export function agentRunShortLabel(run: AgentRun): string {
       ] || "排查中"
     );
   return "状态待确认";
+}
+
+export function deviceApplicationSummary(device: RemoteDevice) {
+  const application = device.capabilities.application;
+  const version = typeof application?.version === "string" ? application.version.trim() : "";
+  const revision = typeof application?.revision === "string" ? application.revision.trim() : "";
+  return {
+    version: version
+      ? `遥操 DAQ · ${version.startsWith("v") ? version : `v${version}`}`
+      : /^[a-f0-9]{7,64}$/i.test(revision)
+        ? `遥操 DAQ · ${revision.slice(0, 7)}`
+        : "版本未读取",
+    web:
+      !device.online || typeof application?.web_ready !== "boolean"
+        ? "网页状态未知"
+        : application.web_ready
+          ? "网页已启动"
+          : "网页未启动",
+  };
 }

@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight, Monitor, RefreshCw, Search } from "lucide-re
 import useSWR from "swr";
 import { qualityApi, errorMessage } from "@/components/quality/api";
 
-import { remoteDiagnosticsBase } from "./types";
+import { remoteDiagnosticsBase, deviceApplicationSummary } from "./types";
 import type { RemoteDevice, RobotTarget } from "./types";
 
 const panelLoading = (
@@ -171,15 +171,11 @@ export function RemoteDiagnostics() {
                         {device.online ? "在线" : "离线"}
                       </span>
                     </div>
-                    <p className="font-mono mt-2 truncate text-12 text-secondary" title={device.hostname}>
-                      {device.hostname || "未知主机"}
+                    <p className="mt-2 truncate text-12 text-secondary">{deviceApplicationSummary(device).version}</p>
+                    <p className="mt-1 text-12 text-secondary">
+                      {deviceApplicationSummary(device).web}
+                      {!device.can_connect && <span className="text-tertiary"> · 无连接权限</span>}
                     </p>
-                    {device.name && device.name !== device.hostname && device.name !== device.username && (
-                      <p className="mt-1 truncate text-12 text-tertiary" title={device.name}>
-                        {device.name}
-                      </p>
-                    )}
-                    {!device.can_connect && <p className="mt-2 text-12 text-secondary">无连接权限</p>}
                   </button>
                 ))}
 
