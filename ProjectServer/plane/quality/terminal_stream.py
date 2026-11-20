@@ -210,13 +210,16 @@ class TerminalConsumer(AsyncJsonWebsocketConsumer):
 
 
 @database_sync_to_async
-def station_exchange(raw, payload):
+def station_exchange(raw, payload, previous_identity=None, poll_only=False):
     from .remote_diagnostics import RemoteExchange
     data = json.dumps(payload).encode()
     request = WSGIRequest({"REQUEST_METHOD":"POST","PATH_INFO":"/","QUERY_STRING":"",
         "CONTENT_TYPE":"application/json","CONTENT_LENGTH":str(len(data)),
         "HTTP_AUTHORIZATION":"Bearer "+raw,"SERVER_NAME":"localhost","SERVER_PORT":"80",
         "wsgi.url_scheme":"http","wsgi.input":BytesIO(data)})
+    # Internal ASGI metadata, never accepted from an HTTP header or JSON body.
+    request.remote_stream_previous_identity = previous_identity
+    request.remote_stream_poll_only = poll_only
     response = RemoteExchange.as_view()(request)
     return response.status_code, response.data
 
@@ -229,7 +232,7 @@ def pending_station_commands(station_id):
 
 
 @database_sync_to_async
-def station_identity(raw):
+def station_identity(raw, include_identity=False):
     from .remote_diagnostics import WorkstationAuthentication
     from rest_framework.request import Request
     request = WSGIRequest({"REQUEST_METHOD":"GET","PATH_INFO":"/","QUERY_STRING":"",
@@ -237,6 +240,11 @@ def station_identity(raw):
         "wsgi.url_scheme":"http","wsgi.input":BytesIO()})
     try:
         _, station = WorkstationAuthentication().authenticate(Request(request))
+        if include_identity:
+            return {"id": str(station.id), "identity": {
+                "boot_id": station.boot_id, "hostname": station.hostname, "username": station.username,
+                "capabilities": {"terminal": station.capabilities.get("terminal", {})},
+            }}
         return str(station.id)
     except APIException:
         return None
@@ -258,9 +266,11 @@ class StationConsumer(AsyncJsonWebsocketConsumer):
         if headers.get(b"origin") or not credential.startswith("Bearer rw_") or len(credential)>128:
             await self.close(code=4403); return
         self.raw = credential.removeprefix("Bearer ")
-        self.station_id = await station_identity(self.raw)
-        if self.station_id is None:
+        registered = await station_identity(self.raw, include_identity=True)
+        if registered is None:
             await self.close(code=4403); return
+        self.station_id = registered["id"]
+        self.previous_identity = registered["identity"]
         await self.accept()
         await self.send_json({"type":"ready"})
         self.task = asyncio.create_task(self.push_commands())
@@ -276,12 +286,15 @@ class StationConsumer(AsyncJsonWebsocketConsumer):
                 or content.get("seq")!=self.seq+1 or not isinstance(content.get("payload"),dict)):
             await self.close(code=4400,reason="invalid_sequence"); return
         async with self.lock:
-            await publish_fast_output(self.station_id,content["payload"].get("outputs",[]))
-            status, result = await station_exchange(self.raw,content["payload"])
+            status, result = await station_exchange(
+                self.raw, content["payload"], previous_identity=self.previous_identity
+            )
             if status!=200:
                 await self.close(code=4403,reason="exchange_rejected"); return
+            await publish_fast_output(self.station_id,content["payload"].get("outputs",[]))
             self.seq = content["seq"]
             self.identity = content["payload"].get("identity")
+            self.previous_identity = self.identity
             self.sent_commands.update({row["id"]:row["expires_at"] for row in result.get("commands",[])})
             await self.send_json({"type":"exchange","seq":self.seq,**result})
 
@@ -297,7 +310,10 @@ class StationConsumer(AsyncJsonWebsocketConsumer):
                 if now-last_check>5:last_check=now
                 if self.identity is None or not await pending_station_commands(self.station_id):continue
                 async with self.lock:
-                    status,result=await station_exchange(self.raw,{"identity":self.identity,"outputs":[],"results":[]})
+                    status,result=await station_exchange(
+                        self.raw, {"identity":self.identity,"outputs":[],"results":[]},
+                        previous_identity=self.identity, poll_only=True,
+                    )
                     if status!=200:
                         await self.close(code=4403);return
                     fresh=[row for row in result.get("commands",[])if row["id"]not in self.sent_commands]
