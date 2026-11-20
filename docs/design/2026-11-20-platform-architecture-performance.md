@@ -4,6 +4,8 @@
 
 工作分支：`feat/platform-architecture-performance-20261120`。基于 `feat/coverage-followups-152` 的 `8660196d8e198867206bfdb22613addb539bf026` 创建，使用独立 worktree；原功能分支和运行平台不变。
 
+后续调研、模块边界及首批实测见[开源方案对比与平台重构方案](2026-11-20-oss-comparison-and-refactoring.md)。本文保留初步设计时的判断，实施进展以该文及相应提交为准。
+
 ## 结论
 
 保留 TypeScript 前端和 Python Agent。业务后端先治理查询、实时传输和任务隔离，Java 作为局部后端服务的候选方案，通过同负载对比决定是否引入。语言比例不能证明瓶颈，增加 Java 也不会自动解决数据库等待、模型响应或公网链路延迟。
