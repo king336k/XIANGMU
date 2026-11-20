@@ -125,6 +125,8 @@ test("plan is collapsed and never approves from initial render or missing propos
   assert.doesNotMatch(JSON.stringify(tree), /5\.3065|private-digest|private-source/);
   assert.equal(h.writes.length, 0);
   assert.equal(harness({ current: null }).render(), null);
+  assert.match(text(tree), /待确认/);
+  assert.doesNotMatch(JSON.stringify(tree), /animate-spin/);
 });
 
 test("expanded plan shows real before/after and requires explicit applicability confirmation", async () => {
@@ -195,6 +197,28 @@ test("unapproved, expired and busy plans stay reviewable but cannot be submitted
     assert.equal(nodes(tree).find((node) => node.type === "button" && text(node) === "确认修复").props.disabled, true);
     assert.equal(h.writes.length, 0);
   }
+});
+
+test("plan header gives short pending, expired, update and submitted states without auto approval", async () => {
+  for (const [overrides, expected] of [
+    [{}, "待确认"],
+    [{ expires_at: "2020-01-01T00:00:00Z" }, "已失效"],
+    [{ can_approve: false, blocked_reason: "请先更新 DAQ，再重新诊断。" }, "需更新"],
+    [{ can_approve: false, blocked_reason: "executor_update_required" }, "需更新"],
+    [{ can_approve: false, blocked_reason: "本轮计划已提交。" }, "已提交"],
+    [{ can_approve: false, blocked_reason: "设备连接已变化，请重新诊断。" }, "暂不可执行"],
+  ]) {
+    const h = harness({ current: { ...proposal, ...overrides } });
+    assert.match(text(h.render()), new RegExp(expected));
+    assert.equal(h.writes.length, 0);
+  }
+  const submitted = harness();
+  submitted.click(submitted.render(), "查看修复计划");
+  nodes(submitted.render())
+    .find((node) => node.type === "input")
+    .props.onChange({ target: { checked: true } });
+  await submitted.click(submitted.render(), "确认修复");
+  assert.match(text(submitted.render()), /已提交/);
 });
 
 test("failed submit keeps the plan visible and allows an explicit retry", async () => {

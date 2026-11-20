@@ -55,6 +55,10 @@ export type AgentRun = {
     verification?: unknown;
     solution?: unknown;
     repaired?: boolean;
+    configuration_repaired?: boolean;
+    configuration_verified?: boolean;
+    needs_business_verification?: boolean;
+    business_verified?: boolean;
     verification_passed?: boolean;
     outcome?: "verified" | "verified_without_repair" | "repaired" | "unresolved";
   } | null;
@@ -84,6 +88,18 @@ export function agentRunStatusLabel(run: AgentRun): string {
   if (run.status === "failed") return "处理失败";
   if (run.status === "timed_out") return "处理超时";
   if (run.status === "completed") {
+    if (
+      run.result?.configuration_repaired === true &&
+      run.result.configuration_verified === true &&
+      run.result.business_verified !== true
+    )
+      return "配置已修复，待业务验证";
+    if (
+      run.result?.configuration_verified === true &&
+      run.result.configuration_repaired !== true &&
+      run.result.business_verified !== true
+    )
+      return "配置已通过，待业务验证";
     if (run.result?.repaired === true && run.result.verification_passed === true) return "已修复并复测";
     if (
       ["verified", "verified_without_repair"].includes(run.result?.outcome || "") &&
@@ -121,6 +137,7 @@ export function agentRunStatusLabel(run: AgentRun): string {
 export function agentRunShortLabel(run: AgentRun): string {
   if (["failed", "timed_out", "cancelled"].includes(run.status)) return "已中断";
   if (run.status === "completed" || run.status === "succeeded") {
+    if (run.result?.configuration_verified === true && run.result.business_verified !== true) return "待验证";
     if (run.result?.verification_passed === true) {
       if (run.result.repaired === true) return "已修复";
       if (["verified", "verified_without_repair"].includes(run.result.outcome || "")) return "复核通过";

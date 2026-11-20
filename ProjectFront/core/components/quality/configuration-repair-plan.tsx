@@ -73,6 +73,17 @@ export function ConfigurationRepairPlan({
   const expired = !Number.isFinite(Date.parse(plan.expires_at)) || Date.parse(plan.expires_at) <= Date.now();
   const confirmed = confirmedDigest === digest && !!digest;
   const canApprove = proposal.can_approve && !expired && !disabled && !submitting && pending.current !== digest;
+  const status = submitting
+    ? "提交中"
+    : pending.current === digest || (!proposal.can_approve && /已提交/u.test(proposal.blocked_reason || ""))
+      ? "已提交"
+      : expired
+        ? "已失效"
+        : !proposal.can_approve
+          ? /DAQ|更新|update_required/iu.test(proposal.blocked_reason || "")
+            ? "需更新"
+            : "暂不可执行"
+          : "待确认";
   async function submit() {
     if (!canApprove || !confirmed || pending.current === digest || Date.parse(plan.expires_at) <= Date.now()) return;
     if (onSubmitting?.() === false) return;
@@ -100,7 +111,15 @@ export function ConfigurationRepairPlan({
     <section className="rounded border border-subtle bg-surface-1" aria-label="配置修复计划">
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0">
-          <p className="text-12 font-medium">配置修复计划</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-12 font-medium">配置修复计划</p>
+            <span
+              role="status"
+              className={`rounded px-1.5 py-0.5 text-11 ${status === "待确认" ? "bg-warning-subtle text-warning-primary" : "bg-surface-2 text-secondary"}`}
+            >
+              {status}
+            </span>
+          </div>
           <p className="text-11 text-secondary">
             {proposal.device.username}@{proposal.device.ip_address || "IP待确认"} · {proposal.robot}
           </p>
