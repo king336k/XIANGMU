@@ -223,8 +223,10 @@ def kill_group(process):
 
 
 def run_command(policy, argv, cwd, timeout, max_output=MAX_OUTPUT, stopping=None, expected_target_revision=None,
-                configuration_target=None, expected_configuration_revision=None):
+                configuration_target=None, expected_configuration_revision=None, configuration_approval=None):
     argv = policy.argv(argv)
+    if configuration_approval is not None and argv[:2] != ['daq-local-diagnostics-v1', 'repair']:
+        raise ValueError('configuration_approval_requires_fixed_repair')
     if argv[0]=='daq-local-diagnostics-v1':
         from file_browser import local_launcher_request
         payload={'action':argv[1]}
@@ -243,6 +245,10 @@ def run_command(policy, argv, cwd, timeout, max_output=MAX_OUTPUT, stopping=None
                     or current.get('connected') is not True or current.get('target_revision')!=expected_target_revision):
                 raise ValueError('robot target changed; configuration repair was not executed')
             payload.update(expected_sha256=argv[2],expected_target_revision=expected_target_revision)
+        if configuration_approval is not None:
+            if argv[1] != 'repair' or not isinstance(configuration_approval, dict):
+                raise ValueError('configuration_approval_requires_fixed_repair')
+            payload['configuration_approval'] = configuration_approval
         response=local_launcher_request(policy.daq_local_api,payload,diagnostics=True)
         if argv[1]=='repair':
             state=response.get('configuration',{}).get('repair',{}).get('state')
@@ -517,7 +523,8 @@ class Engine:
                     command.get('timeout', 15), stopping=self.stopping,
                     expected_target_revision=command.get('expected_target_revision'),
                     configuration_target=command.get('configuration_target'),
-                    expected_configuration_revision=command.get('expected_configuration_revision'))
+                    expected_configuration_revision=command.get('expected_configuration_revision'),
+                    configuration_approval=command.get('configuration_approval'))
                 return
             elif kind == 'read_file':
                 data = self.policy.read(command['path'])
@@ -685,7 +692,10 @@ def diagnostic_capability(local):
         if (isinstance(capability,dict) and capability.get('protocol')=='daq-configuration-v1'
                 and capability.get('semantic_validation') is True
                 and capability.get('supported_repairs')==['restore_invalid_initial_joint_states']):
-            return {'protocol':'daq-configuration-v1','ready':True}
+            observed = {'protocol':'daq-configuration-v1','ready':True}
+            if capability.get('approval_protocol') == 'robot-config-repair-approval-v1':
+                observed['approval_protocol'] = capability['approval_protocol']
+            return observed
     except (OSError, ValueError, TypeError):
         pass
     return None
